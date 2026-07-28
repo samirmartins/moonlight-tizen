@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## v2.0.0
+
+First release of this fork, based on upstream v1.13.1. The version starts a line of
+its own rather than continuing upstream's, so that the two are never confused.
+
+### Fixed
+- Fixed video stuttering caused by the frame pacer busy-waiting on the decoder thread, and by its once-a-second step correction releasing held frames in a burst
+- Fixed the video timeline drifting shorter on every lost frame, by following the host presentation clock instead of counting accepted frames
+- Fixed audio stuttering by rendering audio through the Web Audio API instead of the Tizen elementary media source, whose audio track shares the pipeline that stutters
+- Fixed Opus decoding running on the UDP receive thread, where any stall became real packet loss
+- Fixed gamepad polling continuing on the main thread during streaming
+
+### Changed
+- The dead *Audio synchronization* toggle is now an *Audio jitter buffer* slider (50–500 ms, default 100)
+- Builds with `-O3` instead of `-Os`
+- Reports the client refresh rate and colour space to the host
+- Widgets are named after the version and variant, and the ForceGM variant builds from the same tree with `--build-arg FORCE_GAME_MODE=1`
+
 ## v1.13.1
 
 ### Fixed
