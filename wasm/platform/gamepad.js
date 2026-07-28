@@ -63,6 +63,17 @@ const Controller = (function() {
     delete gamepads[gamepad.index];
   }
 
+  // Named so that repeated startWatching() calls re-register the same function
+  // reference, which addEventListener deduplicates. Anonymous handlers would
+  // accumulate a new copy on every start/stop cycle.
+  function onGamepadConnected(e) {
+    gamepadConnected(e.gamepad);
+  }
+
+  function onGamepadDisconnected(e) {
+    gamepadDisconnected(e.gamepad);
+  }
+
   function analyzeGamepad(gamepad) {
     const index = gamepad.index;
     const pGamepad = gamepads[index];
@@ -85,15 +96,17 @@ const Controller = (function() {
     }
   }
 
+  // This polling exists to drive UI navigation only. During streaming the pads
+  // are read by the native input thread instead, and this must be stopped:
+  // it runs on the main thread, which is the same thread that services the
+  // media element, so leaving it on costs video frames.
   function startWatching() {
     if (!pollingInterval) {
-      window.addEventListener('gamepadconnected', function(e) {
-        gamepadConnected(e.gamepad);
-      });
-      window.addEventListener('gamepaddisconnected', function(e) {
-        gamepadDisconnected(e.gamepad);
-      });
-      pollingInterval = setInterval(pollGamepads, 5);
+      window.addEventListener('gamepadconnected', onGamepadConnected);
+      window.addEventListener('gamepaddisconnected', onGamepadDisconnected);
+      // 60 Hz is plenty for menu navigation. The previous 5 ms interval ran 200
+      // times a second and allocated a Button object per button on each pass.
+      pollingInterval = setInterval(pollGamepads, 16);
     }
   }
 

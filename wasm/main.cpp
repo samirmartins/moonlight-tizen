@@ -47,19 +47,14 @@ MoonlightInstance::MoonlightInstance()
     m_Dispatcher("Curl"),
     m_Mutex(),
     m_EmssStateChanged(),
-    m_EmssAudioStateChanged(),
     m_EmssVideoStateChanged(),
     m_EmssReadyState(EmssReadyState::kDetached),
-    m_AudioStarted(false),
     m_VideoStarted(false),
-    m_AudioSessionId(0),
     m_VideoSessionId(0),
     m_MediaElement("wasm_module"),
     m_Source(nullptr),
     m_SourceListener(this),
-    m_AudioTrackListener(this),
     m_VideoTrackListener(this),
-    m_AudioTrack(),
     m_VideoTrack(),
     m_ConnectionCancelled(false),
     m_StopThread(0),
@@ -90,7 +85,6 @@ void MoonlightInstance::OnConnectionStopped(uint32_t error) {
 void MoonlightInstance::StopConnection() {
   m_ConnectionCancelled = true;
   g_Instance->m_EmssStateChanged.notify_all();
-  g_Instance->m_EmssAudioStateChanged.notify_all();
   g_Instance->m_EmssVideoStateChanged.notify_all();
 
   // Stopping needs to happen in a separate thread to avoid a potential deadlock
@@ -129,7 +123,6 @@ void* MoonlightInstance::StopThreadFunc(void* context) {
   // Close the media source and release tracks to ensure WebKit garbage collection
   if (g_Instance && g_Instance->m_Source) {
     g_Instance->m_Source->Close([](samsung::wasm::OperationResult err) {
-      g_Instance->m_AudioTrack = samsung::wasm::ElementaryMediaTrack();
       g_Instance->m_VideoTrack = samsung::wasm::ElementaryMediaTrack();
       
       std::unique_lock<std::mutex> lock(g_Instance->m_Mutex);
@@ -146,9 +139,7 @@ void* MoonlightInstance::StopThreadFunc(void* context) {
     
     // Reset EMSS state variables for the next stream
     g_Instance->m_EmssReadyState = EmssReadyState::kDetached;
-    g_Instance->m_AudioStarted = false;
     g_Instance->m_VideoStarted = false;
-    g_Instance->m_AudioSessionId = 0;
     g_Instance->m_VideoSessionId = 0;
   }
 
@@ -249,7 +240,7 @@ static void HexStringToBytes(const char* str, char* output) {
 MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std::string width, std::string height, std::string fps, std::string bitrate,
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-  std::string audioConfig, bool audioSync, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
+  std::string audioConfig, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats) {
   
   if (m_StopThread != 0) {
@@ -276,7 +267,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   PostToJs("Setting the Flip A/B face buttons to: " + std::to_string(flipABfaceButtons));
   PostToJs("Setting the Flip X/Y face buttons to: " + std::to_string(flipXYfaceButtons));
   PostToJs("Setting the Audio configuration to: " + audioConfig);
-  PostToJs("Setting the Audio synchronization to: " + std::to_string(audioSync));
+  PostToJs("Setting the Audio jitter buffer to: " + std::to_string(audioJitterMs) + " ms");
   PostToJs("Setting the Play host audio to: " + std::to_string(playHostAudio));
   PostToJs("Setting the Video codec to: " + videoCodec);
   PostToJs("Setting the Video HDR mode to: " + std::to_string(hdrMode));
@@ -293,6 +284,12 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   m_StreamConfig.bitrate = stoi(bitrate); // kilobits per second
   m_StreamConfig.packetSize = 1392;
   m_StreamConfig.streamingRemotely = STREAM_CFG_AUTO;
+
+  // Report the client refresh rate to the host. It is sent in the SDP as
+  // x-nv-video[0].clientRefreshRateX100 and lets the host align its encoder
+  // cadence to the display; left at zero, the host has no reference and the
+  // delivered cadence can beat against the panel.
+  m_StreamConfig.clientRefreshRateX100 = stoi(fps) * 100;
 
   // Initialize the audio configuration with default value
   m_StreamConfig.audioConfiguration = 0;
@@ -353,6 +350,12 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   // Apply the desired color range ​based on the toggle switch state
   m_StreamConfig.colorRange |= fullRange ? COLOR_RANGE_FULL : COLOR_RANGE_LIMITED;
 
+  // Select the encoder colorspace. Leaving this unset means the host encodes
+  // with the Rec. 601 matrix while the TV decodes HD content as Rec. 709, which
+  // shifts every colour in the picture.
+  m_StreamConfig.colorSpace = hdrMode ? COLORSPACE_REC_2020 : COLORSPACE_REC_709;
+  PostToJs(hdrMode ? "Selecting the colorspace to: COLORSPACE_REC_2020" : "Selecting the colorspace to: COLORSPACE_REC_709");
+
   // Limit encryption to devices that do not support AES instructions
   m_StreamConfig.encryptionFlags = ENCFLG_NONE;
 
@@ -388,7 +391,7 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   m_MouseEmulationEnabled = mouseEmulation;
   m_FlipABfaceButtonsEnabled = flipABfaceButtons;
   m_FlipXYfaceButtonsEnabled = flipXYfaceButtons;
-  m_AudioSyncEnabled = audioSync;
+  m_AudioJitterMs = audioJitterMs;
   m_PlayHostAudioEnabled = playHostAudio;
   m_HdrModeEnabled = hdrMode;
   m_FullRangeEnabled = fullRange;
@@ -563,12 +566,12 @@ int main(int argc, char** argv) {
 MessageResult startStream(std::string host, int httpPort, std::string width, std::string height, std::string fps, std::string bitrate,
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
-  std::string audioConfig, bool audioSync, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
+  std::string audioConfig, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
   bool disableWarnings, bool performanceStats) {
   PostToJs("Starting the streaming session...");
   return g_Instance->StartStream(host, httpPort, width, height, fps, bitrate, rikey, rikeyid, appversion, gfeversion, rtspurl, serverCodecModeSupport,
   framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons, audioConfig,
-  audioSync, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats);
+  audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats);
 }
 
 MessageResult stopStream() {
@@ -607,7 +610,12 @@ void PostToJs(std::string msg) {
   }, msg.c_str());
 }
 
-void PostToJsAsync(std::string msg) {
+// Asynchronous counterpart to PostToJs(). The main thread runs the callback
+// after this function has already returned, and only the pointer is handed
+// across, so the caller has to keep `msg` alive until the message has been
+// consumed. Passing a temporary would leave the main thread reading freed
+// memory, which is why this takes a reference rather than a value.
+void PostToJsAsync(const std::string& msg) {
   MAIN_THREAD_ASYNC_EM_ASM({
     const msg = UTF8ToString($0);
     handleMessage(msg);

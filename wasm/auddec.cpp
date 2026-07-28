@@ -1,168 +1,279 @@
 #include "moonlight_wasm.hpp"
 
+#include <atomic>
 #include <chrono>
+#include <cmath>
+#include <condition_variable>
+#include <mutex>
+#include <thread>
+#include <vector>
 
-#include "samsung/wasm/elementary_media_packet.h"
+#include <emscripten.h>
 
-using std::chrono_literals::operator""s;
-using std::chrono_literals::operator""ms;
-using TimeStamp = samsung::wasm::Seconds;
+// Audio is rendered through the Web Audio API rather than through an EMSS
+// audio track. The EMSS track ties audio to the same hardware A/V pipeline as
+// video and schedules it by PTS, and on Tizen that pipeline is what stutters;
+// no amount of care in how it is fed changes that. Feeding it more carefully
+// was tried first and did not help.
+//
+// The corroborating evidence is github.com/ruanformigoni/moonlight-tizen: it
+// abandoned the EMSS audio track in one of its first commits and needed about
+// a dozen iterations before settling on Web Audio. Nobody walks that path if
+// the track can be made to behave.
+//
+// The path has three stages, none of which can block:
+//
+//   network thread  ──memcpy encoded packet──►  ring buffer
+//   feeder thread   ──decode Opus──►  PCM slot pool  ──MAIN_THREAD_ASYNC_EM_ASM──►
+//   main thread     ──_audReceiveFrame()──►  AudioBufferSourceNode
+//
+// The scheduler on the JS side lives in platform/audio.js.
 
-#define MAX_CHANNEL_COUNT 8
-#define FRAME_SIZE 240
+// Default depth of the jitter buffer when the user has not chosen one
+static constexpr int kDefaultJitterMs = 100;
 
-static constexpr TimeStamp kAudioBufferMargin = 100ms;
+// Minimum interval between audio problem log lines. This code runs on the audio
+// path, and logging crosses into JS; an unthrottled line per lost packet is
+// enough to keep the backlog that caused it from ever clearing.
+static constexpr uint32_t kAudioLogIntervalMs = 1000;
 
-static std::vector<opus_int16> s_DecodeBuffer;
+static int s_jitterFrames = 0;
+static double s_frameDurationMs = 0.0;
 
-static TimeStamp s_frameDuration;
-static TimeStamp s_pktPts;
-static TimeStamp s_estimatedAudioEnd;
+static size_t s_samplesPerFrame = 0;
+static size_t s_channelCount = 0;
+static int s_sampleRate = 0;
 
-static size_t s_samplesPerFrame;
-static size_t s_channelCount;
+static OpusMSDecoder* s_OpusDecoder = nullptr;
 
-static std::chrono::time_point<std::chrono::steady_clock> s_firstAppend;
+static uint32_t s_lastAudioLogMs = 0;
 
-static bool s_hasFirstFrame = false;
-static bool s_AudioSyncEnabled = false;
-
-static inline TimeStamp FrameDuration(double samplesPerFrame, double sampleRate) {
-  // Calculate the duration of a frame based on the number of samples per frame and the sample rate
-  return TimeStamp(samplesPerFrame / sampleRate);
-}
-
-static void DecodeAndAppendPacket(samsung::wasm::ElementaryMediaTrack* track, samsung::wasm::SessionId session_id,
-  OpusMSDecoder* decoder, const unsigned char* sampleData, int sampleLength) {
-  int decodeLen;
-  
-  // Decode the incoming audio packet using Opus decoder
-  decodeLen = opus_multistream_decode(
-    decoder, sampleData, sampleLength,
-    s_DecodeBuffer.data(), s_samplesPerFrame, 0
-  );
-
-  // Check if audio decoding failed
-  if (decodeLen <= 0) {
-    // Reset the buffer contents to zero when decoding fails
-    s_DecodeBuffer.assign(s_DecodeBuffer.size(), 0);
+// Logs at most one line per kAudioLogIntervalMs, dropping the rest
+static void LogAudioThrottled(const char* message) {
+  uint32_t nowMs = LiGetMillis();
+  if (nowMs - s_lastAudioLogMs < kAudioLogIntervalMs) {
     return;
   }
+  s_lastAudioLogMs = nowMs;
+  MoonlightInstance::ClLogMessage("%s\n", message);
+}
 
-  // Calculate desired buffer size in bytes for decoded audio data
-  size_t s_desiredBufferSize = sizeof(opus_int16) * decodeLen * s_channelCount;
+// ─── Encoded packet queue (network thread → feeder thread) ────────────────────
+// Fixed-size preallocated slots, so the network thread never allocates.
+// 4 KiB is far beyond the largest legal Opus packet (1275 bytes, RFC 6716).
+static constexpr int kMaxPacketBytes = 4096;
 
-  // Create an ElementaryMediaPacket and start decoding with the decoded audio data
-  samsung::wasm::ElementaryMediaPacket pkt {
-    s_pktPts, // presentation timestamp
-    s_pktPts, // decoding timestamp
-    s_frameDuration, // packet duration
-    true, // bool value indicating if packet is a keyframe
-    s_desiredBufferSize, // packet size
-    s_DecodeBuffer.data(), // pointer to packet payload
-    0, 0, 0, 1, // packet of width, height, framerate numerator and framerate denominator
-    session_id // session identifier
-  };
+struct PacketSlot {
+  uint8_t data[kMaxPacketBytes];
+  int length;
+};
 
-  // Attempt to append the packet to the audio track for rendering
-  if (track->AppendPacket(pkt)) {
-    // If successful, update the presentation timestamp for the next packet
-    s_pktPts += s_frameDuration;
-  } else {
-    MoonlightInstance::ClLogMessage("Append audio packet failed\n");
+static std::vector<PacketSlot> s_pktQueue; // circular, capacity s_pktCap
+static int s_pktHead = 0;
+static int s_pktTail = 0;
+static int s_pktCount = 0;
+static int s_pktCap = 0;
+static std::mutex s_pktMutex;
+static std::condition_variable s_pktCv;
+
+// ─── Decoded frame slot pool ─────────────────────────────────────────────────
+// The feeder writes PCM into slot[s_slotIdx % kNumSlots] and hands the pointer
+// to the JS scheduler. The pool has to be deep enough that the main thread
+// consumes a slot before the feeder wraps around to it again: kNumSlots frames
+// is the protection window, so 32 slots at 10 ms is 320 ms of main thread stall
+// before a slot could be overwritten while still unread.
+static constexpr int kNumSlots = 32;
+static constexpr int kMaxFrameElems = 4096; // 480 samples * 8 channels = 3840
+static opus_int16 s_frameSlots[kNumSlots][kMaxFrameElems];
+static int s_slotIdx = 0;
+
+// ─── Feeder thread ───────────────────────────────────────────────────────────
+static std::thread s_feederThread;
+static std::atomic<bool> s_feederRunning{false};
+
+static void FeederLoop() {
+  while (s_feederRunning.load(std::memory_order_relaxed)) {
+    // Drain the encoded queue, decode, hand each frame to the JS scheduler
+    while (true) {
+      uint8_t pktData[kMaxPacketBytes];
+      int pktLen = 0;
+      {
+        std::unique_lock<std::mutex> lock(s_pktMutex);
+        if (s_pktCount == 0) {
+          break;
+        }
+        const PacketSlot& slot = s_pktQueue[s_pktHead];
+        pktLen = slot.length;
+        memcpy(pktData, slot.data, static_cast<size_t>(pktLen));
+        s_pktHead = (s_pktHead + 1) % s_pktCap;
+        --s_pktCount;
+      } // release the lock before decoding, Opus is the expensive part
+
+      opus_int16* dst = s_frameSlots[s_slotIdx % kNumSlots];
+      int decodeLen = opus_multistream_decode(
+        s_OpusDecoder, pktData, pktLen,
+        dst, static_cast<int>(s_samplesPerFrame), 0
+      );
+
+      if (decodeLen <= 0) {
+        LogAudioThrottled("Audio: Opus decode failed");
+        continue;
+      }
+
+      // Hand the slot address and format to the main thread scheduler. The JS
+      // side reads HEAP16 at this address; shared memory makes that valid
+      // across threads, and the slot pool depth bounds the race.
+      int slotPtr = static_cast<int>(reinterpret_cast<size_t>(dst));
+      int spf = static_cast<int>(s_samplesPerFrame);
+      int channels = static_cast<int>(s_channelCount);
+      int rate = s_sampleRate;
+      MAIN_THREAD_ASYNC_EM_ASM({
+        if (typeof _audReceiveFrame === 'function') {
+          _audReceiveFrame($0, $1, $2, $3);
+        }
+      }, slotPtr, spf, channels, rate);
+      s_slotIdx++;
+    }
+
+    // Wait for the next packet
+    {
+      std::unique_lock<std::mutex> lock(s_pktMutex);
+      s_pktCv.wait_for(lock, std::chrono::milliseconds(1), [] {
+        return s_pktCount > 0 || !s_feederRunning.load(std::memory_order_relaxed);
+      });
+    }
   }
 
-  // Resize decode buffer if it's smaller than the desired size
-  if (s_desiredBufferSize > s_DecodeBuffer.size()) {
-    s_DecodeBuffer.resize(s_desiredBufferSize);
-  }
+  MoonlightInstance::ClLogMessage("Audio: feeder thread exiting\n");
 }
 
 int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusConfig, void* context, int arFlags) {
+  // Read the negotiated configuration rather than assuming 240 samples, which
+  // is what CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION requires of us
+  s_channelCount = static_cast<size_t>(opusConfig->channelCount);
+  s_samplesPerFrame = static_cast<size_t>(opusConfig->samplesPerFrame);
+  s_sampleRate = opusConfig->sampleRate;
+
+  // Guard the slot pool against a configuration it cannot hold
+  if (s_samplesPerFrame * s_channelCount > kMaxFrameElems) {
+    ClLogMessage("Audio: frame of %zu samples x %zu channels exceeds slot capacity\n",
+                 s_samplesPerFrame, s_channelCount);
+    return -1;
+  }
+
+  int targetJitterMs = g_Instance->m_AudioJitterMs != 0
+    ? g_Instance->m_AudioJitterMs
+    : kDefaultJitterMs;
+  s_frameDurationMs = static_cast<double>(s_samplesPerFrame) * 1000.0 / s_sampleRate;
+  s_jitterFrames = static_cast<int>(std::ceil(targetJitterMs / s_frameDurationMs));
+
+  ClLogMessage("Audio: init ch=%d spf=%d rate=%d frame=%.1fms jitterFrames=%d target=%dms\n",
+               opusConfig->channelCount, opusConfig->samplesPerFrame, opusConfig->sampleRate,
+               s_frameDurationMs, s_jitterFrames, targetJitterMs);
+
+  // Size the encoded queue from the jitter depth, with a floor so a small
+  // jitter setting still absorbs a burst
+  s_pktCap = s_jitterFrames * 4;
+  if (s_pktCap < 64) {
+    s_pktCap = 64;
+  }
+  s_pktQueue.resize(s_pktCap);
+  s_pktHead = s_pktTail = s_pktCount = 0;
+  s_slotIdx = 0;
+  s_lastAudioLogMs = 0;
+
   int rc;
-
-  ClLogMessage("MoonlightInstance::AudDecInit\n");
-
-  // Initialize packet timestamp to zero
-  s_pktPts = 0s;
-
-  // Initialize samples per frame (240) and channels count (2, 6, 8)
-  s_samplesPerFrame = opusConfig->samplesPerFrame;
-  s_channelCount = opusConfig->channelCount;
-
-  // Calculate buffer size in bytes for one decoded audio frame
-  size_t s_bufferSize = sizeof(opus_int16) * s_samplesPerFrame * s_channelCount;
-
-  // Resize the decode buffer based on the samples per frame and channels count
-  s_DecodeBuffer.resize(s_bufferSize);
-
-  // Calculate the frame duration based on the samples per frame (240) and sample rate (48000)
-  s_frameDuration = FrameDuration(opusConfig->samplesPerFrame, opusConfig->sampleRate);
-
-  // Create the Opus decoder with the provided configuration parameters
-  g_Instance->m_OpusDecoder = opus_multistream_decoder_create(
+  s_OpusDecoder = opus_multistream_decoder_create(
     opusConfig->sampleRate, opusConfig->channelCount,
     opusConfig->streams, opusConfig->coupledStreams,
     opusConfig->mapping, &rc
   );
+  if (!s_OpusDecoder) {
+    ClLogMessage("Audio: opus_multistream_decoder_create failed rc=%d\n", rc);
+    return -1;
+  }
+  g_Instance->m_OpusDecoder = s_OpusDecoder;
 
-  // Initialize the estimated audio end time
-  s_estimatedAudioEnd = 0s;
+  // Publish the target depth to the JS scheduler
+  MAIN_THREAD_ASYNC_EM_ASM({
+    window._mlAudioTargetMs = $0;
+  }, targetJitterMs);
 
-  // Flag indicating whether this is the first frame of audio to be decoded
-  s_hasFirstFrame = false;
-
-  // Set the audio synchronization flag based on instance configuration
-  s_AudioSyncEnabled = g_Instance->m_AudioSyncEnabled;
+  s_feederRunning.store(true, std::memory_order_release);
+  s_feederThread = std::thread(FeederLoop);
 
   return 0;
 }
 
 void MoonlightInstance::AudDecCleanup(void) {
-  // Clear the decode buffer
-  s_DecodeBuffer.clear();
+  if (s_feederThread.joinable()) {
+    s_feederRunning.store(false, std::memory_order_release);
+    s_pktCv.notify_all();
+    s_feederThread.join();
+  }
 
-  // Shrink the decode buffer to fit its contents
-  s_DecodeBuffer.shrink_to_fit();
+  MAIN_THREAD_ASYNC_EM_ASM({
+    if (typeof stopAudioScheduler === 'function') {
+      stopAudioScheduler();
+    }
+  });
+
+  s_pktQueue.clear();
+  s_pktQueue.shrink_to_fit();
+  s_pktHead = s_pktTail = s_pktCount = s_pktCap = 0;
+
+  if (s_OpusDecoder) {
+    opus_multistream_decoder_destroy(s_OpusDecoder);
+    s_OpusDecoder = nullptr;
+  }
+  g_Instance->m_OpusDecoder = nullptr;
 }
 
+// Runs on the moonlight-common-c audio receive thread for every packet. It only
+// copies the still-encoded payload into the ring and returns, which is why
+// CAPABILITY_DIRECT_SUBMIT is safe here: there is nothing on this path that can
+// stall the socket drain and turn into real packet loss.
 void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLength) {
-  // Check if audio playback has not started
-  if (!g_Instance->m_AudioStarted) {
+  if (!s_feederRunning.load(std::memory_order_relaxed)) {
     return;
   }
 
-  // Check if this is the first audio frame
-  if (!s_hasFirstFrame) {
-    // Record the time of the first frame
-    s_firstAppend = std::chrono::steady_clock::now();
-    // Update the flag to indicate that the first frame has been processed
-    s_hasFirstFrame = true;
-  }
-
-  // Get the current time and calculate the time elapsed since the first frame
-  auto now = std::chrono::steady_clock::now();
-  TimeStamp ntp = now - s_firstAppend;
-
-  // Check if audio synchronization is enabled and if packet dropping is necessary to avoid overflow
-  if (s_AudioSyncEnabled && ntp + kAudioBufferMargin < s_estimatedAudioEnd) {
-    ClLogMessage("Dropping audio packet to avoid overflow: PTS=%.03f NTP=%.03f\n", s_pktPts.count(), ntp.count());
+  // moonlight-common-c signals a lost packet with a NULL buffer. There is no
+  // concealment in this path; the frame is simply absent, and the scheduler
+  // carries on with the next one.
+  if (sampleData == nullptr || sampleLength <= 0 || sampleLength > kMaxPacketBytes) {
+    LogAudioThrottled("Audio: dropping packet with unusable length");
     return;
   }
 
-  // Decode and append the audio packet to the audio track
-  DecodeAndAppendPacket(&g_Instance->m_AudioTrack,
-    g_Instance->m_AudioSessionId.load(), g_Instance->m_OpusDecoder,
-    reinterpret_cast<unsigned char*>(sampleData), sampleLength
-  );
-
-  // Update the estimated audio end time to prevent future overflow
-  s_estimatedAudioEnd = std::max(s_estimatedAudioEnd, ntp) + s_frameDuration;
+  {
+    std::unique_lock<std::mutex> lock(s_pktMutex);
+    if (s_pktCount >= s_pktCap) {
+      // Full: discard the oldest, which is the one least worth keeping
+      s_pktHead = (s_pktHead + 1) % s_pktCap;
+      --s_pktCount;
+      LogAudioThrottled("Audio: packet queue overflow, dropping oldest");
+    }
+    PacketSlot& slot = s_pktQueue[s_pktTail];
+    memcpy(slot.data, sampleData, static_cast<size_t>(sampleLength));
+    slot.length = sampleLength;
+    s_pktTail = (s_pktTail + 1) % s_pktCap;
+    ++s_pktCount;
+  }
+  s_pktCv.notify_one();
 }
 
 AUDIO_RENDERER_CALLBACKS MoonlightInstance::s_ArCallbacks = {
   .init = MoonlightInstance::AudDecInit,
   .cleanup = MoonlightInstance::AudDecCleanup,
   .decodeAndPlaySample = MoonlightInstance::AudDecDecodeAndPlaySample,
-  .capabilities = CAPABILITY_DIRECT_SUBMIT,
+  // DIRECT_SUBMIT is safe because the callback above only does a memcpy.
+  //
+  // SUPPORTS_ARBITRARY_AUDIO_DURATION plus SLOW_OPUS_DECODER negotiate 10 ms
+  // packets. The 10 ms matters beyond halving the packet rate: it doubles the
+  // slot pool protection window compared to 5 ms, and it is the duration this
+  // design was proven at.
+  .capabilities = CAPABILITY_DIRECT_SUBMIT |
+                  CAPABILITY_SUPPORTS_ARBITRARY_AUDIO_DURATION |
+                  CAPABILITY_SLOW_OPUS_DECODER,
 };

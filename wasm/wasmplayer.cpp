@@ -1,8 +1,10 @@
 #include "moonlight_wasm.hpp"
 
+#include <algorithm>
 #include <condition_variable>
 #include <functional>
 #include <mutex>
+#include <thread>
 
 #include <h264_stream.h>
 
@@ -28,7 +30,39 @@ using TimeStamp = samsung::wasm::Seconds;
 
 static constexpr TimeStamp kFrameTimeMargin = 0.5ms;
 static constexpr TimeStamp kTimeWindow = 1s;
-static constexpr uint32_t kSampleRate = 48000;
+
+// Pacing sleeps until this close to the deadline, then finishes with a short
+// bounded wait. Sleeping the whole way overshoots on a coarse scheduler;
+// spinning the whole way pegs a core, which is what the previous
+// implementation did.
+static constexpr TimeStamp kPacingSleepFloor = 1ms;
+
+// Hard ceiling on how long a single frame may be held back by the pacer,
+// expressed as a multiple of the frame duration. Without it, a bad pacing
+// reference could stall the decoder thread indefinitely.
+static constexpr int kPacingMaxWaitFrames = 2;
+
+// Per-second correction applied to the pacing reference. It is a small
+// proportional step rather than an instant jump: assigning the whole measured
+// drift at once releases every frame being held in a single burst, which is
+// visible as a hitch roughly once per second.
+static constexpr double kPacingDriftGain = 0.1;
+static constexpr TimeStamp kPacingMaxDriftStep = 1ms;
+
+// Largest inter-frame gap still trusted from the host presentation clock.
+// Anything beyond this is treated as a discontinuity, not as a real gap.
+static constexpr int64_t kMaxHostPtsGapMs = 2000;
+
+// Decode unit queue depth (bounded at 15 in moonlight-common-c) above which we
+// start shedding P-frames. Letting it reach the bound makes the depacketizer
+// flush the whole queue and request an IDR, which is far more disruptive than
+// dropping a frame here.
+static constexpr int kQueueDepthDropThreshold = 10;
+
+// Minimum interval between IDR requests triggered by append failures. A
+// keyframe costs several times a P-frame, so one request per rejected packet
+// turns a congested link into a worse one.
+static constexpr uint32_t kIdrRequestIntervalMs = 500;
 
 static uint32_t s_VideoFormat = 0;
 static uint32_t s_Width = 0;
@@ -42,12 +76,30 @@ static TimeStamp s_pktPts;
 
 static TimeStamp s_ptsDiff;
 static TimeStamp s_lastSec;
+static bool s_ptsDiffSeeded = false;
+
+// Host presentation clock tracking, see NextPacketPts()
+static uint32_t s_lastHostPtsMs = 0;
+static bool s_hasHostPtsRef = false;
+static bool s_loggedPtsSource = false;
 
 static std::chrono::time_point<std::chrono::steady_clock> s_firstAppend;
-static std::chrono::time_point<std::chrono::steady_clock> s_lastTime;
 
 static bool s_hasFirstFrame = false;
 static bool s_FramePacingEnabled = false;
+
+static uint32_t s_lastIdrRequestMs = 0;
+
+// Parks the decoder thread while pacing. Nothing ever notifies it; wait_for()
+// is used because it lowers to a futex wait, which genuinely blocks the worker,
+// unlike sleep primitives that may degrade to a spin under Emscripten.
+static std::mutex s_PacerMutex;
+static std::condition_variable s_PacerCv;
+
+// PostToJsAsync() hands a raw pointer to the main thread and returns before the
+// main thread reads it, so the payload has to outlive the call. Only the video
+// decoder thread writes this, and only once per second.
+static std::string s_PendingStatMsg;
 
 static uint32_t total_bytes = 0;
 static int m_LastFrameNumber = 0;
@@ -83,28 +135,9 @@ void MoonlightInstance::SourceListener::OnSourceClosed() {
   m_Instance->m_EmssStateChanged.notify_all();
 }
 
-MoonlightInstance::AudioTrackListener::AudioTrackListener(
-  MoonlightInstance* instance
-) : m_Instance(instance) {}
-
-void MoonlightInstance::AudioTrackListener::OnTrackOpen() {
-  ClLogMessage("AUDIO ElementaryMediaTrack::OnTrackOpen\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_AudioStarted = true;
-  m_Instance->m_EmssAudioStateChanged.notify_all();
-}
-
-void MoonlightInstance::AudioTrackListener::OnTrackClosed(samsung::wasm::ElementaryMediaTrack::CloseReason) {
-  ClLogMessage("AUDIO ElementaryMediaTrack::OnTrackClosed\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_AudioStarted = false;
-}
-
-void MoonlightInstance::AudioTrackListener::OnSessionIdChanged(samsung::wasm::SessionId new_session_id) {
-  ClLogMessage("AUDIO ElementaryMediaTrack::OnSessionIdChanged\n");
-  std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
-  m_Instance->m_AudioSessionId.store(new_session_id);
-}
+// There is no audio track listener: audio does not go through the EMSS at all,
+// it is rendered by the Web Audio scheduler in platform/audio.js. The media
+// source below carries video only.
 
 MoonlightInstance::VideoTrackListener::VideoTrackListener(
   MoonlightInstance* instance
@@ -156,41 +189,8 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
   }
   ClLogMessage("Closed\n");
 
-  {
-    samsung::wasm::ChannelLayout channelLayout; // Selected audio channel layout from audio config
-    switch (CHANNEL_COUNT_FROM_AUDIO_CONFIGURATION(g_Instance->m_AudioConfig)) {
-      case 2:
-        channelLayout = samsung::wasm::ChannelLayout::kStereo; // Audio Channel: Stereo
-        ClLogMessage("Selected channel layout for Stereo audio\n");
-        break;
-      case 6:
-        channelLayout = samsung::wasm::ChannelLayout::k5_1; // Audio Channel: 5.1 Surround Sound
-        ClLogMessage("Selected channel layout for 5.1 Surround audio\n");
-        break;
-      case 8:
-        channelLayout = samsung::wasm::ChannelLayout::k7_1; // Audio Channel: 7.1 Surround Sound
-        ClLogMessage("Selected channel layout for 7.1 Surround audio\n");
-        break;
-      default:
-        ClLogMessage("Unable to select channel layout from audio configuration\n");
-        break;
-    }
-
-    auto add_track_result = g_Instance->m_Source->AddTrack(
-      samsung::wasm::ElementaryAudioTrackConfig {
-        "audio/webm; codecs=\"pcm\"", // Audio Codec: Pulse Code Modulation (PCM) Profile
-        {}, // Extradata: Empty
-        samsung::wasm::DecodingMode::kHardware, // Decoding mode: Hardware
-        samsung::wasm::SampleFormat::kS16, // Sample Format: 16-bit signed integer (S16)
-        channelLayout, // Channel Layout: Stereo (2-CH), 5.1 Surround (6-CH), 7.1 Surround (8-CH)
-        kSampleRate, // Sample Rate: 48 kHz (48000 Hz)
-      }
-    );
-    if (add_track_result) {
-      g_Instance->m_AudioTrack = std::move(*add_track_result);
-      g_Instance->m_AudioTrack.SetListener(&g_Instance->m_AudioTrackListener);
-    }
-  }
+  // No audio track is added here on purpose. Audio is rendered by the Web Audio
+  // scheduler, so this source carries video only.
 
   {
     const char *mimetype = "video/mp4"; // MIME-type: Video MP4 Container
@@ -262,15 +262,12 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
     }
   });
 
-  ClLogMessage("Waiting to start\n");
-  g_Instance->WaitFor(&g_Instance->m_EmssAudioStateChanged, [] {
-    return g_Instance->m_AudioStarted.load();
-  });
+  ClLogMessage("Waiting for the video track to open\n");
   g_Instance->WaitFor(&g_Instance->m_EmssVideoStateChanged, [] {
     return g_Instance->m_VideoStarted.load();
   });
   if (g_Instance->m_ConnectionCancelled) {
-    ClLogMessage("Connection cancelled during audio/video wait\n");
+    ClLogMessage("Connection cancelled during video wait\n");
     return -1;
   }
 
@@ -304,12 +301,30 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
 
   // Initialize the timestamp difference to zero
   s_ptsDiff = 0s;
+  s_ptsDiffSeeded = false;
+
+  // Reset host presentation clock tracking for the new stream
+  s_hasHostPtsRef = false;
+  s_lastHostPtsMs = 0;
+  s_loggedPtsSource = false;
+
+  // Reset the IDR request throttle for the new stream
+  s_lastIdrRequestMs = 0;
 
   // Set the frame pacing flag based on instance configuration
   s_FramePacingEnabled = g_Instance->m_FramePacingEnabled;
 
   // Preallocate space for the performance stats string
   s_StatString.resize(1000);
+
+  // Drop any stats message left pending from a previous stream
+  s_PendingStatMsg.clear();
+
+  // Reset the stats counters that live outside the VIDEO_STATS structures.
+  // Leaving m_LastFrameNumber set from a previous session makes the dropped
+  // frame arithmetic below underflow on the first frame of the next one.
+  total_bytes = 0;
+  m_LastFrameNumber = 0;
 
   // Clear active window video statistics to start fresh
   memset(&m_ActiveWndVideoStats, 0, sizeof(m_ActiveWndVideoStats));
@@ -332,6 +347,121 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
   return DR_OK;
 }
 
+// Derives the presentation timestamp for the frame about to be submitted.
+//
+// The preferred source is decodeUnit->presentationTimeMs, which
+// moonlight-common-c derives from the RTP timestamp, i.e. the host's capture
+// clock. Advancing by the host's own inter-frame delta keeps the video timeline
+// anchored to real time across losses. The previous scheme added one frame
+// duration per *accepted* frame, so every frame lost on the network shortened
+// the timeline permanently and pushed video progressively out of sync with
+// audio.
+//
+// The Samsung EMSS headers are not part of this tree, so this is deliberately
+// defensive: a host that never fills presentationTimeMs produces a delta of
+// zero on every frame and falls back to the old synthetic step automatically.
+// The result is strictly monotonic either way.
+static TimeStamp NextPacketPts(PDECODE_UNIT decodeUnit, TimeStamp previousPts) {
+  uint32_t hostMs = decodeUnit->presentationTimeMs;
+
+  if (!s_hasHostPtsRef) {
+    s_hasHostPtsRef = true;
+    s_lastHostPtsMs = hostMs;
+    // Anchor the timeline at zero like the previous implementation did, so the
+    // baseline offset against the audio track is unchanged.
+    return TimeStamp(0);
+  }
+
+  int64_t deltaMs = static_cast<int64_t>(hostMs) - static_cast<int64_t>(s_lastHostPtsMs);
+  s_lastHostPtsMs = hostMs;
+
+  if (deltaMs <= 0 || deltaMs > kMaxHostPtsGapMs) {
+    // Unusable for this frame: unpopulated field, reordering, clock wraparound
+    // or a discontinuity. Fall back to a single frame step.
+    return previousPts + s_frameDuration;
+  }
+
+  if (!s_loggedPtsSource) {
+    s_loggedPtsSource = true;
+    MoonlightInstance::ClLogMessage("Video PTS is following the host presentation clock\n");
+  }
+
+  return previousPts + TimeStamp(static_cast<double>(deltaMs) / 1000.0);
+}
+
+// Holds the decoder thread until the frame is due.
+//
+// The previous implementation was a bare spin on steady_clock::now(), which
+// under Emscripten is a JS call per iteration and keeps the decoder worker at
+// 100% CPU for most of every frame interval. On a TV SoC that starves the audio
+// receive thread and the main thread, and the resulting delay backs up the
+// 15-entry decode unit queue until it is flushed wholesale.
+static void PaceFrame(TimeStamp framePts) {
+  auto now = std::chrono::steady_clock::now();
+  TimeStamp fromStart = now - s_firstAppend;
+
+  TimeStamp deadline = framePts + s_ptsDiff - kFrameTimeMargin;
+  if (fromStart >= deadline) {
+    return;
+  }
+
+  // Never hold a frame for more than a couple of frame intervals, whatever the
+  // pacing reference happens to say.
+  TimeStamp maxDeadline = fromStart + s_frameDuration * kPacingMaxWaitFrames;
+  if (deadline > maxDeadline) {
+    deadline = maxDeadline;
+  }
+
+  while (fromStart < deadline) {
+    TimeStamp remaining = deadline - fromStart;
+    if (remaining > kPacingSleepFloor) {
+      std::unique_lock<std::mutex> lock(s_PacerMutex);
+      s_PacerCv.wait_for(
+        lock,
+        std::chrono::duration_cast<std::chrono::microseconds>(remaining - kPacingSleepFloor)
+      );
+    } else {
+      std::this_thread::yield();
+    }
+    now = std::chrono::steady_clock::now();
+    fromStart = now - s_firstAppend;
+  }
+}
+
+// Re-anchors the pacing reference to the drift observed between the host
+// presentation clock and the local clock.
+static void UpdatePacingDrift(TimeStamp fromStart, TimeStamp framePts) {
+  if (fromStart <= s_lastSec + kTimeWindow) {
+    return;
+  }
+
+  if (fromStart > s_lastSec + kTimeWindow * 2) {
+    // A long stall left us far behind the window schedule; resync rather than
+    // walking forward one window per frame.
+    s_lastSec = fromStart;
+  } else {
+    s_lastSec += kTimeWindow;
+  }
+
+  TimeStamp measured = fromStart - framePts;
+
+  if (!s_ptsDiffSeeded) {
+    // One-off: lock on to the real offset immediately, so pacing starts working
+    // right away instead of creeping towards it a millisecond per second.
+    s_ptsDiffSeeded = true;
+    s_ptsDiff = measured;
+    return;
+  }
+
+  TimeStamp step = (measured - s_ptsDiff) * kPacingDriftGain;
+  if (step > kPacingMaxDriftStep) {
+    step = kPacingMaxDriftStep;
+  } else if (step < -kPacingMaxDriftStep) {
+    step = -kPacingMaxDriftStep;
+  }
+  s_ptsDiff += step;
+}
+
 void MoonlightInstance::VidDecCleanup(void) {
   // Clear the decode buffer
   s_DecodeBuffer.clear();
@@ -343,6 +473,106 @@ void MoonlightInstance::VidDecCleanup(void) {
 int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   // Check if video playback has not started
   if (!g_Instance->m_VideoStarted) {
+    return DR_OK;
+  }
+
+  // Get the current time
+  auto now = std::chrono::steady_clock::now();
+
+  // Check if this is the first video frame
+  if (!s_hasFirstFrame) {
+    // Record the time of the first frame
+    s_firstAppend = now;
+    // Update the flag to indicate that the first frame has been processed
+    s_hasFirstFrame = true;
+  }
+
+  // Track the total number of bytes received by the decoding unit
+  total_bytes += decodeUnit->fullLength;
+
+  // Start performance stats collection if this is the first frame
+  if (!m_LastFrameNumber) {
+    // Record the timestamp when measurement started
+    m_ActiveWndVideoStats.measurementStartTimestamp = LiGetMillis();
+    m_LastFrameNumber = decodeUnit->frameNumber;
+  } else {
+    // Any frame number greater than the last frame number + 1 represents a dropped frame
+    m_ActiveWndVideoStats.networkDroppedFrames += decodeUnit->frameNumber - (m_LastFrameNumber + 1);
+    m_ActiveWndVideoStats.totalFrames += decodeUnit->frameNumber - (m_LastFrameNumber + 1);
+    m_LastFrameNumber = decodeUnit->frameNumber;
+  }
+
+  // Calculate the current bitrate in bits per second and then convert the bitrate to megabits per second
+  float bitrateMbps = (total_bytes * 8.0) / 1000000.0f;
+
+  // Flip performance stats window roughly every second
+  if (m_ActiveWndVideoStats.measurementStartTimestamp + 1000 < LiGetMillis()) {
+    // Update performance stats overlay if it's enabled
+    if (g_Instance->m_PerformanceStatsEnabled == true) {
+      // Create a container to hold aggregated stats for display
+      VIDEO_STATS lastTwoWndStats = {};
+      // Set the bitrate field in the temporary stats for display purposes
+      lastTwoWndStats.receivedBitrate = bitrateMbps;
+      // Add last window and current window to the aggregated stats
+      AddVideoStats(m_LastWndVideoStats, lastTwoWndStats);
+      AddVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
+      // Convert the aggregated stats to a display string
+      FormatVideoStats(lastTwoWndStats, s_StatString.data(), s_StatString.length());
+      // Send the formatted stats string to the JS frontend for overlay display.
+      // This must not be the synchronous variant: it would block the decoder
+      // thread until the main thread has finished the DOM update, which is
+      // exactly the wrong thing to do on the frame submission path.
+      s_PendingStatMsg.assign("StatMsg: ");
+      s_PendingStatMsg.append(s_StatString.data());
+      PostToJsAsync(s_PendingStatMsg);
+      // Clear the stats string buffer for the next use
+      std::fill(s_StatString.begin(), s_StatString.end(), 0);
+      // Reset byte count for the next measurement interval
+      total_bytes = 0;
+    }
+    // Accumulate active window stats into global stats for overall tracking
+    AddVideoStats(m_ActiveWndVideoStats, m_GlobalVideoStats);
+    // Move current active stats to last window stats and reset active window stats for new interval
+    memcpy(&m_LastWndVideoStats, &m_ActiveWndVideoStats, sizeof(m_ActiveWndVideoStats));
+    memset(&m_ActiveWndVideoStats, 0, sizeof(m_ActiveWndVideoStats));
+    m_ActiveWndVideoStats.measurementStartTimestamp = LiGetMillis();
+  }
+
+  // Update min host processing latency if a valid value was provided
+  if (decodeUnit->frameHostProcessingLatency != 0) {
+    // Take the minimum of current min latency and new latency
+    if (m_ActiveWndVideoStats.minHostProcessingLatency != 0) {
+      m_ActiveWndVideoStats.minHostProcessingLatency = MIN(m_ActiveWndVideoStats.minHostProcessingLatency, decodeUnit->frameHostProcessingLatency);
+    } else {
+      m_ActiveWndVideoStats.minHostProcessingLatency = decodeUnit->frameHostProcessingLatency;
+    }
+    // Count how many frames included host processing latency data
+    m_ActiveWndVideoStats.framesWithHostProcessingLatency += 1;
+  }
+
+  // Update max and total host processing latency
+  m_ActiveWndVideoStats.maxHostProcessingLatency = MAX(m_ActiveWndVideoStats.maxHostProcessingLatency, decodeUnit->frameHostProcessingLatency);
+  m_ActiveWndVideoStats.totalHostProcessingLatency += decodeUnit->frameHostProcessingLatency;
+
+  // Count the received frame and increment total frames
+  m_ActiveWndVideoStats.receivedFrames++;
+  m_ActiveWndVideoStats.totalFrames++;
+
+  // Derive this frame's timestamp from the host presentation clock and commit
+  // it immediately. The timeline has to advance with the host regardless of
+  // what happens to this frame below: holding it back on a drop or on a failed
+  // append is what makes the video track shrink against real time and against
+  // the audio track.
+  TimeStamp framePts = NextPacketPts(decodeUnit, s_pktPts);
+  s_pktPts = framePts;
+
+  // Shed P-frames while the decode unit queue is running deep. The queue is
+  // bounded at 15 entries in moonlight-common-c, and reaching that bound makes
+  // the depacketizer discard every queued frame and request an IDR. Dropping a
+  // single P-frame here is far cheaper than that recovery.
+  if (decodeUnit->frameType != FRAME_TYPE_IDR &&
+      LiGetPendingVideoFrames() >= kQueueDepthDropThreshold) {
+    m_ActiveWndVideoStats.pacerDroppedFrames++;
     return DR_OK;
   }
 
@@ -382,37 +612,14 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     entry = entry->next;
   }
 
-  // Get the current time
-  auto now = std::chrono::steady_clock::now();
-
-  // Check if this is the first video frame
-  if (!s_hasFirstFrame) {
-    // Record the time of the first frame
-    s_firstAppend = std::chrono::steady_clock::now();
-    // Update the flag to indicate that the first frame has been processed
-    s_hasFirstFrame = true;
-  }
-
   // Calculate the start of the pacing duration in milliseconds
   uint32_t pacingStart = LiGetMillis();
 
   // Check if the frame pacing is enabled
   if (s_FramePacingEnabled) {
-    // Calculate the time elapsed since the first frame
-    TimeStamp fromStart = now - s_firstAppend;
-    // Wait until the packet timestamp is within the frame time margin
-    while (s_pktPts > fromStart - s_ptsDiff + kFrameTimeMargin) {
-      // Update the current time and recalculate the elapsed time
-      now = std::chrono::steady_clock::now();
-      fromStart = now - s_firstAppend;
-    }
-    // Synchronize packet presentation timing every time window
-    if (fromStart > s_lastSec + kTimeWindow) {
-      // Update the last second to the current time plus the time window
-      s_lastSec += kTimeWindow;
-      // Update the time difference to synchronize with the packet presentation time
-      s_ptsDiff = fromStart - s_pktPts;
-    }
+    // Hold the frame until it is due, then update the pacing reference
+    PaceFrame(framePts);
+    UpdatePacingDrift(std::chrono::steady_clock::now() - s_firstAppend, framePts);
   }
 
   // Calculate the end of the pacing duration in milliseconds
@@ -421,79 +628,10 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   // Measure total pacer time based on calculated pacing duration
   m_ActiveWndVideoStats.totalPacerTime += pacingEnd - pacingStart;
 
-  // Update the timestamp of the last packet append
-  s_lastTime = now;
-
-  // Track the total number of bytes received by the decoding unit
-  total_bytes += decodeUnit->fullLength;
-
-  // Start performance stats collection if this is the first frame
-  if (!m_LastFrameNumber) {
-    // Record the timestamp when measurement started
-    m_ActiveWndVideoStats.measurementStartTimestamp = LiGetMillis();
-    m_LastFrameNumber = decodeUnit->frameNumber;
-  } else {
-    // Any frame number greater than the last frame number + 1 represents a dropped frame
-    m_ActiveWndVideoStats.networkDroppedFrames += decodeUnit->frameNumber - (m_LastFrameNumber + 1);
-    m_ActiveWndVideoStats.totalFrames += decodeUnit->frameNumber - (m_LastFrameNumber + 1);
-    m_LastFrameNumber = decodeUnit->frameNumber;
-  }
-
-  // Calculate the current bitrate in bits per second and then convert the bitrate to megabits per second
-  float bitrateMbps = (total_bytes * 8.0) / 1000000.0f;
-
-  // Flip performance stats window roughly every second
-  if (m_ActiveWndVideoStats.measurementStartTimestamp + 1000 < LiGetMillis()) {
-    // Update performance stats overlay if it's enabled
-    if (g_Instance->m_PerformanceStatsEnabled == true) {
-      // Create a container to hold aggregated stats for display
-      VIDEO_STATS lastTwoWndStats = {};
-      // Set the bitrate field in the temporary stats for display purposes
-      lastTwoWndStats.receivedBitrate = bitrateMbps;
-      // Add last window and current window to the aggregated stats
-      AddVideoStats(m_LastWndVideoStats, lastTwoWndStats);
-      AddVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
-      // Convert the aggregated stats to a display string
-      FormatVideoStats(lastTwoWndStats, s_StatString.data(), s_StatString.length());
-      // Send the formatted stats string to the JS frontend for overlay display
-      PostToJs(std::string("StatMsg: ") + s_StatString.data());
-      // Clear the stats string buffer for the next use
-      std::fill(s_StatString.begin(), s_StatString.end(), 0);
-      // Reset byte count for the next measurement interval
-      total_bytes = 0;
-    }
-    // Accumulate active window stats into global stats for overall tracking
-    AddVideoStats(m_ActiveWndVideoStats, m_GlobalVideoStats);
-    // Move current active stats to last window stats and reset active window stats for new interval
-    memcpy(&m_LastWndVideoStats, &m_ActiveWndVideoStats, sizeof(m_ActiveWndVideoStats));
-    memset(&m_ActiveWndVideoStats, 0, sizeof(m_ActiveWndVideoStats));
-    m_ActiveWndVideoStats.measurementStartTimestamp = LiGetMillis();
-  }
-
-  // Update min host processing latency if a valid value was provided
-  if (decodeUnit->frameHostProcessingLatency != 0) {
-    // Take the minimum of current min latency and new latency
-    if (m_ActiveWndVideoStats.minHostProcessingLatency != 0) {
-      m_ActiveWndVideoStats.minHostProcessingLatency = MIN(m_ActiveWndVideoStats.minHostProcessingLatency, decodeUnit->frameHostProcessingLatency);
-    } else {
-      m_ActiveWndVideoStats.minHostProcessingLatency = decodeUnit->frameHostProcessingLatency;
-    }
-    // Count how many frames included host processing latency data
-    m_ActiveWndVideoStats.framesWithHostProcessingLatency += 1;
-  }
-
-  // Update max and total host processing latency
-  m_ActiveWndVideoStats.maxHostProcessingLatency = MAX(m_ActiveWndVideoStats.maxHostProcessingLatency, decodeUnit->frameHostProcessingLatency);
-  m_ActiveWndVideoStats.totalHostProcessingLatency += decodeUnit->frameHostProcessingLatency;
-
-  // Count the received frame and increment total frames
-  m_ActiveWndVideoStats.receivedFrames++;
-  m_ActiveWndVideoStats.totalFrames++;
-
   // Create an ElementaryMediaPacket and start decoding with the decoded video data
   samsung::wasm::ElementaryMediaPacket pkt {
-    s_pktPts, // presentation timestamp
-    s_pktPts, // decoding timestamp
+    framePts, // presentation timestamp
+    framePts, // decoding timestamp
     s_frameDuration, // packet duration
     decodeUnit->frameType == FRAME_TYPE_IDR, // packet of frame type
     offset, // packet size
@@ -517,14 +655,21 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   if (g_Instance->m_VideoTrack.AppendPacket(pkt)) {
     // Calculate time after rendering
     uint32_t afterRender = LiGetMillis();
-    // Increment packet timestamp for next frame
-    s_pktPts += s_frameDuration;
     // Track total render time and count rendered frames
     m_ActiveWndVideoStats.totalRenderTime += afterRender - beforeRender;
     m_ActiveWndVideoStats.renderedFrames++;
   } else {
-    ClLogMessage("Append video packet failed\n");
-    return DR_NEED_IDR;
+    // Throttle IDR requests. A keyframe costs several times a P-frame, so
+    // asking for one on every rejected packet congests the link further and
+    // provokes another round of rejections.
+    uint32_t nowMs = LiGetMillis();
+    if (nowMs - s_lastIdrRequestMs >= kIdrRequestIntervalMs) {
+      s_lastIdrRequestMs = nowMs;
+      ClLogMessage("Append video packet failed, requesting IDR\n");
+      return DR_NEED_IDR;
+    }
+    // A refresh is already on its way, so drop this frame quietly
+    m_ActiveWndVideoStats.pacerDroppedFrames++;
   }
 
   return DR_OK;
@@ -736,5 +881,9 @@ DECODER_RENDERER_CALLBACKS MoonlightInstance::s_DrCallbacks = {
   .setup = MoonlightInstance::VidDecSetup,
   .cleanup = MoonlightInstance::VidDecCleanup,
   .submitDecodeUnit = MoonlightInstance::VidDecSubmitDecodeUnit,
-  .capabilities = CAPABILITY_SLICES_PER_FRAME(4),
+  // One slice per frame. Slicing exists to let a multithreaded software decoder
+  // work on a frame in parallel; this pipeline hands the bitstream to the TV's
+  // hardware decoder, where extra slices only add bitstream overhead and cost
+  // compression efficiency at the same bitrate.
+  .capabilities = CAPABILITY_SLICES_PER_FRAME(1),
 };

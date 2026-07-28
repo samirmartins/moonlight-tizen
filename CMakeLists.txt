@@ -2,7 +2,10 @@ cmake_minimum_required(VERSION 3.10)
 
 project(MoonlightWasm VERSION 1.0)
 
-add_compile_options(-w -s WASM=1 -fno-ident -Os -flto -DSAMSUNG_WRT -DOS_WASM -DNDEBUG)
+# Optimize for speed, not size. The hot paths here are frame memcpy, Opus
+# decoding at 100-200 frames per second and Reed-Solomon FEC recovery, all of
+# which run on a modest TV SoC where -Os costs real headroom.
+add_compile_options(-w -s WASM=1 -fno-ident -O3 -flto -DSAMSUNG_WRT -DOS_WASM -DNDEBUG)
 
 add_library(moonlight-rs STATIC
     moonlight-common-c/reedsolomon/rs.c)
@@ -264,7 +267,7 @@ set_target_properties(moonlight-wasm
         LINK_FLAGS
             "--bind \
              -pthread \
-             -Os \
+             -O3 \
              -flto \
              -s TOTAL_MEMORY=134217728 \
              -s TOTAL_STACK=16777216 \

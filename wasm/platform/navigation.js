@@ -1021,6 +1021,40 @@ const Views = {
       unmark(this.view.current());
     },
   },
+  SelectAudioJitterMenu: {
+    isActive: () => isPopupMenuActive('audioJitterMenu'),
+    view: new ListView(() =>
+      document.getElementById('audioJitterMenu')
+      .parentNode.children[3].children[1].children),
+    up: function() {},
+    down: function() {},
+    left: function() {
+      jitterSlider.stepDown();
+      jitterSlider.dispatchEvent(new Event('input'));
+    },
+    right: function() {
+      jitterSlider.stepUp();
+      jitterSlider.dispatchEvent(new Event('input'));
+    },
+    accept: function() {
+      clickElement(this.view.current());
+      closeActiveVisibleMenu();
+      setTimeout(() => focusElement('selectAudioJitter'), 250);
+    },
+    back: function() {
+      closePopupMenu('selectAudioJitter');
+      closeActiveVisibleMenu();
+      focusElement('selectAudioJitter');
+    },
+    press: function() {},
+    switch: function() {},
+    enter: function() {
+      mark(this.view.current());
+    },
+    leave: function() {
+      unmark(this.view.current());
+    },
+  },
   HostSettings: {
     view: new ListView(() => [
       'ipAddressFieldModeBtn',
@@ -1106,7 +1140,7 @@ const Views = {
   AudioSettings: {
     view: new ListView(() => [
       'selectAudio',
-      'audioSyncBtn',
+      'selectAudioJitter',
       'playHostAudioBtn'
     ]),
     up: function() {

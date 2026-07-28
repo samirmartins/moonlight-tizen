@@ -151,6 +151,10 @@ void MoonlightInstance::HandleGamepadInputState(bool rumbleFeedback, bool mouseE
 
 // Function to poll gamepad input
 void MoonlightInstance::PollGamepads() {
+  // One sample refreshes the snapshot for every gamepad at once. This runs on a
+  // worker, where the call has to be proxied synchronously to the main thread
+  // because the Gamepad API only exists there, so it is worth doing exactly
+  // once per poll rather than once per connected pad.
   if (emscripten_sample_gamepad_data() != EMSCRIPTEN_RESULT_SUCCESS) {
     std::cerr << "Sample gamepad data failed!\n";
     return;
@@ -173,7 +177,6 @@ void MoonlightInstance::PollGamepads() {
 
   // Iterate through connected gamepads and process their input
   for (int gamepadID = 0; gamepadID < numGamepads; ++gamepadID) {
-    emscripten_sample_gamepad_data();
     EmscriptenGamepadEvent gamepad;
     // See logic in getConnectedGamepadMask() (utils.js)
     // These must stay in sync!

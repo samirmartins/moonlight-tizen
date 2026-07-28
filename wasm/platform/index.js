@@ -81,7 +81,7 @@ function attachListeners() {
   $('#flipABfaceButtonsSwitch').on('click', saveFlipABfaceButtons);
   $('#flipXYfaceButtonsSwitch').on('click', saveFlipXYfaceButtons);
   $('.audioConfigMenu li').on('click', saveAudioConfiguration);
-  $('#audioSyncSwitch').on('click', saveAudioSync);
+  $('#jitterSlider').on('input', saveAudioJitter);
   $('#playHostAudioSwitch').on('click', savePlayHostAudio);
   $('.videoCodecMenu li').on('click', saveVideoCodec);
   $('#hdrModeSwitch').on('click', saveHdrMode);
@@ -108,6 +108,7 @@ function attachListeners() {
   registerMenu('selectResolution', Views.SelectResolutionMenu);
   registerMenu('selectFramerate', Views.SelectFramerateMenu);
   registerMenu('selectBitrate', Views.SelectBitrateMenu);
+  registerMenu('selectAudioJitter', Views.SelectAudioJitterMenu);
   registerMenu('selectAudio', Views.SelectAudioMenu);
   registerMenu('selectCodec', Views.SelectCodecMenu);
 
@@ -115,6 +116,13 @@ function attachListeners() {
 
   Controller.startWatching();
   window.addEventListener('gamepadinputchanged', (e) => {
+    // While streaming, gamepad state is read by the native input thread and
+    // forwarded to the host directly. Running the UI navigation mapping here as
+    // well would burn main thread time on every stick movement, which shows up
+    // as dropped video frames.
+    if (isInGame) {
+      return;
+    }
     isGamepadActive = true;
     const changes = e.detail.changes;
     // Iterate through each change in the gamepad input
@@ -2144,6 +2152,9 @@ function showAppsMode() {
   $('#wasm_module').css('display', 'none');
 
   isInGame = false;
+  // Resume the JavaScript gamepad polling that showStreamMode() stopped, so the
+  // pads drive UI navigation again. Calling this when already running is a no-op.
+  Controller.startWatching();
   // We want to eventually poll on the app screen, but we can't now because
   // it slows down box art loading and we don't update the UI live anyway.
   stopPollingHosts();
@@ -2372,6 +2383,10 @@ function showStreamMode() {
   $('#loadingSpinner').css('display', 'inline-block');
 
   isInGame = true;
+  // Stop the JavaScript gamepad polling for the duration of the stream. It runs
+  // on the main thread alongside the media element, and the native input thread
+  // already covers the pads while streaming.
+  Controller.stopWatching();
   fullscreenWasmModule();
   handleOnScreenOverlays();
   Navigation.stop();
@@ -2414,6 +2429,33 @@ function startGame(host, appID) {
     console.error('%c[index.js, startGame]', 'color: green;', 'Error: Attempted to start a game, but the host was not initialized properly! Host object: ', host);
     return;
   }
+
+  // Create the AudioContext here, while still running synchronously inside the
+  // user gesture handler. Creating it later, from a Promise callback or a WASM
+  // proxied call, puts it outside the gesture and Tizen's autoplay policy makes
+  // the constructor block indefinitely.
+  try {
+    if (window._mlAudioCtx) {
+      try { window._mlAudioCtx.close(); } catch (e) {}
+    }
+    var AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (AudioCtx) {
+      try {
+        window._mlAudioCtx = new AudioCtx({ sampleRate: 48000, latencyHint: 'interactive' });
+      } catch (e) {
+        window._mlAudioCtx = new AudioCtx();
+      }
+    } else {
+      console.error('%c[index.js, startGame]', 'color: green;', 'Error: No AudioContext available, the stream will have no audio.');
+      window._mlAudioCtx = null;
+    }
+  } catch (e) {
+    console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to create the AudioContext: ' + e.message);
+    window._mlAudioCtx = null;
+  }
+
+  // Reset the scheduler for the new stream, also inside the gesture handler
+  startAudioScheduler();
 
   // Refresh the server info, because the user might have quit the game
   host.refreshServerInfo().then(function(ret) {
@@ -2486,7 +2528,7 @@ function startGame(host, appID) {
       const flipABfaceButtons = $('#flipABfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const flipXYfaceButtons = $('#flipXYfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
       var audioConfig = $('#selectAudio').data('value').toString();
-      const audioSync = $('#audioSyncSwitch').parent().hasClass('is-checked') ? 1 : 0;
+      const audioJitterMs = parseInt($('#jitterSlider').val());
       const playHostAudio = $('#playHostAudioSwitch').parent().hasClass('is-checked') ? 1 : 0;
       var videoCodec = $('#selectCodec').data('value').toString();
       const hdrMode = $('#hdrModeSwitch').parent().hasClass('is-checked') ? 1 : 0;
@@ -2507,7 +2549,7 @@ function startGame(host, appID) {
       '\n Flip A/B face buttons: ' + flipABfaceButtons + 
       '\n Flip X/Y face buttons: ' + flipXYfaceButtons + 
       '\n Audio configuration: ' + audioConfig + 
-      '\n Audio synchronization: ' + audioSync + 
+      '\n Audio jitter buffer: ' + audioJitterMs + ' ms' + 
       '\n Play host audio: ' + playHostAudio + 
       '\n Video codec: ' + videoCodec + 
       '\n Video HDR mode: ' + hdrMode + 
@@ -2555,7 +2597,7 @@ function startGame(host, appID) {
             host.address, host.httpPort, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
             host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
             framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
-            audioConfig, audioSync, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
+            audioConfig, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
             performanceStats
           ]);
         }, function(failedResumeApp) {
@@ -2607,7 +2649,7 @@ function startGame(host, appID) {
           host.address, host.httpPort, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
           host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
           framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
-          audioConfig, audioSync, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
+          audioConfig, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
           performanceStats
         ]);
       }, function(failedLaunchApp) {
@@ -3081,12 +3123,11 @@ function warnAudioConfiguration() {
   }
 }
 
-function saveAudioSync() {
-  setTimeout(() => {
-    const chosenAudioSync = $('#audioSyncSwitch').parent().hasClass('is-checked');
-    console.log('%c[index.js, saveAudioSync]', 'color: green;', 'Saving audio sync state: ' + chosenAudioSync);
-    storeData('audioSync', chosenAudioSync, null);
-  }, 100);
+function saveAudioJitter() {
+  var chosenJitter = $('#jitterSlider').val();
+  $('#selectAudioJitter').html(chosenJitter + ' ms');
+  console.log('%c[index.js, saveAudioJitter]', 'color: green;', 'Saving audio jitter buffer value: ' + chosenJitter);
+  storeData('audioJitterMs', chosenJitter, null);
 }
 
 function savePlayHostAudio() {
@@ -3339,9 +3380,10 @@ function restoreDefaultsSettingsValues() {
   $('#selectAudio').text('Stereo').data('value', defaultAudioConfig);
   storeData('audioConfig', defaultAudioConfig, null);
 
-  const defaultAudioSync = false;
-  document.querySelector('#audioSyncBtn').MaterialSwitch.off();
-  storeData('audioSync', defaultAudioSync, null);
+  const defaultAudioJitterMs = '100';
+  $('#jitterSlider')[0].MaterialSlider.change(defaultAudioJitterMs);
+  $('#selectAudioJitter').html(defaultAudioJitterMs + ' ms');
+  storeData('audioJitterMs', defaultAudioJitterMs, null);
 
   const defaultPlayHostAudio = false;
   document.querySelector('#playHostAudioBtn').MaterialSwitch.off();
@@ -3622,15 +3664,11 @@ function loadUserDataCb() {
     }
   });
 
-  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioSync preferences.');
-  getData('audioSync', function(previousValue) {
-    if (previousValue.audioSync == null) {
-      document.querySelector('#audioSyncBtn').MaterialSwitch.off(); // Set the default state
-    } else if (previousValue.audioSync == false) {
-      document.querySelector('#audioSyncBtn').MaterialSwitch.off();
-    } else {
-      document.querySelector('#audioSyncBtn').MaterialSwitch.on();
-    }
+  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioJitterMs preferences.');
+  getData('audioJitterMs', function(previousValue) {
+    var value = (previousValue.audioJitterMs != null) ? String(previousValue.audioJitterMs) : '100';
+    $('#jitterSlider')[0].MaterialSlider.change(value);
+    $('#selectAudioJitter').html(value + ' ms');
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored playHostAudio preferences.');
