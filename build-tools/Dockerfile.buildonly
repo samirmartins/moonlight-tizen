@@ -1,0 +1,62 @@
+# Compile-and-link validation only: mirrors the Emscripten half of the project
+# Dockerfile and stops before Tizen Studio signing/packaging.
+#
+# Use this for fast iteration on the C/C++ sources: it catches every compile and
+# link error without paying for the Tizen Studio download or the signing step.
+# Build the .wgt afterwards with Dockerfile.package, which starts from the image
+# this one produces.
+#
+#   docker build -f build-tools/Dockerfile.buildonly -t moonlight-wasm-check .
+#
+# See build-tools/README.md for the --ulimit requirement of the packaging stage.
+FROM ubuntu:22.04
+
+ARG DEBIAN_FRONTEND=noninteractive
+ENV TZ=Etc/UTC
+
+RUN apt-get update && apt-get install -y \
+	cmake \
+	ccache \
+	git \
+	ninja-build \
+	python2 \
+	unzip \
+	aria2 \
+	&& rm -rf /var/lib/apt/lists/*
+
+RUN ln -sf /usr/bin/python2 /usr/bin/python
+
+RUN useradd -m -s /bin/bash moonlight
+USER moonlight
+WORKDIR /home/moonlight
+
+RUN aria2c -x 5 -s 5 -o emscripten-1.39.4.7-linux64.zip 'https://developer.samsung.com/smarttv/file/a5013a65-af11-4b59-844f-2d34f14d19a9'
+RUN unzip -q emscripten-1.39.4.7-linux64.zip
+
+RUN sed -i 's|https://www.openssl.org/source/old/1.1.1/openssl-|https://github.com/openssl/openssl/releases/download/OpenSSL_1_1_1d/openssl-|g' \
+/home/moonlight/emscripten-release-bundle/emsdk/fastcomp/emscripten/tools/ports/tizen/ssl.py
+RUN sed -i 's|https://www.openssl.org/source/old/1.1.1/openssl-|https://github.com/openssl/openssl/releases/download/OpenSSL_1_1_1d/openssl-|g' \
+/home/moonlight/emscripten-release-bundle/emsdk/fastcomp/emscripten/tools/ports/tizen/crypto.py
+
+WORKDIR emscripten-release-bundle/emsdk
+RUN ./emsdk activate latest-fastcomp
+
+WORKDIR /home/moonlight
+COPY --chown=moonlight CMakeLists.txt ./moonlight-tizen/
+COPY --chown=moonlight h264bitstream ./moonlight-tizen/h264bitstream/
+COPY --chown=moonlight libgamestream ./moonlight-tizen/libgamestream/
+COPY --chown=moonlight moonlight-common-c ./moonlight-tizen/moonlight-common-c/
+COPY --chown=moonlight opus ./moonlight-tizen/opus/
+COPY --chown=moonlight ports ./moonlight-tizen/ports/
+COPY --chown=moonlight wasm/*.c ./moonlight-tizen/wasm/
+COPY --chown=moonlight wasm/*.cpp ./moonlight-tizen/wasm/
+COPY --chown=moonlight wasm/*.hpp ./moonlight-tizen/wasm/
+COPY --chown=moonlight wasm/dispatcher ./moonlight-tizen/wasm/dispatcher/
+
+RUN cmake \
+	-DCMAKE_TOOLCHAIN_FILE=/home/moonlight/emscripten-release-bundle/emsdk/fastcomp/emscripten/cmake/Modules/Platform/Emscripten.cmake \
+	-G Ninja \
+	-S moonlight-tizen \
+	-B build
+RUN cmake --build build
+RUN ls -la build/

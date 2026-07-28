@@ -93,6 +93,24 @@ COPY --chown=moonlight wasm/static/ ./moonlight-tizen/wasm/static/
 RUN cmake --install build --prefix build
 RUN cp moonlight-tizen/res/icon.png build/widget/
 
+# Build the ForceGM variant instead of the plain one. Both come from identical
+# code; the only difference is this line of metadata, which asks the TV firmware
+# to put the panel into Game Mode while the app runs.
+#
+# It is not the same thing as the in-app "Game Mode" switch, which selects the
+# EMSS kUltraLow latency mode and is what freezes on Tizen 9.0. In this variant
+# that switch is meant to stay off.
+#
+#   docker build --ulimit nofile=1024:524288 --build-arg FORCE_GAME_MODE=1 .
+ARG FORCE_GAME_MODE=0
+RUN if [ "$FORCE_GAME_MODE" = "1" ]; then \
+		sed -i 's|<tizen:metadata key="http://samsung.com/tv/metadata/use.voiceguide"|<tizen:metadata key="http://samsung.com/tv/metadata/use.game.mode" value="true"/>\n    <tizen:metadata key="http://samsung.com/tv/metadata/use.voiceguide"|' build/widget/config.xml && \
+		grep -q 'use.game.mode' build/widget/config.xml && \
+		echo "config.xml: Game Mode metadata injected (ForceGM variant)"; \
+	else \
+		echo "config.xml: stock, no Game Mode metadata"; \
+	fi
+
 # Sign and package the application into a WGT file using Expect to automate the interactive password prompts
 RUN echo \
 	'set timeout -1\n' \
@@ -103,7 +121,11 @@ RUN echo \
 	'send -- "N\\r"\n' \
 	'expect eof\n' \
 | expect
-RUN mv build/widget/Moonlight.wgt .
+# Name the artifact after the version it declares and the variant it is, so the
+# file still identifies itself once it is sitting on a USB stick next to others
+RUN VERSION=$(grep -oP 'version="\K[0-9]+\.[0-9]+\.[0-9]+' build/widget/config.xml); \
+	if [ "$FORCE_GAME_MODE" = "1" ]; then SUFFIX="-ForceGM"; else SUFFIX=""; fi; \
+	mv build/widget/Moonlight.wgt "Moonlight-v${VERSION}-samirmartins${SUFFIX}.wgt" && ls -la *.wgt
 
 # Clean up unnecessary files to reduce image size
 RUN rm -rf \

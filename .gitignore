@@ -51,3 +51,6 @@ dir.stamp
 *.vs/
 *.vscode/
 .DS_Store
+
+# Packaged widgets are build output and belong in releases, not here
+*.wgt
