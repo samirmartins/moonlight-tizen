@@ -148,15 +148,12 @@ jobs:
           body: |
             # Moonlight Tizen v${{ env.TIMESTAMP }}
 
-            - Ensure your setup meets the necessary [requirements](https://github.com/brightcraft/moonlight-tizen#%EF%B8%8F-prerequisites) for the best possible streaming experience.
-            - Download `Moonlight.wgt` from the release assets.
-            - Follow the instructions from one of the recommended [installation methods](https://github.com/brightcraft/moonlight-tizen/wiki/Installation-Guide) to install the application on your TV.
+            - Download `Moonlight-v${{ env.VERSION }}-samirmartins.wgt` from the release assets.
+            - Follow one of the [installation methods](https://github.com/brightcraft/moonlight-tizen/wiki/Installation-Guide) documented in the upstream wiki to install the application on your TV.
 
             ## What's Changed:
 
             - No release notes have been provided for this pre-release yet.
-
-            **Full Changelog**: https://github.com/brightcraft/moonlight-tizen/compare/vX.X.X...vX.X.X
 
             > [!WARNING]
             > This is a pre-release build intended for development and testing only.
@@ -164,7 +161,7 @@ jobs:
             > Please report any unexpected behavior and provide feedback to help improve future releases.
           draft: false
           prerelease: true
-      # Uploads the Moonlight.wgt file as a release asset in the newly created GitHub pre-release.
+      # Uploads the widget as a release asset in the newly created GitHub pre-release.
       - name: Upload the widget file to GitHub pre-release
         uses: actions/upload-release-asset@v1
         env:

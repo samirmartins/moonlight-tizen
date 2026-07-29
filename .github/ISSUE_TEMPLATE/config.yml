@@ -1,5 +1,8 @@
-blank_issues_enabled: false
+blank_issues_enabled: true
 contact_links:
   - name: Discussions Board
-    url: https://github.com/brightcraft/moonlight-tizen/discussions
+    url: https://github.com/samirmartins/moonlight-tizen/discussions
     about: General questions, ideas, and conversations
+  - name: Upstream project
+    url: https://github.com/brightcraft/moonlight-tizen
+    about: This fork is based on brightcraft/moonlight-tizen. Issues unrelated to the audio and video pipeline changes likely belong there

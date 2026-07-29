@@ -9,7 +9,7 @@ I was getting both audio and video stuttering streaming to my Samsung **DU7700**
 > [!IMPORTANT]
 > **It works well on my DU7700. I have not tested it on any other TV.**
 >
-> **This is provided as is. I do not intend to maintain it.**
+> **This is provided as is. I cannot maintain it regularly, but pull requests and issues are welcome and encouraged.**
 
 > [!NOTE]
 > **Enormous thanks to [brightcraft](https://github.com/brightcraft) and [ruanformigoni](https://github.com/ruanformigoni), and to every contributor to their forks, for the excellent work this is built on.** Practically all of this application is theirs. This fork changes two pipelines and nothing else.

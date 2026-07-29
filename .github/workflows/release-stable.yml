@@ -45,6 +45,22 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      # The ForceGM variant is the same tree with one metadata line injected at
+      # packaging time. FORCE_GAME_MODE is declared late in the Dockerfile, after
+      # the SDK downloads, so this build reuses every expensive cached layer from
+      # the one above rather than fetching the toolchains again.
+      - name: Build and push Docker image (ForceGM variant)
+        uses: docker/build-push-action@v3
+        with:
+          context: .
+          push: true
+          build-args: FORCE_GAME_MODE=1
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:forcegm
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
   run-and-upload-release:
     runs-on: ubuntu-latest
     needs: build-and-push-image
@@ -70,21 +86,26 @@ jobs:
           VERSION=$(grep -oP 'version="\K[0-9]+\.[0-9]+\.[0-9]+' res/config.xml)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
       # Sets the full Docker image tag using the output from the 'build-and-push-image' job.
-      - name: Set up image tag
-        run: echo "IMAGE_TAG=${{ needs.build-and-push-image.outputs.image_tag }}" >> $GITHUB_ENV
-      # Runs the Docker container in detached mode to extract the build artifact.
-      - name: Run Docker container
+      - name: Set up image tags
+        run: |
+          echo "IMAGE_TAG=${{ needs.build-and-push-image.outputs.image_tag }}" >> $GITHUB_ENV
+          echo "IMAGE_TAG_FORCEGM=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:forcegm" >> $GITHUB_ENV
+      # Runs both containers in detached mode to extract the build artifacts.
+      - name: Run Docker containers
         run: |
           docker run -d --name temp_container $IMAGE_TAG
-      # Copies the built widget from the Docker container. The build names it after the
+          docker run -d --name temp_container_forcegm $IMAGE_TAG_FORCEGM
+      # Copies both widgets from the containers. The build names them after the
       # version declared in config.xml, which was extracted into VERSION above.
-      - name: Copy artifacts from Docker container
+      - name: Copy artifacts from Docker containers
         run: |
           docker cp "temp_container:/home/moonlight/Moonlight-v${VERSION}-samirmartins.wgt" .
-      # Stops and removes the temporary Docker container to clean up resources.
-      - name: Stop and remove Docker container
+          docker cp "temp_container_forcegm:/home/moonlight/Moonlight-v${VERSION}-samirmartins-ForceGM.wgt" .
+      # Stops and removes the temporary Docker containers to clean up resources.
+      - name: Stop and remove Docker containers
         run: |
-          docker stop temp_container && docker rm temp_container
+          docker stop temp_container temp_container_forcegm
+          docker rm temp_container temp_container_forcegm
       # Creates a new GitHub release using the extracted version and includes a detailed description.
       - name: Create GitHub release
         id: create_release
@@ -97,26 +118,22 @@ jobs:
           body: |
             # Moonlight Tizen v${{ env.VERSION }}
 
-            - Ensure your setup meets the necessary [requirements](https://github.com/brightcraft/moonlight-tizen#%EF%B8%8F-prerequisites) for the best possible streaming experience.
-            - Choose the appropriate variant from the release assets:
-              - **Tizen 5.5 or higher:** Download `Moonlight.wgt` (recommended for most users).
-              - **Tizen 9.0 (experimental):** Download `Moonlight-ForceGM.wgt`, which includes the required Game Mode metadata to force Game Mode. See the [documentation](https://github.com/brightcraft/moonlight-tizen/wiki/Known-Issues-&-Limitations#streaming-issues-when-game-mode-is-enabled-tizen-90) for more details about using this variant and its limitations.
-            - Follow the instructions from one of the recommended [installation methods](https://github.com/brightcraft/moonlight-tizen/wiki/Installation-Guide) to install the application on your TV.
+            - Choose one of the two variants from the release assets. They are built from the same code and differ only in one line of widget metadata:
+              - `Moonlight-v${{ env.VERSION }}-samirmartins-ForceGM.wgt` — asks the TV firmware to put the panel into Game Mode. **Leave the in-app Game Mode switch off when using it.**
+              - `Moonlight-v${{ env.VERSION }}-samirmartins.wgt` — no Game Mode metadata. Use this one if the variant above misbehaves on your model or firmware.
+            - Both share the same application ID, so installing one replaces the other and keeps your saved settings.
+            - Follow one of the [installation methods](https://github.com/brightcraft/moonlight-tizen/wiki/Installation-Guide) documented in the upstream wiki to install the application on your TV.
 
             ## What's Changed:
 
-            - No release notes have been provided for this release yet.
+            - See [CHANGELOG.md](https://github.com/${{ github.repository }}/blob/master/CHANGELOG.md).
 
-            **Full Changelog**: https://github.com/brightcraft/moonlight-tizen/compare/vX.X.X...vX.X.X
+            ## Credits:
 
-            ## Support the Project:
-
-            If you find this project useful and would like to support its continued development, including new features, bug fixes, maintenance, and ongoing improvements, consider becoming a supporter. For more information on how you can help, please visit [this page](https://www.patreon.com/posts/how-to-support-151822385).
-
-            [![Patreon](https://img.shields.io/badge/Support_me_on_Patreon-F96854?style=for-the-badge&logo=patreon&logoColor=white)](https://www.patreon.com/cw/BrightCraft/membership)
+            Almost all of this application comes from [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen). If you would like to support that work financially, you can do so on [brightcraft's Patreon](https://www.patreon.com/cw/BrightCraft/membership).
           draft: false
           prerelease: false
-      # Uploads the Moonlight.wgt file as a release asset in the newly created GitHub release.
+      # Uploads both widgets as release assets in the newly created GitHub release.
       - name: Upload the widget file to GitHub release
         uses: actions/upload-release-asset@v1
         env:
@@ -125,4 +142,13 @@ jobs:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
           asset_path: ./Moonlight-v${{ env.VERSION }}-samirmartins.wgt
           asset_name: Moonlight-v${{ env.VERSION }}-samirmartins.wgt
+          asset_content_type: application/octet-stream
+      - name: Upload the ForceGM widget file to GitHub release
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          upload_url: ${{ steps.create_release.outputs.upload_url }}
+          asset_path: ./Moonlight-v${{ env.VERSION }}-samirmartins-ForceGM.wgt
+          asset_name: Moonlight-v${{ env.VERSION }}-samirmartins-ForceGM.wgt
           asset_content_type: application/octet-stream

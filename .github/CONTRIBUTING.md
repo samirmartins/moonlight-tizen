@@ -68,6 +68,6 @@ This helps ensure the feature aligns with the direction of the project.
 
 Contributions are always appreciated. Clear, focused pull requests and well-described issues help keep the project healthy and easier to maintain for everyone.
 
-If you’d like to support the project financially and help me continue the development and maintenance, you can contribute via ongoing support or a one-time donation:
+This fork is not regularly maintained, so contributions may take a while to be reviewed.
 
-[![Patreon](https://img.shields.io/badge/Support_me_on_Patreon-F96854?style=for-the-badge&logo=patreon&logoColor=white)](https://www.patreon.com/BrightCraft)
+Almost all of this application comes from [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen). If you would like to support that work financially, you can do so on [brightcraft's Patreon](https://www.patreon.com/BrightCraft).
