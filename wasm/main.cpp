@@ -345,6 +345,20 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
     // Fallback to H.264 if no codec was selected
     m_StreamConfig.supportedVideoFormats = VIDEO_FORMAT_H264;
     PostToJs("Selecting the fallback video format to: VIDEO_FORMAT_H264");
+  } else if (!(m_StreamConfig.supportedVideoFormats & VIDEO_FORMAT_MASK_H264)) {
+    // Announce H.264 alongside the chosen codec so a host that cannot encode
+    // HEVC or AV1 still has something to negotiate down to. Without this the
+    // stream simply fails to start, which is what kept HEVC from being the
+    // default: it works on hosts that support it and breaks the rest.
+    //
+    // moonlight-common-c picks the best format both ends advertise, so adding
+    // H.264 here never downgrades a host that can do better. It only matters
+    // when the alternative is not connecting at all.
+    //
+    // An explicit H.264 selection is left alone by the condition above, so
+    // choosing H.264 in the menu still means H.264 and nothing else.
+    m_StreamConfig.supportedVideoFormats |= VIDEO_FORMAT_H264;
+    PostToJs("Announcing VIDEO_FORMAT_H264 as a fallback format");
   }
 
   // Initialize the color range with default value

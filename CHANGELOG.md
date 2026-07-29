@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## v3.1.0
+
+### Added
+- H.264 SPS rewriting. The stream is always low delay, but the SPS the host sends does not say so, and a hardware decoder reading no bitstream restrictions sizes its picture buffer from `level_idc` and holds several frames before showing one. The SPS now declares no reordering, a single buffered frame and a single reference frame, and lowers `level_idc` to the smallest level that fits the resolution. This is the rewrite `moonlight-android` performs on every device since Android 8, and it is staged so it can be narrowed without editing the source
+- Opus packet loss concealment. A packet the network lost was previously skipped, leaving a hole in the scheduled audio; the decoder is now asked to conceal it, which also keeps its internal state continuous for the frames that follow
+- H.264 is announced alongside HEVC and AV1 as a fallback format, so a host that cannot encode the selected codec negotiates down instead of failing to connect. An explicit H.264 selection is unaffected
+
+### Changed
+- Defaults changed for a working out-of-the-box configuration: 1080p at 20 Mbps (was 720p at 10 Mbps), HEVC (was H.264), audio jitter buffer 60 ms (was 100 ms), *Optimize game settings*, *Rumble feedback* and *Mouse emulation* on (all were off), and *Frame pacing* off. The first three match `moonlight-android`; frame pacing matches its `DEFAULT_FRAME_PACING = "latency"`, where the newest frame is presented on arrival rather than held for a deadline
+- *Game Mode* now defaults off on every platform version. It selects the EMSS ultra low latency mode, which freezes playback on the first frame on some models, and it is also the switch that must stay off in the ForceGM build where the panel is put into Game Mode by widget metadata. Defaulting it on meant a fresh install could land on the one combination that does not work
+- The frame pacer waits against the pipeline's own reported position when the platform provides it, instead of always estimating from local elapsed time, and hands each frame over one frame duration before it is due so the pipeline is never left with nothing in hand
+- Audio buffers are drawn from a pool rather than allocated per frame, and the sample conversion no longer looks up the heap view per sample
+
 ## v3.0.0
 
 ### Fixed

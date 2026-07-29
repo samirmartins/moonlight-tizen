@@ -30,7 +30,7 @@
 // The scheduler on the JS side lives in platform/audio.js.
 
 // Default depth of the jitter buffer when the user has not chosen one
-static constexpr int kDefaultJitterMs = 100;
+static constexpr int kDefaultJitterMs = 60;
 
 // Minimum interval between audio problem log lines. This code runs on the audio
 // path, and logging crosses into JS; an unthrottled line per lost packet is
@@ -110,10 +110,25 @@ static void FeederLoop() {
       } // release the lock before decoding, Opus is the expensive part
 
       opus_int16* dst = s_frameSlots[s_slotIdx % kNumSlots];
-      int decodeLen = opus_multistream_decode(
-        s_OpusDecoder, pktData, pktLen,
-        dst, static_cast<int>(s_samplesPerFrame), 0
-      );
+
+      // A queued length of zero is the marker for a packet the network lost.
+      // Passing a null pointer to the decoder invokes Opus packet loss
+      // concealment, which interpolates from the previous frame instead of
+      // leaving a hole. A hole is audible as a click; the concealed frame is
+      // not, and it also keeps the decoder's internal state continuous for the
+      // frames that follow.
+      int decodeLen;
+      if (pktLen == 0) {
+        decodeLen = opus_multistream_decode(
+          s_OpusDecoder, nullptr, 0,
+          dst, static_cast<int>(s_samplesPerFrame), 0
+        );
+      } else {
+        decodeLen = opus_multistream_decode(
+          s_OpusDecoder, pktData, pktLen,
+          dst, static_cast<int>(s_samplesPerFrame), 0
+        );
+      }
 
       if (decodeLen <= 0) {
         LogAudioThrottled("Audio: Opus decode failed");
@@ -238,13 +253,18 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
     return;
   }
 
-  // moonlight-common-c signals a lost packet with a NULL buffer. There is no
-  // concealment in this path; the frame is simply absent, and the scheduler
-  // carries on with the next one.
-  if (sampleData == nullptr || sampleLength <= 0 || sampleLength > kMaxPacketBytes) {
+  // A length beyond the slot size is corrupt, not lost. Nothing useful can be
+  // done with it and concealing it would be a lie about what arrived.
+  if (sampleLength > kMaxPacketBytes) {
     LogAudioThrottled("Audio: dropping packet with unusable length");
     return;
   }
+
+  // moonlight-common-c signals a packet the network lost with a null buffer.
+  // Queue it as a zero length entry so the feeder runs Opus packet loss
+  // concealment for it, in order, rather than silently skipping the frame and
+  // leaving a gap in the scheduled audio.
+  bool lost = (sampleData == nullptr || sampleLength <= 0);
 
   {
     std::unique_lock<std::mutex> lock(s_pktMutex);
@@ -255,8 +275,12 @@ void MoonlightInstance::AudDecDecodeAndPlaySample(char* sampleData, int sampleLe
       LogAudioThrottled("Audio: packet queue overflow, dropping oldest");
     }
     PacketSlot& slot = s_pktQueue[s_pktTail];
-    memcpy(slot.data, sampleData, static_cast<size_t>(sampleLength));
-    slot.length = sampleLength;
+    if (lost) {
+      slot.length = 0;
+    } else {
+      memcpy(slot.data, sampleData, static_cast<size_t>(sampleLength));
+      slot.length = sampleLength;
+    }
     s_pktTail = (s_pktTail + 1) % s_pktCap;
     ++s_pktCount;
   }

@@ -179,8 +179,7 @@ class MoonlightInstance {
   static int VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
   static void AddVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst);
   static void FormatVideoStats(VIDEO_STATS& stats, char* output, int length);
-  // Cadence instrumentation, fed from the frame submission path. Members rather
-  // than free functions because they read the pipeline clock, which is private.
+  // Cadence instrumentation, fed from the frame submission path.
   static void RecordAppendCadence(VIDEO_STATS& stats);
   static void RecordPipelineLead(VIDEO_STATS& stats, samsung::wasm::Seconds framePts);
   void TogglePerformanceStats();
@@ -195,6 +194,18 @@ class MoonlightInstance {
   void OpenUrl(int callbackId, std::string url, std::string ppk, bool binaryResponse);
 
   LoadResult LoadCert(const char* certStr, const char* keyStr);
+
+  // Last playback position reported by the pipeline, and the local time it was
+  // reported at, so a reader can extrapolate to now. Microseconds rather than a
+  // floating point second count because std::atomic<double> is not guaranteed
+  // to be lock free here, and this is written from the main thread and read
+  // from the decoder thread on every frame.
+  //
+  // A negative position means the pipeline has not reported yet. Everything
+  // downstream must treat that as "no measurement", never as position zero.
+  static constexpr int64_t kNoPipelinePosition = -1;
+  std::atomic<int64_t> m_PipelinePositionUs;
+  std::atomic<uint64_t> m_PipelinePositionAtMs;
 
   private:
     using EmssReadyState = samsung::wasm::ElementaryMediaStreamSource::ReadyState;
@@ -289,17 +300,6 @@ class MoonlightInstance {
   pthread_t m_StopThread;
   std::atomic<samsung::wasm::SessionId> m_VideoSessionId;
 
-  // Last playback position reported by the pipeline, and the local time it was
-  // reported at, so a reader can extrapolate to now. Microseconds rather than a
-  // floating point second count because std::atomic<double> is not guaranteed
-  // to be lock free here, and this is written from the main thread and read
-  // from the decoder thread on every frame.
-  //
-  // A negative position means the pipeline has not reported yet. Everything
-  // downstream must treat that as "no measurement", never as position zero.
-  static constexpr int64_t kNoPipelinePosition = -1;
-  std::atomic<int64_t> m_PipelinePositionUs;
-  std::atomic<uint64_t> m_PipelinePositionAtMs;
 
   samsung::html::HTMLMediaElement m_MediaElement;
   std::unique_ptr<samsung::wasm::ElementaryMediaStreamSource> m_Source;

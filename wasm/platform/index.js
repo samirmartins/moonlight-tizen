@@ -3331,24 +3331,31 @@ function savePerformanceStats() {
 
 // Reset all settings to their default state and save the value data
 function restoreDefaultsSettingsValues() {
-  const defaultResolution = '1280:720';
-  $('#selectResolution').text('1280 x 720 (720p)').data('value', defaultResolution);
+  // 1080p is the sensible starting point on a modern TV panel. 720p left the
+  // picture soft on hardware that decodes 1080p without effort.
+  const defaultResolution = '1920:1080';
+  $('#selectResolution').text('1920 x 1080 (1080p)').data('value', defaultResolution);
   storeData('resolution', defaultResolution, null);
 
   const defaultFramerate = '60';
   $('#selectFramerate').text('60 FPS').data('value', defaultFramerate);
   storeData('frameRate', defaultFramerate, null);
 
-  const defaultBitrate = '10';
+  // Matches the 1080p60 preset in standardBitratePresets(), and the number
+  // Moonlight uses on every other platform for this resolution.
+  const defaultBitrate = '20';
   $('#selectBitrate').html(defaultBitrate + ' Mbps');
   $('#bitrateSlider')[0].MaterialSlider.change(defaultBitrate);
   storeData('bitrate', defaultBitrate, null);
 
-  // Frame pacing defaults on. Without it frames are handed to the pipeline as
-  // fast as the network delivers them, which leaves the cadence entirely to
-  // whatever arrival jitter the link happens to have.
-  const defaultFramePacing = true;
-  document.querySelector('#framePacingBtn').MaterialSwitch.on();
+  // Frame pacing defaults off, which hands each frame to the pipeline as soon as
+  // it is decoded. This matches the default on the other Moonlight clients:
+  // moonlight-android ships DEFAULT_FRAME_PACING = "latency", where the newest
+  // frame is presented immediately rather than held for a display deadline.
+  // Holding frames back is available for anyone who wants it, but it is not what
+  // the reference implementations do out of the box.
+  const defaultFramePacing = false;
+  document.querySelector('#framePacingBtn').MaterialSwitch.off();
   storeData('framePacing', defaultFramePacing, null);
 
   const defaultIpAddressFieldMode = false;
@@ -3359,15 +3366,19 @@ function restoreDefaultsSettingsValues() {
   document.querySelector('#sortAppsListBtn').MaterialSwitch.off();
   storeData('sortAppsList', defaultSortAppsList, null);
 
-  const defaultOptimizeGames = false;
+  // Matches DEFAULT_SOPS in moonlight-android: let the host pick game settings
+  // that suit the stream.
+  const defaultOptimizeGames = true;
   document.querySelector('#optimizeGamesBtn').MaterialSwitch.off();
   storeData('optimizeGames', defaultOptimizeGames, null);
 
-  const defaultRumbleFeedback = false;
+  // moonlight-android has no switch for this at all; rumble is always forwarded.
+  const defaultRumbleFeedback = true;
   document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.off();
   storeData('rumbleFeedback', defaultRumbleFeedback, null);
 
-  const defaultMouseEmulation = false;
+  // Matches DEFAULT_MOUSE_EMULATION in moonlight-android.
+  const defaultMouseEmulation = true;
   document.querySelector('#mouseEmulationBtn').MaterialSwitch.off();
   storeData('mouseEmulation', defaultMouseEmulation, null);
 
@@ -3383,7 +3394,10 @@ function restoreDefaultsSettingsValues() {
   $('#selectAudio').text('Stereo').data('value', defaultAudioConfig);
   storeData('audioConfig', defaultAudioConfig, null);
 
-  const defaultAudioJitterMs = '100';
+  // moonlight-android bounds pending audio at 40 ms. 60 ms keeps a little more
+  // margin for a TV's Web Audio scheduler while staying far below the 100 ms
+  // this shipped with.
+  const defaultAudioJitterMs = '60';
   $('#jitterSlider')[0].MaterialSlider.change(defaultAudioJitterMs);
   $('#selectAudioJitter').html(defaultAudioJitterMs + ' ms');
   storeData('audioJitterMs', defaultAudioJitterMs, null);
@@ -3392,8 +3406,11 @@ function restoreDefaultsSettingsValues() {
   document.querySelector('#playHostAudioBtn').MaterialSwitch.off();
   storeData('playHostAudio', defaultPlayHostAudio, null);
 
-  const defaultVideoCodec = 'H264';
-  $('#selectCodec').text('H.264').data('value', defaultVideoCodec);
+  // HEVC by default, with H.264 announced alongside it as a fallback (see
+  // StartStream in wasm/main.cpp), so a host that cannot encode HEVC still
+  // connects. This mirrors the "auto" video format default in moonlight-android.
+  const defaultVideoCodec = 'HEVC';
+  $('#selectCodec').text('HEVC').data('value', defaultVideoCodec);
   storeData('videoCodec', defaultVideoCodec, null);
 
   const defaultHdrMode = false;
@@ -3404,19 +3421,19 @@ function restoreDefaultsSettingsValues() {
   document.querySelector('#fullRangeBtn').MaterialSwitch.off();
   storeData('fullRange', defaultFullRange, null);
 
-  // Reset default Game Mode based on Tizen platform version
-  if (parseFloat(platformVer) === 9.0) {
-    // Disable for Tizen 9.0 to avoid compatibility issues
-    const incompatibleGameMode = false;
-    document.querySelector('#gameModeBtn').MaterialSwitch.off();
-    storeData('gameMode', incompatibleGameMode, null);
-  } else if (parseFloat(platformVer) === 5.5) {
-    // Keep disabled for Tizen 5.5 due to lack of support
-  } else {
-    // Enable for other Tizen platform versions
-    const defaultGameMode = true;
-    document.querySelector('#gameModeBtn').MaterialSwitch.on();
-    storeData('gameMode', defaultGameMode, null);
+  // Game Mode defaults off on every platform version.
+  //
+  // This switch selects the EMSS ultra low latency mode, and it is the setting
+  // that freezes playback on the first frame on some models. It is also the
+  // switch that must stay off in the ForceGM build, where the panel is put into
+  // Game Mode by the widget metadata instead. Defaulting it on meant a fresh
+  // install could land on the one combination that does not work.
+  const defaultGameMode = false;
+  document.querySelector('#gameModeBtn').MaterialSwitch.off();
+  storeData('gameMode', defaultGameMode, null);
+  if (parseFloat(platformVer) === 5.5) {
+    // Tizen 5.5 has no support for it at all, so the switch is not offered
+    document.querySelector('#gameModeBtn').MaterialSwitch.disable();
   }
 
   const defaultUnlockAllFps = false;
@@ -3560,7 +3577,7 @@ function loadUserDataCb() {
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored bitrate preferences.');
   getData('bitrate', function(previousValue) {
-    $('#bitrateSlider')[0].MaterialSlider.change(previousValue.bitrate != null ? previousValue.bitrate : '10');
+    $('#bitrateSlider')[0].MaterialSlider.change(previousValue.bitrate != null ? previousValue.bitrate : '20');
     // Update the video bitrate field based on the given value
     $('#selectBitrate').html($('#bitrateSlider').val() + ' Mbps');
   });
@@ -3568,7 +3585,7 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored framePacing preferences.');
   getData('framePacing', function(previousValue) {
     if (previousValue.framePacing == null) {
-      document.querySelector('#framePacingBtn').MaterialSwitch.on(); // Set the default state
+      document.querySelector('#framePacingBtn').MaterialSwitch.off(); // Set the default state
     } else if (previousValue.framePacing == false) {
       document.querySelector('#framePacingBtn').MaterialSwitch.off();
     } else {
@@ -3603,7 +3620,7 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored optimizeGames preferences.');
   getData('optimizeGames', function(previousValue) {
     if (previousValue.optimizeGames == null) {
-      document.querySelector('#optimizeGamesBtn').MaterialSwitch.off(); // Set the default state
+      document.querySelector('#optimizeGamesBtn').MaterialSwitch.on(); // Set the default state
     } else if (previousValue.optimizeGames == false) {
       document.querySelector('#optimizeGamesBtn').MaterialSwitch.off();
     } else {
@@ -3614,7 +3631,7 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored rumbleFeedback preferences.');
   getData('rumbleFeedback', function(previousValue) {
     if (previousValue.rumbleFeedback == null) {
-      document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.off(); // Set the default state
+      document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.on(); // Set the default state
     } else if (previousValue.rumbleFeedback == false) {
       document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.off();
     } else {
@@ -3625,7 +3642,7 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored mouseEmulation preferences.');
   getData('mouseEmulation', function(previousValue) {
     if (previousValue.mouseEmulation == null) {
-      document.querySelector('#mouseEmulationBtn').MaterialSwitch.off(); // Set the default state
+      document.querySelector('#mouseEmulationBtn').MaterialSwitch.on(); // Set the default state
     } else if (previousValue.mouseEmulation == false) {
       document.querySelector('#mouseEmulationBtn').MaterialSwitch.off();
     } else {
@@ -3669,7 +3686,7 @@ function loadUserDataCb() {
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioJitterMs preferences.');
   getData('audioJitterMs', function(previousValue) {
-    var value = (previousValue.audioJitterMs != null) ? String(previousValue.audioJitterMs) : '100';
+    var value = (previousValue.audioJitterMs != null) ? String(previousValue.audioJitterMs) : '60';
     $('#jitterSlider')[0].MaterialSlider.change(value);
     $('#selectAudioJitter').html(value + ' ms');
   });
@@ -3722,13 +3739,11 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored gameMode preferences.');
   getData('gameMode', function(previousValue) {
     if (previousValue.gameMode == null) {
-      if (parseFloat(platformVer) === 9.0) {
-        document.querySelector('#gameModeBtn').MaterialSwitch.off(); // Disable for Tizen 9.0 to avoid compatibility issues
-      } else if (parseFloat(platformVer) === 5.5) {
-        document.querySelector('#gameModeBtn').MaterialSwitch.off(); // Disable for Tizen 5.5 due to lack of support
-        document.querySelector('#gameModeBtn').MaterialSwitch.disable(); // Disable the switch to prevent user interaction
-      } else {
-        document.querySelector('#gameModeBtn').MaterialSwitch.on(); // Set the default state
+      // Off on every version: this is the switch that freezes playback on some
+      // models, and it must stay off in the ForceGM build
+      document.querySelector('#gameModeBtn').MaterialSwitch.off();
+      if (parseFloat(platformVer) === 5.5) {
+        document.querySelector('#gameModeBtn').MaterialSwitch.disable(); // No support at all on 5.5
       }
     } else if (previousValue.gameMode == false) {
       document.querySelector('#gameModeBtn').MaterialSwitch.off();

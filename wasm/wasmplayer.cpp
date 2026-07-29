@@ -45,6 +45,17 @@ static constexpr TimeStamp kPacingSleepFloor = 1ms;
 // reference could stall the decoder thread indefinitely.
 static constexpr int kPacingMaxWaitFrames = 2;
 
+// How far ahead of its presentation time a frame is handed over, in frame
+// durations.
+//
+// Releasing a frame exactly when it is due leaves the pipeline with nothing in
+// hand, so any hesitation upstream lands directly on the screen. The other
+// clients keep a shallow buffer past the decoder for precisely this reason:
+// moonlight-android holds its output queue at two frames and presents one per
+// display refresh. One frame of lead is the same idea expressed where this
+// pipeline allows it, and it costs one frame of latency.
+static constexpr int kPacingLeadFrames = 1;
+
 // Per-second correction applied to the pacing reference. It is a small
 // proportional step rather than an instant jump: assigning the whole measured
 // drift at once releases every frame being held in a single burst, which is
@@ -75,6 +86,14 @@ static constexpr double kPtsMaxStepAdjustS = 0.000050;
 // steered. No rate mismatch produces a quarter second of drift; a discontinuity
 // that slipped past the frame number check does.
 static constexpr double kPtsResyncThresholdS = 0.25;
+
+// Stages of the H.264 SPS fixup, so a decoder that dislikes one of them can be
+// bisected by lowering this rather than by rebuilding with parts commented out.
+//   0 = off, the bitstream is passed through untouched
+//   1 = declare the bitstream restrictions: no reordering, one buffered frame
+//   2 = also cap the reference frame count at one
+//   3 = also lower level_idc to the smallest level that fits the resolution
+static constexpr int kSpsFixupStage = 3;
 
 // Minimum interval between IDR requests triggered by append failures. A
 // keyframe costs several times a P-frame, so one request per rejected packet
@@ -111,6 +130,9 @@ static int s_ptsFrameNumberRef = 0;
 // One-shot log guard for the pipeline clock, so its absence is visible in the
 // log by omission rather than its presence being repeated every update.
 static bool s_loggedPipelineClock = false;
+
+// One-shot log guard for the SPS rewrite, which happens once per IDR frame.
+static bool s_loggedSpsFixup = false;
 
 // Cadence instrumentation. The interval between successive appends is the one
 // thing we can measure without the platform's cooperation, and its spread is
@@ -428,6 +450,7 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
   // nothing to say about this one.
   s_hasLastAppendTime = false;
   s_loggedPipelineClock = false;
+  s_loggedSpsFixup = false;
   g_Instance->m_PipelinePositionUs.store(kNoPipelinePosition, std::memory_order_release);
   g_Instance->m_PipelinePositionAtMs.store(0, std::memory_order_relaxed);
 
@@ -466,6 +489,102 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
   }
 
   return DR_OK;
+}
+
+// Rewrites an H.264 SPS so the decoder provisions for a low delay stream.
+//
+// The stream is always low delay: the host emits I and P frames only, never
+// reorders, and keeps a single reference. The SPS it sends does not say so. A
+// hardware decoder reading an SPS with no bitstream restrictions does what the
+// standard requires and assumes reordering is possible, so it sizes its picture
+// buffer from level_idc and holds several frames before emitting the first. That
+// is latency, and worse, it is latency that changes size when the network
+// wobbles, which is what a viewer perceives as uneven motion.
+//
+// moonlight-android performs the same rewrite on every device since Android 8
+// (MediaCodecDecoderRenderer.java), with the note that it "at worst seems to do
+// nothing and at best fixes issues with video lag, hangs, and crashes".
+//
+// h264bitstream handles the emulation prevention bytes in both directions, which
+// is the part that is genuinely awkward to do by hand. Returns the number of
+// bytes written to `out`, or 0 to mean "use the original".
+static unsigned int FixupSps(const uint8_t* nalu, unsigned int naluLen,
+                             uint8_t* out, unsigned int outCapacity) {
+  if (kSpsFixupStage <= 0 || naluLen < 5) {
+    return 0;
+  }
+
+  // Locate the Annex B start code so the NAL header can be handed to the parser
+  // at the right offset. Both three and four byte forms occur.
+  unsigned int startLen;
+  if (nalu[0] == 0x00 && nalu[1] == 0x00 && nalu[2] == 0x01) {
+    startLen = 3;
+  } else if (naluLen >= 6 && nalu[0] == 0x00 && nalu[1] == 0x00 &&
+             nalu[2] == 0x00 && nalu[3] == 0x01) {
+    startLen = 4;
+  } else {
+    return 0;
+  }
+
+  h264_stream_t* h = h264_new();
+  if (h == nullptr) {
+    return 0;
+  }
+
+  unsigned int written = 0;
+  do {
+    if (read_nal_unit(h, const_cast<uint8_t*>(nalu) + startLen,
+                      (int)(naluLen - startLen)) < 0) {
+      break;
+    }
+    if (h->nal->nal_unit_type != 7 || h->sps == nullptr) {
+      break;  // not an SPS after all
+    }
+
+    sps_t* sps = h->sps;
+
+    // Stage 1. The VUI is where the restrictions live, so it has to exist.
+    sps->vui_parameters_present_flag = 1;
+    sps->vui.bitstream_restriction_flag = 1;
+    sps->vui.num_reorder_frames = 0;
+    sps->vui.motion_vectors_over_pic_boundaries_flag = 1;
+    sps->vui.max_bytes_per_pic_denom = 2;
+    sps->vui.max_bits_per_mb_denom = 1;
+    sps->vui.log2_max_mv_length_horizontal = 16;
+    sps->vui.log2_max_mv_length_vertical = 16;
+
+    // Stage 2. One reference frame is all the stream uses. Some decoders reject
+    // a max_dec_frame_buffering below num_ref_frames, so the two move together.
+    if (kSpsFixupStage >= 2) {
+      sps->num_ref_frames = 1;
+    }
+    sps->vui.max_dec_frame_buffering = sps->num_ref_frames;
+
+    // Stage 3. Decoders that size their buffer from the declared level benefit
+    // from the smallest level that still fits. The thresholds match the ones in
+    // moonlight-android.
+    if (kSpsFixupStage >= 3) {
+      if (s_Width <= 720 && s_Height <= 480 && s_Framerate <= 60) {
+        sps->level_idc = 31;
+      } else if (s_Width <= 1280 && s_Height <= 720 && s_Framerate <= 60) {
+        sps->level_idc = 32;
+      } else if (s_Width <= 1920 && s_Height <= 1080 && s_Framerate <= 60) {
+        sps->level_idc = 42;
+      }
+      // Above 1080p, or above 60 Hz, leave the level as the host sent it
+    }
+
+    int rc = write_nal_unit(h, out + startLen, (int)(outCapacity - startLen));
+    if (rc <= 0) {
+      break;
+    }
+
+    memcpy(out, nalu, startLen);
+    written = startLen + (unsigned int)rc;
+  } while (false);
+
+  h264_free(h);
+  return written;
 }
 
 // Derives the presentation timestamp for the frame about to be submitted.
@@ -572,11 +691,58 @@ static TimeStamp NextPacketPts(PDECODE_UNIT decodeUnit, TimeStamp previousPts) {
 // 100% CPU for most of every frame interval. On a TV SoC that starves the audio
 // receive thread and the main thread, and the resulting delay backs up the
 // 15-entry decode unit queue until it is flushed wholesale.
+//
+// Two references are possible. The pipeline's own reported position is exact and
+// is used whenever the platform provides it. Failing that, elapsed local time
+// since the first append plus an estimated offset is the best available guess,
+// which is what every version up to now used unconditionally.
 static void PaceFrame(TimeStamp framePts) {
+  TimeStamp lead = s_frameDuration * kPacingLeadFrames;
+
+  // Preferred path: wait until the pipeline has actually reached the point where
+  // this frame is one lead away from being needed. No estimator, no drift.
+  int64_t positionUs = g_Instance->m_PipelinePositionUs.load(std::memory_order_acquire);
+  if (positionUs != MoonlightInstance::kNoPipelinePosition) {
+    uint64_t reportedAtMs = g_Instance->m_PipelinePositionAtMs.load(std::memory_order_relaxed);
+    double targetMs = std::chrono::duration<double, std::milli>(framePts - lead).count();
+
+    // Bound the wait the same way the fallback does, so a stalled or stale
+    // position report cannot park the decoder thread indefinitely.
+    auto waitStart = std::chrono::steady_clock::now();
+    auto maxWait = std::chrono::duration_cast<std::chrono::microseconds>(
+      s_frameDuration * kPacingMaxWaitFrames);
+
+    while (true) {
+      uint64_t nowMs = LiGetMillis();
+      double sinceReportMs = (nowMs >= reportedAtMs) ? (double)(nowMs - reportedAtMs) : 0.0;
+      double positionMs = (positionUs / 1000.0) + sinceReportMs;
+
+      double remainingMs = targetMs - positionMs;
+      if (remainingMs <= 0.0) {
+        return;
+      }
+      if (std::chrono::steady_clock::now() - waitStart >= maxWait) {
+        return;
+      }
+
+      if (remainingMs > 1.0) {
+        std::unique_lock<std::mutex> lock(s_PacerMutex);
+        s_PacerCv.wait_for(lock, std::chrono::microseconds((int64_t)(remainingMs * 1000.0) - 1000));
+      } else {
+        std::this_thread::yield();
+      }
+
+      // Pick up any newer report published while we waited
+      positionUs = g_Instance->m_PipelinePositionUs.load(std::memory_order_acquire);
+      reportedAtMs = g_Instance->m_PipelinePositionAtMs.load(std::memory_order_relaxed);
+    }
+  }
+
+  // Fallback: local clock against the estimated offset.
   auto now = std::chrono::steady_clock::now();
   TimeStamp fromStart = now - s_firstAppend;
 
-  TimeStamp deadline = framePts + s_ptsDiff - kFrameTimeMargin;
+  TimeStamp deadline = framePts + s_ptsDiff - lead - kFrameTimeMargin;
   if (fromStart >= deadline) {
     return;
   }
@@ -862,10 +1028,35 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
 
   // Iterate through the buffer list of video data entries
   while (entry != NULL) {
-    // Copy the data of the current entry to the decode buffer at the specified offset
-    memcpy(&s_DecodeBuffer[offset], entry->data, entry->length);
-    // Update the offset based on the length of the copied data
-    offset += entry->length;
+    bool copied = false;
+
+    // The SPS of an H.264 IDR frame is rewritten on the way through, so the
+    // decoder is told the stream is low delay. See FixupSps(). Everything else,
+    // including every HEVC parameter set, is copied verbatim.
+    if (entry->bufferType == BUFFER_TYPE_SPS && (s_VideoFormat & VIDEO_FORMAT_H264)) {
+      unsigned int room = (unsigned int)(s_DecodeBuffer.size() - offset);
+      unsigned int fixedLen = FixupSps(
+        reinterpret_cast<const uint8_t*>(entry->data), (unsigned int)entry->length,
+        &s_DecodeBuffer[offset], room
+      );
+      if (fixedLen > 0) {
+        offset += fixedLen;
+        copied = true;
+        if (!s_loggedSpsFixup) {
+          s_loggedSpsFixup = true;
+          ClLogMessage("H.264 SPS rewritten for low delay decoding (stage %d)\n",
+                       kSpsFixupStage);
+        }
+      }
+    }
+
+    if (!copied) {
+      // Copy the data of the current entry to the decode buffer at the specified offset
+      memcpy(&s_DecodeBuffer[offset], entry->data, entry->length);
+      // Update the offset based on the length of the copied data
+      offset += entry->length;
+    }
+
     // Move to the next entry in the buffer list
     entry = entry->next;
   }
