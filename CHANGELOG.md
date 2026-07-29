@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## v3.2.1
+
+Validated on a Samsung DU7700 streaming at 4K: no complaints about picture or audio.
+This is the first release since v2.0.0 to be confirmed on hardware, and everything
+between the two was reasoned about rather than measured.
+
+### Fixed
+- Fixed the stall detector being able to fire on a healthy stream. It required the reported position to be unchanged for a fixed 750 ms, but the platform's reporting interval is neither documented nor ours to choose: a platform that reports once a second leaves the position legitimately unchanged for that long, and the detector would then flush the pipeline on every reporting interval, turning the protection into the fault. The threshold now calibrates itself against the largest gap observed while presentation was known to be advancing, and only a gap several times longer than anything healthy counts
+
 ## v3.2.0
 
 ### Fixed

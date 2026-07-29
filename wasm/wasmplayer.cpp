@@ -123,7 +123,17 @@ static constexpr unsigned int kVideoAppendMaxAttempts =
 // The detector only arms once the platform has proved that it reports position
 // at all and that the position was advancing, because those two facts are what
 // make a lack of movement meaningful rather than merely unobserved.
-static constexpr uint32_t kStallProgressTimeoutMs = 750;
+//
+// The threshold cannot be a fixed number, because the reporting interval is not
+// documented and is not ours to choose. A platform that reports once a second
+// leaves the position legitimately unchanged for a second at a time, and a fixed
+// 750 ms threshold would then declare a stall on every reporting interval and
+// flush the pipeline forever: the protection would become the fault. So the
+// threshold calibrates itself against the largest gap actually observed while
+// presentation was known to be advancing, and only a gap several times longer
+// than anything healthy counts.
+static constexpr uint32_t kStallFloorMs = 1500;
+static constexpr uint32_t kStallHealthyGapMultiple = 4;
 static constexpr uint32_t kStallMinAppendsWithoutProgress = 30;
 static constexpr uint32_t kStallRecoveryCooldownMs = 3000;
 
@@ -937,6 +947,9 @@ static uint32_t s_lastPositionChangeMs = 0;
 static uint32_t s_appendsSinceProgress = 0;
 static bool s_positionEverAdvanced = false;
 static uint32_t s_lastRecoveryMs = 0;
+// Largest interval between two position changes seen while the position was
+// advancing. This is the platform telling us how often it intends to report.
+static uint32_t s_maxHealthyGapMs = 0;
 
 // Recovers a frozen pipeline, off the submission path.
 //
@@ -1001,6 +1014,11 @@ void MoonlightInstance::NotePresentationProgress(TimeStamp framePts) {
 
   if (positionUs != s_lastSeenPositionUs) {
     if (s_lastSeenPositionUs != kNoPipelinePosition && positionUs > s_lastSeenPositionUs) {
+      // This gap was healthy by definition: it ended in the position advancing.
+      const uint32_t gapMs = nowMs - s_lastPositionChangeMs;
+      if (s_positionEverAdvanced && gapMs > s_maxHealthyGapMs) {
+        s_maxHealthyGapMs = gapMs;
+      }
       s_positionEverAdvanced = true;
     }
     s_lastSeenPositionUs = positionUs;
@@ -1019,7 +1037,18 @@ void MoonlightInstance::NotePresentationProgress(TimeStamp framePts) {
   if (s_appendsSinceProgress < kStallMinAppendsWithoutProgress) {
     return;
   }
-  if (nowMs - s_lastPositionChangeMs < kStallProgressTimeoutMs) {
+
+  // Until a healthy gap has been measured, there is nothing to compare against
+  // and the floor alone would be a guess about the platform's reporting rate.
+  if (s_maxHealthyGapMs == 0) {
+    return;
+  }
+
+  uint32_t thresholdMs = s_maxHealthyGapMs * kStallHealthyGapMultiple;
+  if (thresholdMs < kStallFloorMs) {
+    thresholdMs = kStallFloorMs;
+  }
+  if (nowMs - s_lastPositionChangeMs < thresholdMs) {
     return;
   }
   if (nowMs - s_lastRecoveryMs < kStallRecoveryCooldownMs) {
@@ -1043,6 +1072,7 @@ static void StartRecoveryThread() {
   s_appendsSinceProgress = 0;
   s_positionEverAdvanced = false;
   s_lastRecoveryMs = 0;
+  s_maxHealthyGapMs = 0;
   s_recoveryRequested.store(false, std::memory_order_relaxed);
   s_recoveryThreadRunning.store(true, std::memory_order_release);
   s_recoveryThread = std::thread(RecoveryLoop);
