@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## v3.2.0
+
+### Fixed
+- Fixed *Restore Defaults* leaving three switches showing the opposite of what it saved. *Optimize game settings*, *Rumble feedback* and *Mouse emulation* were stored as on while their switches were set to off, so the screen disagreed with the configuration until the next start
+- Fixed audio being discarded whenever the scheduled buffer ran past its target. A network burst pushed the buffer deep and every frame beyond the target was thrown away, which is an audible discontinuity. The buffer is now drained by consuming slightly faster than it arrives, and a frame is only discarded when the backlog is large enough that draining it would hold latency high for many seconds
+- Fixed a decoded audio frame being playable after the feeder had reused its slot. The pool was deep enough to make it unlikely and nothing detected it when it happened; each slot now carries a version, the scheduler re-reads it after copying, and a frame spliced from two different moments is counted and dropped instead of played
+
+### Added
+- Audio and video are now servoed against each other. The scheduler compares where the pipeline reports it is against how much audio has actually been played, calibrating the fixed offset between the two clocks once per epoch, and corrects the difference through playback rate. Without the epoch calibration the comparison is meaningless: the two timelines have no reason to share an origin
+- Presentation stall detection. If the platform keeps accepting packets while the reported position stops advancing, the pipeline is flushed and a keyframe requested, from a worker rather than from the submission path. The detector stays disarmed unless the platform has proved it reports position and that the position was advancing
+- The performance overlay reports the share of frames submitted without assembly, hand-over retries and pipeline recoveries
+
+### Changed
+- A decode unit that arrives contiguous is handed to the platform where it lies, with no assembly copy. That is every frame except a keyframe, which needs the copy anyway because its H.264 SPS is rewritten in transit
+- A refused packet is retried three times with a short backoff before it costs a frame or a keyframe request. The worst case adds under 2 ms, well inside a frame interval
+- Each stream stamps a generation onto its audio, so a frame published while the previous stream was being torn down cannot be scheduled against the new stream's clock
+- The audio jitter buffer default is 50 ms. It is now the setpoint a rate servo holds rather than a threshold above which audio is dropped, so it no longer has to carry slack for bursts
+
 ## v3.1.1
 
 ### Fixed

@@ -29,8 +29,10 @@
 //
 // The scheduler on the JS side lives in platform/audio.js.
 
-// Default depth of the jitter buffer when the user has not chosen one
-static constexpr int kDefaultJitterMs = 60;
+// Default depth of the jitter buffer when the user has not chosen one. This is
+// the setpoint the scheduler's rate servo holds, not a threshold above which
+// audio is thrown away; see platform/audio.js.
+static constexpr int kDefaultJitterMs = 50;
 
 // Minimum interval between audio problem log lines. This code runs on the audio
 // path, and logging crosses into JS; an unthrottled line per lost packet is
@@ -82,10 +84,33 @@ static std::condition_variable s_pktCv;
 // consumes a slot before the feeder wraps around to it again: kNumSlots frames
 // is the protection window, so 32 slots at 10 ms is 320 ms of main thread stall
 // before a slot could be overwritten while still unread.
-static constexpr int kNumSlots = 32;
+// A deep pool alone is not a correctness argument, only a probability one, so
+// each slot also carries a version. The feeder makes the version odd before
+// writing and even after, and hands the even value to the scheduler along with
+// the pointer. The scheduler copies the samples and then re-reads the version:
+// if it differs from the one it was given, the feeder wrapped around and
+// overwrote the slot mid-copy, and the frame is discarded rather than played as
+// a splice of two different moments. That is a seqlock, and it turns a race that
+// used to be silently audible into a counted event.
+//
+// 128 slots at 10 ms is 1.28 s of main thread stall before a slot can be reused,
+// which makes the seqlock a backstop rather than a routine occurrence.
+static constexpr int kNumSlots = 128;
 static constexpr int kMaxFrameElems = 4096; // 480 samples * 8 channels = 3840
 static opus_int16 s_frameSlots[kNumSlots][kMaxFrameElems];
+alignas(4) static std::atomic<uint32_t> s_slotVersions[kNumSlots];
 static int s_slotIdx = 0;
+
+// Incremented for every stream. The scheduler stamps the generation it was
+// configured with onto everything it does and ignores frames from any other, so
+// a frame published by the previous stream's feeder while teardown was still in
+// flight cannot be scheduled against the new stream's clock.
+static std::atomic<uint32_t> s_audioGeneration{0};
+
+// Handed to JS once per stream so it can perform the seqlock re-read.
+extern "C" EMSCRIPTEN_KEEPALIVE void* audioSlotVersionsAddress() {
+  return &s_slotVersions[0];
+}
 
 // ─── Feeder thread ───────────────────────────────────────────────────────────
 static std::thread s_feederThread;
@@ -109,7 +134,14 @@ static void FeederLoop() {
         --s_pktCount;
       } // release the lock before decoding, Opus is the expensive part
 
-      opus_int16* dst = s_frameSlots[s_slotIdx % kNumSlots];
+      const int slot = s_slotIdx % kNumSlots;
+      opus_int16* dst = s_frameSlots[slot];
+
+      // Open the seqlock: an odd version means "being written". What the reader
+      // actually relies on is the comparison against the value published below,
+      // which detects any rewrite regardless of parity; the odd marker makes a
+      // read caught mid-write fail that comparison too.
+      s_slotVersions[slot].fetch_add(1, std::memory_order_acq_rel);
 
       // A queued length of zero is the marker for a packet the network lost.
       // Passing a null pointer to the decoder invokes Opus packet loss
@@ -131,9 +163,16 @@ static void FeederLoop() {
       }
 
       if (decodeLen <= 0) {
+        // Close the seqlock even on failure, so the slot does not stay marked as
+        // being written forever.
+        s_slotVersions[slot].fetch_add(1, std::memory_order_release);
         LogAudioThrottled("Audio: Opus decode failed");
         continue;
       }
+
+      // Close the seqlock. The value handed to the scheduler is this even one.
+      const uint32_t versionAfter =
+        s_slotVersions[slot].fetch_add(1, std::memory_order_acq_rel) + 1;
 
       // Hand the slot address and format to the main thread scheduler. The JS
       // side reads HEAP16 at this address; shared memory makes that valid
@@ -142,11 +181,12 @@ static void FeederLoop() {
       int spf = static_cast<int>(s_samplesPerFrame);
       int channels = static_cast<int>(s_channelCount);
       int rate = s_sampleRate;
+      int generation = static_cast<int>(s_audioGeneration.load(std::memory_order_relaxed));
       MAIN_THREAD_ASYNC_EM_ASM({
         if (typeof _audReceiveFrame === 'function') {
-          _audReceiveFrame($0, $1, $2, $3);
+          _audReceiveFrame($0, $1, $2, $3, $4, $5, $6);
         }
-      }, slotPtr, spf, channels, rate);
+      }, slotPtr, spf, channels, rate, slot, (int)versionAfter, generation);
       s_slotIdx++;
     }
 
@@ -197,6 +237,14 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   s_slotIdx = 0;
   s_lastAudioLogMs = 0;
 
+  // Even versions everywhere: no slot is being written. Starting from zero each
+  // stream is safe because the generation below is what separates streams.
+  for (int i = 0; i < kNumSlots; i++) {
+    s_slotVersions[i].store(0, std::memory_order_relaxed);
+  }
+  const uint32_t generation =
+    s_audioGeneration.fetch_add(1, std::memory_order_acq_rel) + 1;
+
   int rc;
   s_OpusDecoder = opus_multistream_decoder_create(
     opusConfig->sampleRate, opusConfig->channelCount,
@@ -209,10 +257,14 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
   }
   g_Instance->m_OpusDecoder = s_OpusDecoder;
 
-  // Publish the target depth to the JS scheduler
+  // Configure the scheduler for this stream: target depth, the address it needs
+  // for the seqlock re-read, and the generation that stamps everything.
   MAIN_THREAD_ASYNC_EM_ASM({
-    window._mlAudioTargetMs = $0;
-  }, targetJitterMs);
+    if (typeof configureAudioScheduler === 'function') {
+      configureAudioScheduler($0, $1, $2);
+    }
+  }, targetJitterMs, (int)reinterpret_cast<size_t>(&s_slotVersions[0]),
+     (int)generation);
 
   s_feederRunning.store(true, std::memory_order_release);
   s_feederThread = std::thread(FeederLoop);
@@ -221,6 +273,15 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
 }
 
 void MoonlightInstance::AudDecCleanup(void) {
+  // Retire the generation before stopping the feeder, so anything still in
+  // flight towards the main thread is recognised as stale on arrival.
+  const uint32_t retiring = s_audioGeneration.load(std::memory_order_relaxed);
+  MAIN_THREAD_ASYNC_EM_ASM({
+    if (typeof retireAudioGeneration === 'function') {
+      retireAudioGeneration($0);
+    }
+  }, (int)retiring);
+
   if (s_feederThread.joinable()) {
     s_feederRunning.store(false, std::memory_order_release);
     s_pktCv.notify_all();

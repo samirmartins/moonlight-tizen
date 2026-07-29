@@ -9,6 +9,8 @@
 #include <mutex>
 #include <thread>
 
+#include <emscripten.h>
+
 #include <h264_stream.h>
 
 #include <assert.h>
@@ -100,6 +102,31 @@ static constexpr int kSpsFixupStage = 3;
 // turns a congested link into a worse one.
 static constexpr uint32_t kIdrRequestIntervalMs = 500;
 
+// Backoffs between attempts to hand a packet to the platform. The first attempt
+// is immediate, so the total added delay in the worst case is 1.75 ms.
+static constexpr std::chrono::microseconds kVideoAppendRetryBackoffs[] = {
+  std::chrono::microseconds(250),
+  std::chrono::microseconds(500),
+  std::chrono::microseconds(1000),
+};
+static constexpr unsigned int kVideoAppendMaxAttempts =
+  (unsigned int)(sizeof(kVideoAppendRetryBackoffs) /
+                 sizeof(kVideoAppendRetryBackoffs[0])) + 1;
+
+// ─── Presentation stall detection ────────────────────────────────────────────
+//
+// The failure this catches has a specific signature: the platform keeps
+// accepting packets, so nothing upstream reports a problem, while the picture
+// and the reported playback position both stop advancing. Everything looks
+// healthy from the submission side and the screen is frozen.
+//
+// The detector only arms once the platform has proved that it reports position
+// at all and that the position was advancing, because those two facts are what
+// make a lack of movement meaningful rather than merely unobserved.
+static constexpr uint32_t kStallProgressTimeoutMs = 750;
+static constexpr uint32_t kStallMinAppendsWithoutProgress = 30;
+static constexpr uint32_t kStallRecoveryCooldownMs = 3000;
+
 static uint32_t s_VideoFormat = 0;
 static uint32_t s_Width = 0;
 static uint32_t s_Height = 0;
@@ -168,6 +195,10 @@ static int m_LastFrameNumber = 0;
 
 static std::string s_StatString = "";
 
+// Defined below, next to the recovery worker they control.
+static void StartRecoveryThread();
+static void StopRecoveryThread();
+
 static VIDEO_STATS m_ActiveWndVideoStats;
 static VIDEO_STATS m_LastWndVideoStats;
 static VIDEO_STATS m_GlobalVideoStats;
@@ -219,6 +250,17 @@ void MoonlightInstance::SourceListener::OnPlaybackPositionChanged(
   // whole reporting interval.
   m_Instance->m_PipelinePositionAtMs.store(LiGetMillis(), std::memory_order_relaxed);
   m_Instance->m_PipelinePositionUs.store(positionUs, std::memory_order_release);
+
+  // The audio scheduler needs a video clock to servo against, and this is a
+  // better one than the media element's currentTime: Samsung documents it as the
+  // preferred source of time updates. Published asynchronously so this callback
+  // never waits, and with the position in milliseconds because that is the
+  // precision the drift loop works at.
+  MAIN_THREAD_ASYNC_EM_ASM({
+    if (typeof publishPipelinePosition === 'function') {
+      publishPipelinePosition($0);
+    }
+  }, (int)(positionUs / 1000));
 
   if (!s_loggedPipelineClock) {
     s_loggedPipelineClock = true;
@@ -459,7 +501,7 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
 
   // Preallocate space for the performance stats string. The cadence block added
   // several lines, and FormatVideoStats() asserts rather than truncating.
-  s_StatString.resize(2000);
+  s_StatString.resize(2400);
 
   // Drop any stats message left pending from a previous stream
   s_PendingStatMsg.clear();
@@ -479,12 +521,19 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
   // Reset global video statistics for new decoding session
   memset(&m_GlobalVideoStats, 0, sizeof(m_GlobalVideoStats));
 
+  // The recovery worker has to exist before the first frame can be appended,
+  // because the detector runs on the append path.
+  StartRecoveryThread();
+
   // Ensure that StartupVidDecSetup is called every time when VidDecSetup is invoked to reinitialize the media pipeline
   int initVidDec = StartupVidDecSetup(videoFormat, width, height, redrawRate, context, drFlags);
 
   // Check and handle errors from video decoding configuration and propagating failures
   if (initVidDec != 0) {
     ClLogMessage("Initialization of video decoding configuration failed: %d\n", initVidDec);
+    // Cleanup is not guaranteed to run for a setup that never succeeded, so the
+    // worker started above has to be retired here.
+    StopRecoveryThread();
     return initVidDec;
   }
 
@@ -874,7 +923,143 @@ void MoonlightInstance::RecordPipelineLead(VIDEO_STATS& stats, TimeStamp framePt
   }
 }
 
+// ─── Presentation stall detection and recovery ───────────────────────────────
+
+static std::atomic<bool> s_recoveryThreadRunning{false};
+static std::atomic<bool> s_recoveryRequested{false};
+static std::thread s_recoveryThread;
+static std::mutex s_recoveryMutex;
+static std::condition_variable s_recoveryCv;
+
+// Detector state, touched only by the decoder thread.
+static int64_t s_lastSeenPositionUs = MoonlightInstance::kNoPipelinePosition;
+static uint32_t s_lastPositionChangeMs = 0;
+static uint32_t s_appendsSinceProgress = 0;
+static bool s_positionEverAdvanced = false;
+static uint32_t s_lastRecoveryMs = 0;
+
+// Recovers a frozen pipeline, off the submission path.
+//
+// Flushing and re-priming are done here rather than inline because they act on
+// the source while the decoder thread is the one that feeds it: doing both from
+// the same thread invites the flush to wait on work that only that thread could
+// perform. Requesting the keyframe last means the fresh picture arrives into an
+// already emptied pipeline.
+static void RecoveryLoop() {
+  while (s_recoveryThreadRunning.load(std::memory_order_relaxed)) {
+    {
+      std::unique_lock<std::mutex> lock(s_recoveryMutex);
+      s_recoveryCv.wait_for(lock, std::chrono::milliseconds(250), [] {
+        return s_recoveryRequested.load(std::memory_order_relaxed) ||
+               !s_recoveryThreadRunning.load(std::memory_order_relaxed);
+      });
+    }
+    if (!s_recoveryThreadRunning.load(std::memory_order_relaxed)) {
+      break;
+    }
+    if (!s_recoveryRequested.exchange(false, std::memory_order_acq_rel)) {
+      continue;
+    }
+
+    MoonlightInstance::PerformPresentationRecovery();
+  }
+}
+
+// Flushes the pipeline and asks for a fresh keyframe. Runs on the recovery
+// worker, never on the submission path.
+void MoonlightInstance::PerformPresentationRecovery() {
+  if (!g_Instance || !g_Instance->m_Source || !g_Instance->m_VideoStarted.load()) {
+    return;
+  }
+
+  ClLogMessage("Presentation stalled while packets were still being accepted; "
+               "flushing the pipeline and requesting a keyframe\n");
+
+  // A failed flush is not fatal. The keyframe request below is still worth
+  // making, and is on its own sometimes enough to restart presentation.
+  if (!g_Instance->m_Source->Flush()) {
+    ClLogMessage("Pipeline flush was refused\n");
+  }
+
+  LiRequestIdrFrame();
+}
+
+// Called after every accepted append. Cheap by construction: two atomic loads
+// and some integer arithmetic on the thread that is already here.
+void MoonlightInstance::NotePresentationProgress(TimeStamp framePts) {
+  (void)framePts;
+
+  const int64_t positionUs =
+    g_Instance->m_PipelinePositionUs.load(std::memory_order_acquire);
+  const uint32_t nowMs = LiGetMillis();
+
+  if (positionUs == kNoPipelinePosition) {
+    // The platform does not report position on this model, so a stall is not
+    // observable and the detector stays disarmed for the whole session.
+    return;
+  }
+
+  if (positionUs != s_lastSeenPositionUs) {
+    if (s_lastSeenPositionUs != kNoPipelinePosition && positionUs > s_lastSeenPositionUs) {
+      s_positionEverAdvanced = true;
+    }
+    s_lastSeenPositionUs = positionUs;
+    s_lastPositionChangeMs = nowMs;
+    s_appendsSinceProgress = 0;
+    return;
+  }
+
+  s_appendsSinceProgress++;
+
+  if (!s_positionEverAdvanced) {
+    // Still warming up: the position has never moved, so there is no baseline
+    // that says it should be moving now.
+    return;
+  }
+  if (s_appendsSinceProgress < kStallMinAppendsWithoutProgress) {
+    return;
+  }
+  if (nowMs - s_lastPositionChangeMs < kStallProgressTimeoutMs) {
+    return;
+  }
+  if (nowMs - s_lastRecoveryMs < kStallRecoveryCooldownMs) {
+    return;
+  }
+
+  s_lastRecoveryMs = nowMs;
+  s_appendsSinceProgress = 0;
+  m_ActiveWndVideoStats.presentationRecoveries++;
+
+  s_recoveryRequested.store(true, std::memory_order_release);
+  s_recoveryCv.notify_one();
+}
+
+static void StartRecoveryThread() {
+  if (s_recoveryThread.joinable()) {
+    return;
+  }
+  s_lastSeenPositionUs = MoonlightInstance::kNoPipelinePosition;
+  s_lastPositionChangeMs = LiGetMillis();
+  s_appendsSinceProgress = 0;
+  s_positionEverAdvanced = false;
+  s_lastRecoveryMs = 0;
+  s_recoveryRequested.store(false, std::memory_order_relaxed);
+  s_recoveryThreadRunning.store(true, std::memory_order_release);
+  s_recoveryThread = std::thread(RecoveryLoop);
+}
+
+static void StopRecoveryThread() {
+  if (!s_recoveryThread.joinable()) {
+    return;
+  }
+  s_recoveryThreadRunning.store(false, std::memory_order_release);
+  s_recoveryCv.notify_all();
+  s_recoveryThread.join();
+}
+
 void MoonlightInstance::VidDecCleanup(void) {
+  StopRecoveryThread();
+
   // Clear the decode buffer
   s_DecodeBuffer.clear();
 
@@ -1000,65 +1185,80 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   // overload is strictly better than silently corrupting the reference chain.
   // Anything below that genuinely cannot proceed must return DR_NEED_IDR.
 
-  // Declare variables for entry data, offset, and total length
-  PLENTRY entry;
+  // Assemble the packet.
+  //
+  // A decode unit that arrived as a single contiguous entry needs no assembly at
+  // all: the buffer belongs to the decoder thread until AppendPacket returns, so
+  // the platform can read it where it lies. That is every P-frame, which is all
+  // but one frame in sixty. Only an IDR arrives split into parameter sets and
+  // picture data, and only that path pays for a copy, which it needs anyway
+  // because the H.264 SPS is rewritten in transit.
+  PLENTRY entry = decodeUnit->bufferList;
   unsigned int offset;
-  unsigned int totalLength;
+  const unsigned char* packetData;
 
-  // Build one packet from multiple data chunks
-  totalLength = decodeUnit->fullLength;
+  const bool needsSpsFixup = (decodeUnit->frameType == FRAME_TYPE_IDR) &&
+                             (s_VideoFormat & VIDEO_FORMAT_H264);
 
-  // Check if the frame type from the decoding unit is IDR frame
-  if (decodeUnit->frameType == FRAME_TYPE_IDR) {
-    // Add some extra space in case we need to do an SPS fixup
-    totalLength += MAX_SPS_EXTRA_SIZE;
-  }
+  if (!needsSpsFixup && entry != NULL && entry->next == NULL &&
+      entry->length == decodeUnit->fullLength) {
+    packetData = reinterpret_cast<const unsigned char*>(entry->data);
+    offset = (unsigned int)decodeUnit->fullLength;
+    m_ActiveWndVideoStats.zeroCopyFrames++;
+  } else {
+    unsigned int totalLength = decodeUnit->fullLength;
 
-  // Ensure the decode buffer is large enough to hold the full packet
-  if (totalLength > s_DecodeBuffer.size()) {
-    // Resize decode buffer to accommodate the larger data
-    s_DecodeBuffer.resize(totalLength);
-  }
+    // Check if the frame type from the decoding unit is IDR frame
+    if (decodeUnit->frameType == FRAME_TYPE_IDR) {
+      // Add some extra space in case we need to do an SPS fixup
+      totalLength += MAX_SPS_EXTRA_SIZE;
+    }
 
-  // Initialize the entry pointer to the start of the buffer list
-  entry = decodeUnit->bufferList;
+    // Ensure the decode buffer is large enough to hold the full packet
+    if (totalLength > s_DecodeBuffer.size()) {
+      // Resize decode buffer to accommodate the larger data
+      s_DecodeBuffer.resize(totalLength);
+    }
 
-  // Initialize the offset to 0 before starting to copy data
-  offset = 0;
+    // Initialize the offset to 0 before starting to copy data
+    offset = 0;
 
-  // Iterate through the buffer list of video data entries
-  while (entry != NULL) {
-    bool copied = false;
+    // Iterate through the buffer list of video data entries
+    while (entry != NULL) {
+      bool copied = false;
 
-    // The SPS of an H.264 IDR frame is rewritten on the way through, so the
-    // decoder is told the stream is low delay. See FixupSps(). Everything else,
-    // including every HEVC parameter set, is copied verbatim.
-    if (entry->bufferType == BUFFER_TYPE_SPS && (s_VideoFormat & VIDEO_FORMAT_H264)) {
-      unsigned int room = (unsigned int)(s_DecodeBuffer.size() - offset);
-      unsigned int fixedLen = FixupSps(
-        reinterpret_cast<const uint8_t*>(entry->data), (unsigned int)entry->length,
-        &s_DecodeBuffer[offset], room
-      );
-      if (fixedLen > 0) {
-        offset += fixedLen;
-        copied = true;
-        if (!s_loggedSpsFixup) {
-          s_loggedSpsFixup = true;
-          ClLogMessage("H.264 SPS rewritten for low delay decoding (stage %d)\n",
-                       kSpsFixupStage);
+      // The SPS of an H.264 IDR frame is rewritten on the way through, so the
+      // decoder is told the stream is low delay. See FixupSps(). Everything
+      // else, including every HEVC parameter set, is copied verbatim.
+      if (entry->bufferType == BUFFER_TYPE_SPS && (s_VideoFormat & VIDEO_FORMAT_H264)) {
+        unsigned int room = (unsigned int)(s_DecodeBuffer.size() - offset);
+        unsigned int fixedLen = FixupSps(
+          reinterpret_cast<const uint8_t*>(entry->data), (unsigned int)entry->length,
+          &s_DecodeBuffer[offset], room
+        );
+        if (fixedLen > 0) {
+          offset += fixedLen;
+          copied = true;
+          if (!s_loggedSpsFixup) {
+            s_loggedSpsFixup = true;
+            ClLogMessage("H.264 SPS rewritten for low delay decoding (stage %d)\n",
+                         kSpsFixupStage);
+          }
         }
       }
+
+      if (!copied) {
+        // Copy the data of the current entry to the decode buffer at the specified offset
+        memcpy(&s_DecodeBuffer[offset], entry->data, entry->length);
+        // Update the offset based on the length of the copied data
+        offset += entry->length;
+      }
+
+      // Move to the next entry in the buffer list
+      entry = entry->next;
     }
 
-    if (!copied) {
-      // Copy the data of the current entry to the decode buffer at the specified offset
-      memcpy(&s_DecodeBuffer[offset], entry->data, entry->length);
-      // Update the offset based on the length of the copied data
-      offset += entry->length;
-    }
-
-    // Move to the next entry in the buffer list
-    entry = entry->next;
+    packetData = s_DecodeBuffer.data();
   }
 
   // Calculate the start of the pacing duration in milliseconds
@@ -1077,6 +1277,8 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   // Measure total pacer time based on calculated pacing duration
   m_ActiveWndVideoStats.totalPacerTime += pacingEnd - pacingStart;
 
+  const auto packetSessionId = g_Instance->m_VideoSessionId.load();
+
   // Create an ElementaryMediaPacket and start decoding with the decoded video data
   samsung::wasm::ElementaryMediaPacket pkt {
     framePts, // presentation timestamp
@@ -1084,12 +1286,12 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     s_frameDuration, // packet duration
     decodeUnit->frameType == FRAME_TYPE_IDR, // packet of frame type
     offset, // packet size
-    s_DecodeBuffer.data(), // pointer to packet payload
+    packetData, // pointer to packet payload
     s_Width, // packet of width
     s_Height, // packet of height
     s_Framerate, // packet of framerate numerator
     1, // packet of framerate denominator
-    g_Instance->m_VideoSessionId.load() // session identifier
+    packetSessionId // session identifier
   };
 
   // Track total time spent reassembling and decoding this frame
@@ -1100,8 +1302,35 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   // Calculate time before rendering
   uint32_t beforeRender = LiGetMillis();
 
-  // Attempt to append the packet to the video track for rendering
-  if (g_Instance->m_VideoTrack.AppendPacket(pkt)) {
+  // Hand the packet over, retrying briefly if the platform refuses it.
+  //
+  // A refusal is not necessarily a rejection of the frame: the pipeline can be
+  // momentarily unable to accept one, and the previous behaviour turned that
+  // instant into either a lost frame or a keyframe request, both of which are
+  // visible. A few hundred microseconds of patience covers the transient. The
+  // total worst case is under two milliseconds, well inside one frame interval,
+  // and this runs on the decoder thread where the pacer already sleeps.
+  bool appended = false;
+  unsigned int attempts = 0;
+  for (; attempts < kVideoAppendMaxAttempts; attempts++) {
+    if (attempts > 0) {
+      // Nothing to retry into if the track went away or the session moved on
+      // underneath us; the frame is stale either way.
+      if (!g_Instance->m_VideoStarted.load() ||
+          g_Instance->m_VideoSessionId.load() != packetSessionId) {
+        break;
+      }
+      std::this_thread::sleep_for(kVideoAppendRetryBackoffs[attempts - 1]);
+      m_ActiveWndVideoStats.appendRetries++;
+    }
+
+    if (g_Instance->m_VideoTrack.AppendPacket(pkt)) {
+      appended = true;
+      break;
+    }
+  }
+
+  if (appended) {
     // Calculate time after rendering
     uint32_t afterRender = LiGetMillis();
     // Track total render time and count rendered frames
@@ -1110,6 +1339,7 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
 
     RecordAppendCadence(m_ActiveWndVideoStats);
     RecordPipelineLead(m_ActiveWndVideoStats, framePts);
+    NotePresentationProgress(framePts);
   } else {
     // Throttle IDR requests. A keyframe costs several times a P-frame, so
     // asking for one on every rejected packet congests the link further and
@@ -1117,7 +1347,8 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     uint32_t nowMs = LiGetMillis();
     if (nowMs - s_lastIdrRequestMs >= kIdrRequestIntervalMs) {
       s_lastIdrRequestMs = nowMs;
-      ClLogMessage("Append video packet failed, requesting IDR\n");
+      ClLogMessage("Append video packet failed after %u attempts, requesting IDR\n",
+                   attempts);
       return DR_NEED_IDR;
     }
     // A refresh is already on its way, so drop this frame quietly
@@ -1149,6 +1380,9 @@ void MoonlightInstance::AddVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst) {
   dst.pipelineClockLeadSumMs += src.pipelineClockLeadSumMs;
   dst.pipelineClockLeadSumSqMs += src.pipelineClockLeadSumSqMs;
   dst.pipelineClockLeadMaxMs = MAX(dst.pipelineClockLeadMaxMs, src.pipelineClockLeadMaxMs);
+  dst.zeroCopyFrames += src.zeroCopyFrames;
+  dst.appendRetries += src.appendRetries;
+  dst.presentationRecoveries += src.presentationRecoveries;
 
   // Update minimum host processing latency if it's not set or if the source has a valid smaller value
   if (dst.minHostProcessingLatency == 0) {
@@ -1340,6 +1574,23 @@ void MoonlightInstance::FormatVideoStats(VIDEO_STATS& stats, char* output, int l
       "Frames delivered off cadence (>%.0f ms): %.2f%%\n",
       mean, sqrt(variance), kAppendJitterToleranceMs,
       (float)stats.appendJitterOutliers / (float)stats.appendIntervalCount * 100
+    );
+    if (ret < 0 || ret >= length - offset) {
+      assert(false);
+      return;
+    }
+    offset += ret;
+  }
+
+  // Assembly and hand-over behaviour. Each of these three is zero in the healthy
+  // case except the first, which should be nearly every frame.
+  if (stats.decodedFrames != 0) {
+    ret = snprintf(
+      &output[offset], length - offset,
+      "Frames submitted without assembly: %.1f%%\n"
+      "Hand-over retries: %u, pipeline recoveries: %u\n",
+      (float)stats.zeroCopyFrames / (float)stats.decodedFrames * 100,
+      stats.appendRetries, stats.presentationRecoveries
     );
     if (ret < 0 || ret >= length - offset) {
       assert(false);

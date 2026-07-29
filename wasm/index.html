@@ -261,11 +261,11 @@
                 - Controls how far ahead audio is scheduled. A larger buffer rides out network gaps but adds audio delay. Default is 100 ms.
               </span>
               <div id="audioJitterMenu">
-                <button type="button" id="selectAudioJitter" class="mdl-button mdl-js-button mdl-js-ripple-effect">100 ms</button>
+                <button type="button" id="selectAudioJitter" class="mdl-button mdl-js-button mdl-js-ripple-effect">50 ms</button>
               </div>
               <div class="audioJitterMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectAudioJitter">
                 <span id="jitterLowestValue">50</span>
-                <input type="range" id="jitterSlider" class="mdl-slider mdl-js-slider" min="50" max="500" step="25" value="100">
+                <input type="range" id="jitterSlider" class="mdl-slider mdl-js-slider" min="50" max="500" step="25" value="50">
                 <span id="jitterHighestValue">500</span>
               </div>
             </div>

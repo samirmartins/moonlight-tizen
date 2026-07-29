@@ -99,6 +99,14 @@ typedef struct _VIDEO_STATS {
   double pipelineClockLeadSumMs;
   double pipelineClockLeadSumSqMs;
   float pipelineClockLeadMaxMs;
+
+  // Frames handed to the platform where they already lay, without assembly
+  uint32_t zeroCopyFrames;
+  // Extra attempts spent getting a refused packet accepted
+  uint32_t appendRetries;
+  // Times the pipeline was flushed because presentation had stopped advancing
+  // while packets were still being accepted
+  uint32_t presentationRecoveries;
 } VIDEO_STATS, *PVIDEO_STATS;
 
 enum class LoadResult {
@@ -182,6 +190,12 @@ class MoonlightInstance {
   // Cadence instrumentation, fed from the frame submission path.
   static void RecordAppendCadence(VIDEO_STATS& stats);
   static void RecordPipelineLead(VIDEO_STATS& stats, samsung::wasm::Seconds framePts);
+  // Watches for the pipeline accepting packets while presentation is frozen, and
+  // asks the recovery worker to flush when it is.
+  static void NotePresentationProgress(samsung::wasm::Seconds framePts);
+  // Entry point for the recovery worker, which is a free function and so cannot
+  // reach the media source directly.
+  static void PerformPresentationRecovery();
   void TogglePerformanceStats();
 
   static int AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusConfig, void* context, int arFlags);

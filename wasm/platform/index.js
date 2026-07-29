@@ -3369,17 +3369,17 @@ function restoreDefaultsSettingsValues() {
   // Matches DEFAULT_SOPS in moonlight-android: let the host pick game settings
   // that suit the stream.
   const defaultOptimizeGames = true;
-  document.querySelector('#optimizeGamesBtn').MaterialSwitch.off();
+  document.querySelector('#optimizeGamesBtn').MaterialSwitch.on();
   storeData('optimizeGames', defaultOptimizeGames, null);
 
   // moonlight-android has no switch for this at all; rumble is always forwarded.
   const defaultRumbleFeedback = true;
-  document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.off();
+  document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.on();
   storeData('rumbleFeedback', defaultRumbleFeedback, null);
 
   // Matches DEFAULT_MOUSE_EMULATION in moonlight-android.
   const defaultMouseEmulation = true;
-  document.querySelector('#mouseEmulationBtn').MaterialSwitch.off();
+  document.querySelector('#mouseEmulationBtn').MaterialSwitch.on();
   storeData('mouseEmulation', defaultMouseEmulation, null);
 
   const defaultFlipABfaceButtons = false;
@@ -3394,10 +3394,11 @@ function restoreDefaultsSettingsValues() {
   $('#selectAudio').text('Stereo').data('value', defaultAudioConfig);
   storeData('audioConfig', defaultAudioConfig, null);
 
-  // moonlight-android bounds pending audio at 40 ms. 60 ms keeps a little more
-  // margin for a TV's Web Audio scheduler while staying far below the 100 ms
-  // this shipped with.
-  const defaultAudioJitterMs = '60';
+  // The setpoint the scheduler's rate servo holds. It no longer has to carry
+  // slack for bursts, because a backlog is now drained by consuming slightly
+  // faster rather than by discarding frames, so it can sit at the low end of the
+  // slider. moonlight-android bounds its pending audio at 40 ms.
+  const defaultAudioJitterMs = '50';
   $('#jitterSlider')[0].MaterialSlider.change(defaultAudioJitterMs);
   $('#selectAudioJitter').html(defaultAudioJitterMs + ' ms');
   storeData('audioJitterMs', defaultAudioJitterMs, null);
@@ -3686,7 +3687,7 @@ function loadUserDataCb() {
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioJitterMs preferences.');
   getData('audioJitterMs', function(previousValue) {
-    var value = (previousValue.audioJitterMs != null) ? String(previousValue.audioJitterMs) : '60';
+    var value = (previousValue.audioJitterMs != null) ? String(previousValue.audioJitterMs) : '50';
     $('#jitterSlider')[0].MaterialSlider.change(value);
     $('#selectAudioJitter').html(value + ' ms');
   });
