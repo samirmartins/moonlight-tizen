@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file.
 
+## v2.1.0
+
+### Fixed
+- Fixed frames being discarded from the bitstream without requesting a keyframe. Once the decode unit queue passed a threshold, P-frames were dropped and reported as handled. The stream carries no periodic keyframes, so the decoder was left referencing a picture it never received and the error propagated until an IDR was requested for some unrelated reason. Rare queue overload is now left to moonlight-common-c, which flushes and requests a keyframe, costing one clean recovery instead of lasting corruption
+
+### Added
+- The performance overlay now reports frame delivery interval and its standard deviation, the percentage of frames delivered off cadence, and the depth of the platform's own playback buffer. Averages alone cannot distinguish a steady frame rate from a bursty one
+
+### Changed
+- Frame pacing now defaults to on for new installations. Existing settings are preserved
+
 ## v2.0.0
 
 First release of this fork, based on upstream v1.13.1. The version starts a line of

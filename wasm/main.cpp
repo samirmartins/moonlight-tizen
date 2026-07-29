@@ -51,6 +51,8 @@ MoonlightInstance::MoonlightInstance()
     m_EmssReadyState(EmssReadyState::kDetached),
     m_VideoStarted(false),
     m_VideoSessionId(0),
+    m_PipelinePositionUs(kNoPipelinePosition),
+    m_PipelinePositionAtMs(0),
     m_MediaElement("wasm_module"),
     m_Source(nullptr),
     m_SourceListener(this),

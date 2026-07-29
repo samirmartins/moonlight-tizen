@@ -3344,8 +3344,11 @@ function restoreDefaultsSettingsValues() {
   $('#bitrateSlider')[0].MaterialSlider.change(defaultBitrate);
   storeData('bitrate', defaultBitrate, null);
 
-  const defaultFramePacing = false;
-  document.querySelector('#framePacingBtn').MaterialSwitch.off();
+  // Frame pacing defaults on. Without it frames are handed to the pipeline as
+  // fast as the network delivers them, which leaves the cadence entirely to
+  // whatever arrival jitter the link happens to have.
+  const defaultFramePacing = true;
+  document.querySelector('#framePacingBtn').MaterialSwitch.on();
   storeData('framePacing', defaultFramePacing, null);
 
   const defaultIpAddressFieldMode = false;
@@ -3565,7 +3568,7 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored framePacing preferences.');
   getData('framePacing', function(previousValue) {
     if (previousValue.framePacing == null) {
-      document.querySelector('#framePacingBtn').MaterialSwitch.off(); // Set the default state
+      document.querySelector('#framePacingBtn').MaterialSwitch.on(); // Set the default state
     } else if (previousValue.framePacing == false) {
       document.querySelector('#framePacingBtn').MaterialSwitch.off();
     } else {

@@ -76,6 +76,29 @@ typedef struct _VIDEO_STATS {
   float renderedFps;
   float receivedBitrate;
   uint32_t measurementStartTimestamp;
+
+  // Cadence instrumentation.
+  //
+  // Every other counter above is a mean over a one second window, and a mean is
+  // blind to the thing we are chasing: a cadence can average exactly 60 FPS and
+  // still deliver every frame at the wrong moment. These fields carry enough to
+  // reconstruct the spread, not just the centre.
+  //
+  // Sums are kept instead of the derived statistics so that AddVideoStats() can
+  // merge two windows by addition, like every other field here.
+  uint32_t appendIntervalCount;     // inter-append intervals measured
+  double appendIntervalSumMs;       // sum, for the mean
+  double appendIntervalSumSqMs;     // sum of squares, for the standard deviation
+  uint32_t appendJitterOutliers;    // intervals outside the tolerance window
+
+  // Distance between the timestamp we hand to the pipeline and where the
+  // pipeline reports it actually is. This is the depth of the TV's own buffer:
+  // if it grows, the pipeline is queueing our frames rather than presenting
+  // them on arrival, and pacing the submission cannot control presentation.
+  uint32_t pipelineClockSamples;
+  double pipelineClockLeadSumMs;
+  double pipelineClockLeadSumSqMs;
+  float pipelineClockLeadMaxMs;
 } VIDEO_STATS, *PVIDEO_STATS;
 
 enum class LoadResult {
@@ -156,6 +179,10 @@ class MoonlightInstance {
   static int VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit);
   static void AddVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst);
   static void FormatVideoStats(VIDEO_STATS& stats, char* output, int length);
+  // Cadence instrumentation, fed from the frame submission path. Members rather
+  // than free functions because they read the pipeline clock, which is private.
+  static void RecordAppendCadence(VIDEO_STATS& stats);
+  static void RecordPipelineLead(VIDEO_STATS& stats, samsung::wasm::Seconds framePts);
   void TogglePerformanceStats();
 
   static int AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusConfig, void* context, int arFlags);
@@ -179,6 +206,10 @@ class MoonlightInstance {
     void OnSourceOpen() override;
     void OnSourceOpenPending() override;
     void OnSourceClosed() override;
+    // The pipeline's own clock. Samsung documents this as the preferred way to
+    // receive time updates, and it is the only observable that tells us where
+    // the TV actually is in the stream rather than where we assume it is.
+    void OnPlaybackPositionChanged(samsung::wasm::Seconds) override;
   private:
     MoonlightInstance* m_Instance;
   };
@@ -257,6 +288,19 @@ class MoonlightInstance {
   std::atomic<bool> m_ConnectionCancelled;
   pthread_t m_StopThread;
   std::atomic<samsung::wasm::SessionId> m_VideoSessionId;
+
+  // Last playback position reported by the pipeline, and the local time it was
+  // reported at, so a reader can extrapolate to now. Microseconds rather than a
+  // floating point second count because std::atomic<double> is not guaranteed
+  // to be lock free here, and this is written from the main thread and read
+  // from the decoder thread on every frame.
+  //
+  // A negative position means the pipeline has not reported yet. Everything
+  // downstream must treat that as "no measurement", never as position zero.
+  static constexpr int64_t kNoPipelinePosition = -1;
+  std::atomic<int64_t> m_PipelinePositionUs;
+  std::atomic<uint64_t> m_PipelinePositionAtMs;
+
   samsung::html::HTMLMediaElement m_MediaElement;
   std::unique_ptr<samsung::wasm::ElementaryMediaStreamSource> m_Source;
   SourceListener m_SourceListener;

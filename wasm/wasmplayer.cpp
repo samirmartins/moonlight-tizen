@@ -1,6 +1,7 @@
 #include "moonlight_wasm.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <condition_variable>
 #include <functional>
 #include <mutex>
@@ -53,12 +54,6 @@ static constexpr TimeStamp kPacingMaxDriftStep = 1ms;
 // Anything beyond this is treated as a discontinuity, not as a real gap.
 static constexpr int64_t kMaxHostPtsGapMs = 2000;
 
-// Decode unit queue depth (bounded at 15 in moonlight-common-c) above which we
-// start shedding P-frames. Letting it reach the bound makes the depacketizer
-// flush the whole queue and request an IDR, which is far more disruptive than
-// dropping a frame here.
-static constexpr int kQueueDepthDropThreshold = 10;
-
 // Minimum interval between IDR requests triggered by append failures. A
 // keyframe costs several times a P-frame, so one request per rejected packet
 // turns a congested link into a worse one.
@@ -82,6 +77,21 @@ static bool s_ptsDiffSeeded = false;
 static uint32_t s_lastHostPtsMs = 0;
 static bool s_hasHostPtsRef = false;
 static bool s_loggedPtsSource = false;
+
+// One-shot log guard for the pipeline clock, so its absence is visible in the
+// log by omission rather than its presence being repeated every update.
+static bool s_loggedPipelineClock = false;
+
+// Cadence instrumentation. The interval between successive appends is the one
+// thing we can measure without the platform's cooperation, and its spread is
+// what a frame rate average hides.
+static std::chrono::time_point<std::chrono::steady_clock> s_lastAppendTime;
+static bool s_hasLastAppendTime = false;
+
+// An interval this far from one frame duration counts as an outlier. A quarter
+// of a frame at 60 Hz is about 4 ms, which is roughly where a cadence error
+// stops being invisible.
+static constexpr double kAppendJitterToleranceMs = 4.0;
 
 static std::chrono::time_point<std::chrono::steady_clock> s_firstAppend;
 
@@ -133,6 +143,35 @@ void MoonlightInstance::SourceListener::OnSourceClosed() {
   std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
   m_Instance->m_EmssReadyState = EmssReadyState::kClosed;
   m_Instance->m_EmssStateChanged.notify_all();
+}
+
+// Records where the pipeline says it is. Deliberately does nothing else: this
+// runs on the main thread, and the frame path must never wait on it. It only
+// publishes two numbers that the decoder thread reads without locking.
+void MoonlightInstance::SourceListener::OnPlaybackPositionChanged(
+  samsung::wasm::Seconds position
+) {
+  auto positionUs = static_cast<int64_t>(position.count() * 1000000.0);
+
+  // A pipeline that has not started yet can legitimately report zero; that is a
+  // real measurement and must be kept. Only a negative value would be nonsense,
+  // and it would collide with the "not reported yet" sentinel.
+  if (positionUs < 0) {
+    return;
+  }
+
+  // Order matters: publish the timestamp first, then the position. A reader
+  // that catches the pair mid-update then extrapolates from a slightly stale
+  // timestamp, which overstates the position by microseconds. The reverse order
+  // would pair a new timestamp with an old position and understate it by a
+  // whole reporting interval.
+  m_Instance->m_PipelinePositionAtMs.store(LiGetMillis(), std::memory_order_relaxed);
+  m_Instance->m_PipelinePositionUs.store(positionUs, std::memory_order_release);
+
+  if (!s_loggedPipelineClock) {
+    s_loggedPipelineClock = true;
+    ClLogMessage("Pipeline is reporting its playback position\n");
+  }
 }
 
 // There is no audio track listener: audio does not go through the EMSS at all,
@@ -311,11 +350,20 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
   // Reset the IDR request throttle for the new stream
   s_lastIdrRequestMs = 0;
 
+  // Reset the cadence instrumentation. The first append of a stream has no
+  // predecessor to measure against, and the pipeline of the previous stream has
+  // nothing to say about this one.
+  s_hasLastAppendTime = false;
+  s_loggedPipelineClock = false;
+  g_Instance->m_PipelinePositionUs.store(kNoPipelinePosition, std::memory_order_release);
+  g_Instance->m_PipelinePositionAtMs.store(0, std::memory_order_relaxed);
+
   // Set the frame pacing flag based on instance configuration
   s_FramePacingEnabled = g_Instance->m_FramePacingEnabled;
 
-  // Preallocate space for the performance stats string
-  s_StatString.resize(1000);
+  // Preallocate space for the performance stats string. The cadence block added
+  // several lines, and FormatVideoStats() asserts rather than truncating.
+  s_StatString.resize(2000);
 
   // Drop any stats message left pending from a previous stream
   s_PendingStatMsg.clear();
@@ -462,6 +510,76 @@ static void UpdatePacingDrift(TimeStamp fromStart, TimeStamp framePts) {
   s_ptsDiff += step;
 }
 
+// Folds the interval since the previous append into the window statistics.
+//
+// Measured around AppendPacket rather than around the pacer, because this is
+// the last moment we control. Whatever the pipeline does afterwards, an uneven
+// cadence here can only make it worse.
+void MoonlightInstance::RecordAppendCadence(VIDEO_STATS& stats) {
+  auto now = std::chrono::steady_clock::now();
+
+  if (s_hasLastAppendTime) {
+    double intervalMs =
+      std::chrono::duration<double, std::milli>(now - s_lastAppendTime).count();
+
+    // A gap spanning several frames is a stall or a stream restart, not a
+    // cadence error. Folding it in would swamp the standard deviation with one
+    // sample and hide the small deviations this exists to expose.
+    double frameMs = std::chrono::duration<double, std::milli>(s_frameDuration).count();
+    if (intervalMs < frameMs * 4) {
+      stats.appendIntervalCount++;
+      stats.appendIntervalSumMs += intervalMs;
+      stats.appendIntervalSumSqMs += intervalMs * intervalMs;
+
+      if (std::abs(intervalMs - frameMs) > kAppendJitterToleranceMs) {
+        stats.appendJitterOutliers++;
+      }
+    }
+  }
+
+  s_lastAppendTime = now;
+  s_hasLastAppendTime = true;
+}
+
+// Folds the distance between the timestamp just submitted and where the
+// pipeline reports it is.
+//
+// This is the number that decides the next round of work. If the lead stays
+// near zero, the pipeline presents what we hand it more or less on arrival, and
+// the submission cadence is the presentation cadence. If the lead settles at
+// some depth, the pipeline is buffering and scheduling by PTS, which means
+// pacing the submission cannot control presentation at all, and the effort
+// belongs somewhere else entirely.
+void MoonlightInstance::RecordPipelineLead(VIDEO_STATS& stats, TimeStamp framePts) {
+  int64_t positionUs = g_Instance->m_PipelinePositionUs.load(std::memory_order_acquire);
+  if (positionUs == kNoPipelinePosition) {
+    // The platform never reported. Leaving the counters at zero makes that
+    // visible in the overlay rather than silently reporting a lead of zero,
+    // which would look like a measurement.
+    return;
+  }
+
+  uint64_t reportedAtMs = g_Instance->m_PipelinePositionAtMs.load(std::memory_order_relaxed);
+  uint64_t nowMs = LiGetMillis();
+
+  // Extrapolate the reported position to now at real time. Playback rate is
+  // never altered here, so 1:1 is exact between updates.
+  double sinceReportMs = (nowMs >= reportedAtMs) ? (double)(nowMs - reportedAtMs) : 0.0;
+  double positionMs = (positionUs / 1000.0) + sinceReportMs;
+
+  double framePtsMs = std::chrono::duration<double, std::milli>(framePts).count();
+  double leadMs = framePtsMs - positionMs;
+
+  stats.pipelineClockSamples++;
+  stats.pipelineClockLeadSumMs += leadMs;
+  stats.pipelineClockLeadSumSqMs += leadMs * leadMs;
+
+  float absLeadMs = (float)std::abs(leadMs);
+  if (absLeadMs > stats.pipelineClockLeadMaxMs) {
+    stats.pipelineClockLeadMaxMs = absLeadMs;
+  }
+}
+
 void MoonlightInstance::VidDecCleanup(void) {
   // Clear the decode buffer
   s_DecodeBuffer.clear();
@@ -566,15 +684,27 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   TimeStamp framePts = NextPacketPts(decodeUnit, s_pktPts);
   s_pktPts = framePts;
 
-  // Shed P-frames while the decode unit queue is running deep. The queue is
-  // bounded at 15 entries in moonlight-common-c, and reaching that bound makes
-  // the depacketizer discard every queued frame and request an IDR. Dropping a
-  // single P-frame here is far cheaper than that recovery.
-  if (decodeUnit->frameType != FRAME_TYPE_IDR &&
-      LiGetPendingVideoFrames() >= kQueueDepthDropThreshold) {
-    m_ActiveWndVideoStats.pacerDroppedFrames++;
-    return DR_OK;
-  }
+  // There is deliberately no queue-depth frame shedding here.
+  //
+  // A previous version dropped P-frames once the decode unit queue passed a
+  // threshold, reasoning that losing one frame beats the wholesale flush that
+  // moonlight-common-c performs when the queue hits its bound. That reasoning
+  // was wrong, and the difference matters.
+  //
+  // The stream carries no periodic keyframes: the host emits an IDR only when
+  // asked. Every P-frame is coded against the one before it, so a P-frame
+  // discarded here leaves the decoder referencing a picture it never received,
+  // and the error propagates through every frame that follows until something
+  // requests an IDR. Returning DR_OK told moonlight-common-c the frame had been
+  // handled, so nothing ever did. The result was not one lost frame, it was
+  // corruption lasting until the next keyframe happened to be requested for an
+  // unrelated reason.
+  //
+  // The library's own overflow path is the correct behaviour and was already
+  // there: it flushes the queue and requests an IDR, which costs one visible
+  // recovery and then resynchronises cleanly. Letting it handle the rare
+  // overload is strictly better than silently corrupting the reference chain.
+  // Anything below that genuinely cannot proceed must return DR_NEED_IDR.
 
   // Declare variables for entry data, offset, and total length
   PLENTRY entry;
@@ -658,6 +788,9 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     // Track total render time and count rendered frames
     m_ActiveWndVideoStats.totalRenderTime += afterRender - beforeRender;
     m_ActiveWndVideoStats.renderedFrames++;
+
+    RecordAppendCadence(m_ActiveWndVideoStats);
+    RecordPipelineLead(m_ActiveWndVideoStats, framePts);
   } else {
     // Throttle IDR requests. A keyframe costs several times a P-frame, so
     // asking for one on every rejected packet congests the link further and
@@ -687,6 +820,16 @@ void MoonlightInstance::AddVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst) {
   dst.totalDecodeTime += src.totalDecodeTime;
   dst.totalPacerTime += src.totalPacerTime;
   dst.totalRenderTime += src.totalRenderTime;
+
+  // Cadence instrumentation. Sums merge by addition; the max does not.
+  dst.appendIntervalCount += src.appendIntervalCount;
+  dst.appendIntervalSumMs += src.appendIntervalSumMs;
+  dst.appendIntervalSumSqMs += src.appendIntervalSumSqMs;
+  dst.appendJitterOutliers += src.appendJitterOutliers;
+  dst.pipelineClockSamples += src.pipelineClockSamples;
+  dst.pipelineClockLeadSumMs += src.pipelineClockLeadSumMs;
+  dst.pipelineClockLeadSumSqMs += src.pipelineClockLeadSumSqMs;
+  dst.pipelineClockLeadMaxMs = MAX(dst.pipelineClockLeadMaxMs, src.pipelineClockLeadMaxMs);
 
   // Update minimum host processing latency if it's not set or if the source has a valid smaller value
   if (dst.minHostProcessingLatency == 0) {
@@ -852,6 +995,65 @@ void MoonlightInstance::FormatVideoStats(VIDEO_STATS& stats, char* output, int l
       (float)stats.totalRenderTime / stats.renderedFrames
     );
     // Abort if string formatting failed or buffer overflowed
+    if (ret < 0 || ret >= length - offset) {
+      assert(false);
+      return;
+    }
+    offset += ret;
+  }
+
+  // Cadence block. Everything above is a mean, and a mean cannot distinguish a
+  // steady 60 FPS from a 60 FPS that arrives in bursts. These three lines can.
+  if (stats.appendIntervalCount > 1) {
+    double n = (double)stats.appendIntervalCount;
+    double mean = stats.appendIntervalSumMs / n;
+    // Population variance from the running sums. Clamped at zero because
+    // catastrophic cancellation can drive it slightly negative when every
+    // sample is nearly identical, which is exactly the good case.
+    double variance = (stats.appendIntervalSumSqMs / n) - (mean * mean);
+    if (variance < 0.0) {
+      variance = 0.0;
+    }
+
+    ret = snprintf(
+      &output[offset], length - offset,
+      "Frame delivery interval: %.2f ms average, %.2f ms deviation\n"
+      "Frames delivered off cadence (>%.0f ms): %.2f%%\n",
+      mean, sqrt(variance), kAppendJitterToleranceMs,
+      (float)stats.appendJitterOutliers / (float)stats.appendIntervalCount * 100
+    );
+    if (ret < 0 || ret >= length - offset) {
+      assert(false);
+      return;
+    }
+    offset += ret;
+  }
+
+  // Pipeline buffer depth. Absent means the platform never reported a position,
+  // which is itself the answer to whether we can pace against its clock.
+  if (stats.pipelineClockSamples > 1) {
+    double n = (double)stats.pipelineClockSamples;
+    double mean = stats.pipelineClockLeadSumMs / n;
+    double variance = (stats.pipelineClockLeadSumSqMs / n) - (mean * mean);
+    if (variance < 0.0) {
+      variance = 0.0;
+    }
+
+    ret = snprintf(
+      &output[offset], length - offset,
+      "Pipeline buffer depth: %.1f ms average, %.1f ms deviation, %.1f ms peak\n",
+      mean, sqrt(variance), stats.pipelineClockLeadMaxMs
+    );
+    if (ret < 0 || ret >= length - offset) {
+      assert(false);
+      return;
+    }
+    offset += ret;
+  } else if (stats.renderedFrames != 0) {
+    ret = snprintf(
+      &output[offset], length - offset,
+      "Pipeline buffer depth: not reported by the platform\n"
+    );
     if (ret < 0 || ret >= length - offset) {
       assert(false);
       return;
