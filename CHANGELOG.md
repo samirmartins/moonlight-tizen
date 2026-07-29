@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## v3.0.0
+
+### Fixed
+- Fixed the presentation timeline carrying the host clock's quantisation into every frame. moonlight-common-c derives `presentationTimeMs` from the 90 kHz RTP timestamp with an integer division by 90, so at 60 FPS the deltas repeat 16, 17, 17 rather than a uniform 16.667 ms. Following them injected a periodic third of a millisecond of error into each frame's presentation time and into the pacer deadline derived from it. The timeline is now generated at a uniform step, with the step slowly adapted so it stays locked to the host's rate, and the number of frames to advance taken from the frame number rather than the timestamp
+- Fixed video track setup continuing after the track was rejected, which produced a stream that opened and showed nothing instead of a clear failure
+
+### Changed
+- HEVC below 1440p now declares level 4.1 instead of 5.1. The declared level sizes the decoder's picture buffer: at 1080p, level 5.1 yields a buffer of 16 pictures and level 4.1 yields 6. Configurations are tried in order and fall back to the previous level 5.1 if the decoder rejects the smaller one
+
 ## v2.1.0
 
 ### Fixed

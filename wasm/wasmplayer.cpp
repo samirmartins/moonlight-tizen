@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cmath>
 #include <condition_variable>
+#include <string>
+#include <vector>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -50,9 +52,29 @@ static constexpr int kPacingMaxWaitFrames = 2;
 static constexpr double kPacingDriftGain = 0.1;
 static constexpr TimeStamp kPacingMaxDriftStep = 1ms;
 
-// Largest inter-frame gap still trusted from the host presentation clock.
-// Anything beyond this is treated as a discontinuity, not as a real gap.
-static constexpr int64_t kMaxHostPtsGapMs = 2000;
+// Largest jump in frame number still treated as ordinary packet loss. Beyond
+// this the timeline is re-anchored instead of extrapolated: a gap that long is
+// a restart or a renumbering, and stepping through it would push the timeline
+// seconds into the future.
+static constexpr int kMaxFrameNumberGap = 120;
+
+// Rate lock between the generated timeline and the host clock. The gain is
+// deliberately tiny: the error it corrects accumulates over seconds, and a
+// stiff response would turn the host's millisecond quantisation into exactly
+// the per-frame noise this design exists to remove.
+static constexpr double kPtsRateLockGain = 0.002;
+
+// Hard cap on how far the step may sit from the nominal frame duration. Fifty
+// microseconds is three tenths of a percent of a 60 Hz frame, far below
+// anything visible. Sustaining a rate mismatch requires the correction to equal
+// it, and 59.94 against a nominal 60 needs about 17 us per frame, so the cap has
+// to sit comfortably above that rather than just above it.
+static constexpr double kPtsMaxStepAdjustS = 0.000050;
+
+// Accumulated error beyond which the timeline is re-anchored rather than
+// steered. No rate mismatch produces a quarter second of drift; a discontinuity
+// that slipped past the frame number check does.
+static constexpr double kPtsResyncThresholdS = 0.25;
 
 // Minimum interval between IDR requests triggered by append failures. A
 // keyframe costs several times a P-frame, so one request per rejected packet
@@ -73,10 +95,18 @@ static TimeStamp s_ptsDiff;
 static TimeStamp s_lastSec;
 static bool s_ptsDiffSeeded = false;
 
-// Host presentation clock tracking, see NextPacketPts()
+// Generated timeline state, see NextPacketPts()
 static uint32_t s_lastHostPtsMs = 0;
 static bool s_hasHostPtsRef = false;
 static bool s_loggedPtsSource = false;
+
+// Uniform step, adapted slowly so the timeline tracks the host's rate.
+static TimeStamp s_ptsStep;
+// Point the accumulated error is measured from, on both clocks, and the frame
+// number the last step was taken from.
+static uint32_t s_ptsAnchorHostMs = 0;
+static TimeStamp s_ptsAnchorPts;
+static int s_ptsFrameNumberRef = 0;
 
 // One-shot log guard for the pipeline clock, so its absence is visible in the
 // log by omission rather than its presence being repeated every update.
@@ -232,52 +262,91 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
   // scheduler, so this source carries video only.
 
   {
-    const char *mimetype = "video/mp4"; // MIME-type: Video MP4 Container
+    // Candidate track configurations, most preferred first. More than one entry
+    // exists only where a lower declared level is worth trying, and every list
+    // ends with the configuration that has always worked, so a decoder that
+    // rejects the preferred form falls back instead of failing to start.
+    std::vector<std::string> mimetypes;
+
     if (videoFormat & VIDEO_FORMAT_H264) {
-      mimetype = "video/mp4; codecs=\"avc1.64002A\""; // Video codec: H.264 High Level Profile 4.2
-      /* NOTE: Depending on the capabilities of the TV, it may support higher-level codec profiles, such as:
-      5.1 (avc1.640033); */
-      ClLogMessage("Video codec profile selected: H.264 High Level Profile 4.2\n");
-    } else if (videoFormat & VIDEO_FORMAT_H265) {
-      mimetype = "video/mp4; codecs=\"hev1.1.6.L153.B0\""; // Video Codec: HEVC Main Level Profile 5.1
-      /* NOTE: Depending on the capabilities of the TV, it may support higher-level codec profiles, such as:
-      5.2 (hev1.1.6.L156.B0); */
-      ClLogMessage("Video codec profile selected: HEVC Main Level Profile 5.1\n");
-    } else if (videoFormat & VIDEO_FORMAT_H265_MAIN10) {
-      mimetype = "video/mp4; codecs=\"hev1.2.4.L153.B0\""; // Video Codec: HEVC Main10 Level Profile 5.1
-      /* NOTE: Depending on the capabilities of the TV, it may support higher-level codec profiles, such as:
-      5.2 (hev1.2.4.L156.B0); */
-      ClLogMessage("Video codec profile selected: HEVC Main10 Level Profile 5.1\n");
+      // H.264 High Profile 4.2. A TV may support higher, e.g. 5.1 (avc1.640033).
+      mimetypes.push_back("video/mp4; codecs=\"avc1.64002A\"");
+    } else if (videoFormat & (VIDEO_FORMAT_H265 | VIDEO_FORMAT_H265_MAIN10)) {
+      // The profile prefix differs between Main and Main10; the tier and level
+      // that follow do not.
+      const char* profile = (videoFormat & VIDEO_FORMAT_H265_MAIN10)
+        ? "hev1.2.4." : "hev1.1.6.";
+
+      // Declaring a level sizes the decoder's picture buffer, and we have been
+      // declaring the 4K one regardless of what we actually stream.
+      //
+      // HEVC derives the buffer from the level's MaxLumaPs and the real picture
+      // size (H.265 A.4.2). At 1080p under level 5.1, MaxLumaPs is 8912896 and
+      // the picture is 2073600, which lands in the first bracket and yields a
+      // buffer of 16 pictures. Under level 4.1, MaxLumaPs is 2228224, the
+      // picture lands in the last bracket, and the buffer is 6. The decoder has
+      // been provisioning, and potentially filling, more than twice the frames
+      // it needs before it shows one.
+      //
+      // This is the same reasoning behind the level_idc patching in
+      // moonlight-android, obtained here without rewriting the bitstream.
+      //
+      // Only worth doing below 1440p: above that the picture no longer fits the
+      // smaller level at all, and level 5.0 and 5.1 produce the same buffer.
+      if ((uint64_t)width * (uint64_t)height <= 1920ull * 1080ull) {
+        // High tier first: level 4.1 Main tier caps at 20 Mbps, which is exactly
+        // the 1080p60 preset, leaving a stream configured any higher against the
+        // ceiling. High tier at the same level allows 50 Mbps.
+        mimetypes.push_back(std::string("video/mp4; codecs=\"") + profile + "H123.B0\"");
+        mimetypes.push_back(std::string("video/mp4; codecs=\"") + profile + "L123.B0\"");
+      }
+
+      // Level 5.1, the configuration used up to v2.1.0. Always last.
+      mimetypes.push_back(std::string("video/mp4; codecs=\"") + profile + "L153.B0\"");
     } else if (videoFormat & VIDEO_FORMAT_AV1_MAIN8) {
-      mimetype = "video/mp4; codecs=\"av01.0.13M.08\""; // Video Codec: AV1 Main Level Profile 5.1
-      /* NOTE: Depending on the capabilities of the TV, it may support higher-level codec profiles, such as:
-      5.2 (av01.0.14M.08); */
-      ClLogMessage("Video codec profile selected: AV1 Main Level Profile 5.1\n");
+      // AV1 Main Level 5.1. A TV may support higher, e.g. 5.2 (av01.0.14M.08).
+      mimetypes.push_back("video/mp4; codecs=\"av01.0.13M.08\"");
     } else if (videoFormat & VIDEO_FORMAT_AV1_MAIN10) {
-      mimetype = "video/mp4; codecs=\"av01.0.13M.10\""; // Video Codec: AV1 Main10 Level Profile 5.1
-      /* NOTE: Depending on the capabilities of the TV, it may support higher-level codec profiles, such as:
-      5.2 (av01.0.14M.10); */
-      ClLogMessage("Video codec profile selected: AV1 Main10 Level Profile 5.1\n");
+      // AV1 Main10 Level 5.1. A TV may support higher, e.g. 5.2 (av01.0.14M.10).
+      mimetypes.push_back("video/mp4; codecs=\"av01.0.13M.10\"");
     } else {
       ClLogMessage("Failed to select video codec profile (videoFormat=0x%x)\n", videoFormat);
       return -1;
     }
 
-    ClLogMessage("Using mimeType %s\n", mimetype);
-    auto add_track_result = g_Instance->m_Source->AddTrack(
-      samsung::wasm::ElementaryVideoTrackConfig {
-        mimetype, // MIME-type: Selected Video Format
-        {}, // Extradata: Empty
-        samsung::wasm::DecodingMode::kHardware, // Decoding mode: Hardware
-        static_cast<uint32_t>(width), // Video resolution: Width
-        static_cast<uint32_t>(height), // Video resolution: Height
-        static_cast<uint32_t>(redrawRate), // Framerate: Numerator
-        1, // Framerate: Denominator
+    bool trackAdded = false;
+    for (const std::string& mimetype : mimetypes) {
+      ClLogMessage("Trying mimeType %s\n", mimetype.c_str());
+
+      auto add_track_result = g_Instance->m_Source->AddTrack(
+        samsung::wasm::ElementaryVideoTrackConfig {
+          mimetype, // MIME-type: Selected Video Format
+          {}, // Extradata: Empty
+          samsung::wasm::DecodingMode::kHardware, // Decoding mode: Hardware
+          static_cast<uint32_t>(width), // Video resolution: Width
+          static_cast<uint32_t>(height), // Video resolution: Height
+          static_cast<uint32_t>(redrawRate), // Framerate: Numerator
+          1, // Framerate: Denominator
+        }
+      );
+
+      if (add_track_result) {
+        g_Instance->m_VideoTrack = std::move(*add_track_result);
+        g_Instance->m_VideoTrack.SetListener(&g_Instance->m_VideoTrackListener);
+        ClLogMessage("Using mimeType %s\n", mimetype.c_str());
+        trackAdded = true;
+        break;
       }
-    );
-    if (add_track_result) {
-      g_Instance->m_VideoTrack = std::move(*add_track_result);
-      g_Instance->m_VideoTrack.SetListener(&g_Instance->m_VideoTrackListener);
+
+      ClLogMessage("Track rejected, falling back\n");
+    }
+
+    // Previously a failure here was ignored and setup carried on without a
+    // track, which turns a clear error into a stream that opens and shows
+    // nothing.
+    if (!trackAdded) {
+      ClLogMessage("No usable video track configuration was accepted\n");
+      return -1;
     }
   }
 
@@ -342,10 +411,14 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
   s_ptsDiff = 0s;
   s_ptsDiffSeeded = false;
 
-  // Reset host presentation clock tracking for the new stream
+  // Reset the generated timeline for the new stream
   s_hasHostPtsRef = false;
   s_lastHostPtsMs = 0;
   s_loggedPtsSource = false;
+  s_ptsStep = s_frameDuration;
+  s_ptsAnchorHostMs = 0;
+  s_ptsAnchorPts = TimeStamp(0);
+  s_ptsFrameNumberRef = 0;
 
   // Reset the IDR request throttle for the new stream
   s_lastIdrRequestMs = 0;
@@ -397,44 +470,99 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
 
 // Derives the presentation timestamp for the frame about to be submitted.
 //
-// The preferred source is decodeUnit->presentationTimeMs, which
-// moonlight-common-c derives from the RTP timestamp, i.e. the host's capture
-// clock. Advancing by the host's own inter-frame delta keeps the video timeline
-// anchored to real time across losses. The previous scheme added one frame
-// duration per *accepted* frame, so every frame lost on the network shortened
-// the timeline permanently and pushed video progressively out of sync with
-// audio.
+// The timestamp handed to the pipeline has to satisfy two things that pull in
+// opposite directions: the interval between consecutive frames must be uniform,
+// because that interval is the cadence the display will reproduce; and the
+// timeline must not drift against the host, because that is what keeps video
+// aligned with audio over a long session.
 //
-// The Samsung EMSS headers are not part of this tree, so this is deliberately
-// defensive: a host that never fills presentationTimeMs produces a delta of
-// zero on every frame and falls back to the old synthetic step automatically.
-// The result is strictly monotonic either way.
+// Reading the host clock directly, as the previous implementation did, gets the
+// second and destroys the first. moonlight-common-c derives presentationTimeMs
+// from the 90 kHz RTP timestamp with an integer division by 90
+// (RtpVideoQueue.c). At 60 FPS a frame is exactly 1500 ticks, and 1500/90 is
+// 16.666..., so the sequence that arrives is 0, 16, 33, 50, 66, 83, ... and the
+// deltas repeat 16, 17, 17. Following those deltas injects a periodic third of
+// a millisecond of error into every frame's presentation time, and into the
+// pacer deadline derived from it. A repeating pattern of timing error is far
+// more visible than random jitter of the same size.
+//
+// So the timeline is generated instead of copied. It advances by a step that
+// stays within a few microseconds of the nominal frame duration, and that step
+// is slowly adapted so the accumulated timeline tracks the host's accumulated
+// time. Uniform output, locked rate.
+//
+// How many frames to advance comes from the frame number rather than from the
+// timestamp: it is an exact integer, so a frame lost on the network still moves
+// the timeline by the right amount without reintroducing the quantisation the
+// rest of this function exists to remove.
 static TimeStamp NextPacketPts(PDECODE_UNIT decodeUnit, TimeStamp previousPts) {
   uint32_t hostMs = decodeUnit->presentationTimeMs;
+  int frameNumber = decodeUnit->frameNumber;
 
   if (!s_hasHostPtsRef) {
     s_hasHostPtsRef = true;
     s_lastHostPtsMs = hostMs;
-    // Anchor the timeline at zero like the previous implementation did, so the
+    s_ptsAnchorHostMs = hostMs;
+    s_ptsFrameNumberRef = frameNumber;
+    s_ptsStep = s_frameDuration;
+    // Anchor the timeline at zero, as every previous implementation did, so the
     // baseline offset against the audio track is unchanged.
     return TimeStamp(0);
   }
 
-  int64_t deltaMs = static_cast<int64_t>(hostMs) - static_cast<int64_t>(s_lastHostPtsMs);
+  int framesElapsed = frameNumber - s_ptsFrameNumberRef;
+  s_ptsFrameNumberRef = frameNumber;
   s_lastHostPtsMs = hostMs;
 
-  if (deltaMs <= 0 || deltaMs > kMaxHostPtsGapMs) {
-    // Unusable for this frame: unpopulated field, reordering, clock wraparound
-    // or a discontinuity. Fall back to a single frame step.
-    return previousPts + s_frameDuration;
+  // A frame number that did not advance, ran backwards, or jumped further than
+  // a brief loss burst means the stream restarted or the host reset its
+  // numbering. Neither the step nor the accumulated error means anything across
+  // that boundary, so re-anchor rather than trying to interpolate through it.
+  if (framesElapsed < 1 || framesElapsed > kMaxFrameNumberGap) {
+    s_ptsAnchorHostMs = hostMs;
+    s_ptsAnchorPts = previousPts + s_frameDuration;
+    s_ptsStep = s_frameDuration;
+    return s_ptsAnchorPts;
+  }
+
+  TimeStamp framePts = previousPts + s_ptsStep * framesElapsed;
+
+  // Slow rate lock. The host may not be producing exactly the nominal frame
+  // rate: 59.94 against a nominal 60 is a third of a percent, which is
+  // imperceptible per frame and a second of drift every five minutes.
+  //
+  // The error is measured over the whole run rather than per frame, so the
+  // millisecond quantisation of the host clock averages out instead of being
+  // differentiated into noise. The correction is capped hard enough that the
+  // step can never move far enough from nominal to be seen as a cadence change.
+  double hostElapsedS =
+    (double)((int64_t)hostMs - (int64_t)s_ptsAnchorHostMs) / 1000.0;
+  double ourElapsedS = (framePts - s_ptsAnchorPts).count();
+  double errorS = hostElapsedS - ourElapsedS;
+
+  if (std::abs(errorS) > kPtsResyncThresholdS) {
+    // Far beyond anything a rate mismatch produces: a discontinuity we did not
+    // detect from the frame numbers. Re-anchor here.
+    s_ptsAnchorHostMs = hostMs;
+    s_ptsAnchorPts = framePts;
+    s_ptsStep = s_frameDuration;
+  } else {
+    double adjustS = errorS * kPtsRateLockGain;
+    if (adjustS > kPtsMaxStepAdjustS) {
+      adjustS = kPtsMaxStepAdjustS;
+    } else if (adjustS < -kPtsMaxStepAdjustS) {
+      adjustS = -kPtsMaxStepAdjustS;
+    }
+    s_ptsStep = s_frameDuration + TimeStamp(adjustS);
   }
 
   if (!s_loggedPtsSource) {
     s_loggedPtsSource = true;
-    MoonlightInstance::ClLogMessage("Video PTS is following the host presentation clock\n");
+    MoonlightInstance::ClLogMessage(
+      "Video PTS is generated at a uniform step, rate locked to the host\n");
   }
 
-  return previousPts + TimeStamp(static_cast<double>(deltaMs) / 1000.0);
+  return framePts;
 }
 
 // Holds the decoder thread until the frame is due.
