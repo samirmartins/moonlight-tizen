@@ -77,6 +77,13 @@ void MoonlightInstance::OnConnectionStopped(uint32_t error) {
   // Not running anymore
   m_Running = false;
 
+  // Stop publishing gamepad state; nothing reads it once the input thread ends
+  MAIN_THREAD_ASYNC_EM_ASM({
+    if (typeof stopGamepadSnapshot === 'function') {
+      stopGamepadSnapshot();
+    }
+  });
+
   // Unlock the mouse
   UnlockMouse();
 
@@ -227,6 +234,16 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
 
   // Set running state before starting connection-specific threads
   me->m_Running = true;
+
+  // Ask the main thread to start publishing gamepad state into the heap. The
+  // input thread below reads that snapshot instead of calling the Emscripten
+  // gamepad functions, which are proxied synchronously and would put hundreds of
+  // blocking round trips a second on the main thread. See wasm/gamepad.cpp.
+  MAIN_THREAD_ASYNC_EM_ASM({
+    if (typeof startGamepadSnapshot === 'function') {
+      startGamepadSnapshot();
+    }
+  });
 
   pthread_create(&me->m_InputThread, NULL, MoonlightInstance::InputThreadFunc, me);
 

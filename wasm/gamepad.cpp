@@ -51,6 +51,73 @@ enum GamepadAxis {
   RightY = 3,
 };
 
+// Gamepad state as the main thread hands it over.
+//
+// The Emscripten gamepad functions cannot be used from here. All three of them
+// (emscripten_sample_gamepad_data, emscripten_get_num_gamepads and
+// emscripten_get_gamepad_status) are declared __proxy: 'sync' in the SDK,
+// because the Gamepad API only exists on the main thread. Calling them from this
+// worker blocks it and queues work on the main thread, and this loop runs every
+// 5 ms: with one controller that is six hundred synchronous round trips a
+// second, on the same thread that schedules audio and services the media
+// pipeline. It was the largest consumer of main thread time in the application.
+//
+// So the direction is inverted. A requestAnimationFrame loop in
+// platform/gamepad.js reads navigator.getGamepads() where it already lives,
+// writes the result here, and this side just reads memory. No proxying, and the
+// sampling rate becomes the display's, which is the useful rate for input.
+//
+// Plain arithmetic types only: this is written by JS through the heap views.
+static constexpr int kMaxSnapshotPads = 4;
+
+struct GamepadState {
+  int32_t connected;
+  int32_t numAxes;
+  int32_t numButtons;
+  // Tizen reports gamepads that are not really there, and those keep a
+  // timestamp of zero. JS reduces the timestamp to this flag, which is all the
+  // logic below ever needed from it.
+  int32_t hasTimestamp;
+  float axis[8];
+  float analogButton[GamepadButton::Count];
+  int32_t digitalButton[GamepadButton::Count];
+};
+
+struct GamepadSnapshot {
+  int32_t numGamepads;
+  GamepadState pads[kMaxSnapshotPads];
+};
+
+// Every member is four bytes wide and four byte aligned, so the layout has no
+// padding and JS can index it with the HEAP32 and HEAPF32 views directly. The
+// assertions exist so that adding a field of another width fails the build here
+// rather than silently misaligning the writer on the other side.
+static_assert(sizeof(GamepadState) ==
+                (4 + 8 + GamepadButton::Count + GamepadButton::Count) * 4,
+              "GamepadState has padding; platform/gamepad.js indexes it directly");
+static_assert(sizeof(GamepadSnapshot) == 4 + kMaxSnapshotPads * sizeof(GamepadState),
+              "GamepadSnapshot has padding; platform/gamepad.js indexes it directly");
+
+static GamepadSnapshot s_gpSnapshot = {};
+
+// Handed to JS once, when the input loop starts.
+extern "C" EMSCRIPTEN_KEEPALIVE void* gamepadSnapshotAddress() {
+  return &s_gpSnapshot;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int gamepadSnapshotMaxPads() {
+  return kMaxSnapshotPads;
+}
+
+extern "C" EMSCRIPTEN_KEEPALIVE int gamepadSnapshotButtonCount() {
+  return GamepadButton::Count;
+}
+
+// Exported so the writer does not have to reproduce the arithmetic
+extern "C" EMSCRIPTEN_KEEPALIVE int gamepadSnapshotStride() {
+  return (int)sizeof(GamepadState);
+}
+
 // Function to create a mask for active gamepads
 static short GetActiveGamepadMask(int numGamepads) {
   short result = 0;
@@ -63,7 +130,7 @@ static short GetActiveGamepadMask(int numGamepads) {
 }
 
 // Function to map gamepad buttons to flags
-static short GetButtonFlags(const EmscriptenGamepadEvent& gamepad) {
+static short GetButtonFlags(const GamepadState& gamepad) {
   // Triggers are considered analog buttons in the "Emscripten API", however they need
   // to be passed in separate arguments for "Limelight" (it even lacks flags for them).
 
@@ -133,7 +200,7 @@ static short GetButtonFlags(const EmscriptenGamepadEvent& gamepad) {
   short result = 0;
   
   for (int i = 0; i < gamepad.numButtons && i < buttonMasksSize; ++i) {
-    if (gamepad.digitalButton[i] == EM_TRUE) {
+    if (gamepad.digitalButton[i] != 0) {
       result |= buttonMasks[i];
     }
   }
@@ -151,18 +218,13 @@ void MoonlightInstance::HandleGamepadInputState(bool rumbleFeedback, bool mouseE
 
 // Function to poll gamepad input
 void MoonlightInstance::PollGamepads() {
-  // One sample refreshes the snapshot for every gamepad at once. This runs on a
-  // worker, where the call has to be proxied synchronously to the main thread
-  // because the Gamepad API only exists there, so it is worth doing exactly
-  // once per poll rather than once per connected pad.
-  if (emscripten_sample_gamepad_data() != EMSCRIPTEN_RESULT_SUCCESS) {
-    std::cerr << "Sample gamepad data failed!\n";
-    return;
+  // Read the snapshot the main thread publishes. See GamepadSnapshot above for
+  // why this is not asking Emscripten directly.
+  int numGamepads = s_gpSnapshot.numGamepads;
+  if (numGamepads > kMaxSnapshotPads) {
+    numGamepads = kMaxSnapshotPads;
   }
-
-  const auto numGamepads = emscripten_get_num_gamepads();
-  if (numGamepads == EMSCRIPTEN_RESULT_NOT_SUPPORTED) {
-    std::cerr << "Get num gamepads failed!\n";
+  if (numGamepads <= 0) {
     return;
   }
 
@@ -177,12 +239,11 @@ void MoonlightInstance::PollGamepads() {
 
   // Iterate through connected gamepads and process their input
   for (int gamepadID = 0; gamepadID < numGamepads; ++gamepadID) {
-    EmscriptenGamepadEvent gamepad;
     // See logic in getConnectedGamepadMask() (utils.js)
     // These must stay in sync!
+    const GamepadState& gamepad = s_gpSnapshot.pads[gamepadID];
 
-    const auto result = emscripten_get_gamepad_status(gamepadID, &gamepad);
-    if (result != EMSCRIPTEN_RESULT_SUCCESS || !gamepad.connected) {
+    if (!gamepad.connected) {
       // Not connected
       if (gamepadID < 32) {
         isRealGamepad[gamepadID] = false;
@@ -190,11 +251,11 @@ void MoonlightInstance::PollGamepads() {
       continue;
     }
 
-    if (gamepadID < 32 && gamepad.timestamp != 0) {
+    if (gamepadID < 32 && gamepad.hasTimestamp) {
       isRealGamepad[gamepadID] = true;
     }
 
-    if (gamepad.timestamp == 0 && (gamepadID >= 32 || !isRealGamepad[gamepadID])) {
+    if (!gamepad.hasTimestamp && (gamepadID >= 32 || !isRealGamepad[gamepadID])) {
       // On some platforms, Tizen returns "connected" gamepads that really 
       // aren't, so timestamp stays at zero. To work around this, we'll only
       // count gamepads that have a non-zero timestamp in our controller index.

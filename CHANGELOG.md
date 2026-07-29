@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+## v3.1.1
+
+### Fixed
+- Fixed gamepad polling putting hundreds of blocking round trips a second on the main thread. `emscripten_sample_gamepad_data`, `emscripten_get_num_gamepads` and `emscripten_get_gamepad_status` are all declared `__proxy: 'sync'` in the SDK, because the Gamepad API only exists on the main thread, so the 5 ms poll on the input worker was six hundred synchronous crossings a second onto the same thread that schedules audio and services the media pipeline. Gamepad state is now read on the main thread by a `requestAnimationFrame` loop, written into the WASM heap, and read from there by the worker without any proxying
+
 ## v3.1.0
 
 ### Added
