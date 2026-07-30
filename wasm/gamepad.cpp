@@ -2,6 +2,7 @@
 
 #include <iostream>
 #include <array>
+#include <atomic>
 #include <utility>
 #include <sstream>
 #include <chrono>
@@ -383,15 +384,58 @@ void MoonlightInstance::PollGamepads() {
   }
 }
 
-// Function to send controller rumble feedback for gamepad
+// Rumble magnitudes, published where the animation frame callback can read them.
+//
+// The host sends these continuously during action. The path they used to take
+// cost far more than the effect is worth: a string built through an
+// ostringstream, a **synchronous** crossing to the main thread, the string
+// parsed back out, navigator.getGamepads() to find the pad, a concatenated line
+// logged to the console, and only then the effect. All of it landed on the
+// thread that also schedules every audio frame, and it was measurable as uneven
+// video, which is why the feature had to be switched off to get a smooth
+// picture.
+//
+// Nothing crosses now. The magnitudes are written here and platform/gamepad.js
+// reads them from its animation frame callback, which is already walking the
+// gamepads once per frame. Posting a message per event, even asynchronously,
+// would still put one main thread task per event on a stream whose rate we do
+// not control; polling a word of memory puts none, whatever the host sends.
+//
+// Both magnitudes live in one 32-bit word so a single aligned atomic store
+// publishes them together. Split across two words, a reader could catch a new
+// low against an old high; packed, that cannot happen and no sequence counter is
+// needed to prove it.
+static std::atomic<int32_t> s_rumblePacked[kMaxSnapshotPads];
+
+static inline int32_t PackRumble(uint16_t lowFreqMotor, uint16_t highFreqMotor) {
+  return (int32_t)(((uint32_t)lowFreqMotor << 16) | (uint32_t)highFreqMotor);
+}
+
+// Handed to JS once, when the input loop starts.
+extern "C" EMSCRIPTEN_KEEPALIVE void* rumbleStateAddress() {
+  return &s_rumblePacked[0];
+}
+
+// Forwards a rumble event from the host to the gamepad.
 void MoonlightInstance::ClControllerRumble(unsigned short controllerNumber, unsigned short lowFreqMotor, unsigned short highFreqMotor) {
-  const float weakMagnitude = static_cast<float>(highFreqMotor) / static_cast<float>(UINT16_MAX);
-  const float strongMagnitude = static_cast<float>(lowFreqMotor) / static_cast<float>(UINT16_MAX);
-  
-  // Check if the rumble feedback switch is checked
-  if (rumbleFeedbackSwitch) {
-    std::ostringstream ss;
-    ss << controllerNumber << "," << weakMagnitude << "," << strongMagnitude;
-    PostToJs(std::string("controllerRumble: ") + ss.str());
+  if (!rumbleFeedbackSwitch || controllerNumber >= kMaxSnapshotPads) {
+    return;
+  }
+
+  const int32_t packed = PackRumble(lowFreqMotor, highFreqMotor);
+
+  // A repeat of the magnitudes already in force changes nothing on the pad.
+  // Games hold a constant vibration for long stretches, so this is most of them.
+  if (s_rumblePacked[controllerNumber].load(std::memory_order_relaxed) == packed) {
+    return;
+  }
+  s_rumblePacked[controllerNumber].store(packed, std::memory_order_release);
+}
+
+// Clears the published magnitudes so a new stream starts from silence rather
+// than from whatever the last one left behind.
+extern "C" EMSCRIPTEN_KEEPALIVE void resetRumbleState() {
+  for (int i = 0; i < kMaxSnapshotPads; i++) {
+    s_rumblePacked[i].store(0, std::memory_order_release);
   }
 }

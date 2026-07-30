@@ -501,13 +501,7 @@ const Views = {
     },
   },
   HostsNav: {
-    view: new ListView(() => {
-      if (document.getElementById('updateAppBtn')) {
-        return ['updateAppBtn', 'settingsBtn', 'supportBtn'];
-      } else {
-        return ['settingsBtn', 'supportBtn'];
-      }
-    }),
+    view: new ListView(() => ['settingsBtn']),
     up: function() {},
     down: function() {
       // Navigate to the Hosts view
@@ -1284,8 +1278,6 @@ const Views = {
   },
   AdvancedSettings: {
     view: new ListView(() => [
-      'unlockAllFpsBtn',
-      'optimizeBitrateBtn',
       'disableWarningsBtn',
       'performanceStatsBtn'
     ]),
@@ -1327,7 +1319,6 @@ const Views = {
     view: new ListView(() => [
       'systemInfoBtn',
       'navigationGuideBtn',
-      'checkUpdatesBtn',
       'restartAppBtn'
     ]),
     up: function() {

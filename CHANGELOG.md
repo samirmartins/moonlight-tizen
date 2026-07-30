@@ -7,6 +7,52 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.3.1
+
+Rumble was costing smooth video. With it switched off the picture was already close to
+ideal - 1.62 ms of deviation in frame delivery, 1.65% of frames off cadence - and
+switching it on was what pulled those numbers apart. This release makes the feature cost
+effectively nothing, so it can be left on.
+
+### Changed
+- Rumble no longer crosses threads at all. Each event from the host used to build a string
+  through an `ostringstream`, cross to the main thread **synchronously**, be parsed back
+  out of that string, call `navigator.getGamepads()` to find the pad, log a concatenated
+  line to the console, and only then play the effect - all on the thread that also
+  schedules every audio frame. The magnitudes are now published into a word of shared
+  memory and read by the animation frame callback that already walks the gamepads to
+  publish input. The rate at which the host sends events, which is not the client's to
+  control, no longer sets the rate at which the client does work
+- Both magnitudes share one 32-bit word, written by a single aligned atomic store, so a
+  reader can never catch a new low-frequency value against a stale high-frequency one
+- The effect is applied to a pad at most once every 32 ms. A dual-rumble pad drives
+  weighted motors whose spin-up and spin-down are measured in tens of milliseconds; they
+  cannot express a magnitude that moves at frame rate. This is a floor on the interval
+  rather than a delay - the first change after a quiet spell is applied on the very next
+  frame, so an impact is never held back, and only a sustained stream of changes is
+  thinned. A change that arrives while the floor is in force is not dropped: the next
+  frame applies whatever the newest value is by then, rather than a stale one from a queue
+- The promises returned by `playEffect` and `reset` are now claimed. A `try`/`catch` does
+  not cover a rejected promise, only a synchronous throw, so a pad that disconnected mid
+  effect left an unhandled rejection behind - and each of those is reported to the console,
+  which is work on the very thread this path exists to keep clear
+- Rumble now defaults to off. The work above should make it safe to turn on, and on the
+  DU7700 it is, but the default is left off for anyone whose hardware has not been tried
+- A controller left mid-vibration when a stream ends is now silenced explicitly, rather
+  than buzzing until the effect's own duration expires
+
+### Removed
+- *Check for updates*, along with the automatic check that ran ten seconds after every
+  launch. Both queried the releases of a different repository and compared them against a
+  version line that is not the same one, so neither could ever give a correct answer
+- The *Support* button and its dialog, which pointed at documentation for another project
+- *Unlock all frame rates*, which offered frame rates the panel cannot sustain
+- *Optimize bitrate presets*. The standard presets already come from the same table the
+  other Moonlight clients use
+- A second rumble flag that was written on every stream start and never read anywhere. The
+  setting was governed by a different variable, so editing the wrong one would have made
+  rumble ignore the setting without a word
+
 ## v3.3.0
 
 Everything this client was adding to the stream's timing, removed.

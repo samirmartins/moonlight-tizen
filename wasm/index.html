@@ -32,10 +32,6 @@
             <i class="navigation-button-icons material-icons">settings</i>
           </button>
           <div id="settingsTooltip" class="mdl-tooltip" for="settingsBtn">Settings</div>
-          <button type="button" id="supportBtn" class="mdl-button mdl-js-button mdl-button--icon mdl-js-ripple-effect" aria-label="Support">
-            <i class="navigation-button-icons material-icons">help</i>
-          </button>
-          <div id="supportTooltip" class="mdl-tooltip" for="supportBtn">Support</div>
           <button type="button" id="restoreDefaultsBtn" class="mdl-button mdl-js-button mdl-button--icon mdl-js-ripple-effect" aria-label="Restore Defaults">
             <i class="navigation-button-icons material-icons">settings_backup_restore</i>
           </button>
@@ -322,30 +318,6 @@
           </div>
           <div id="advancedSettings" class="settings-options">
             <div class="setting-option">
-              <label>Unlock all frame rates<span class="badge badge-experimental">Experimental</span></label>
-              <span class="mdl-list__item-text-body">
-                - Higher FPS can reduce latency on high-end devices, but may cause lag or instability on unsupported devices.
-              </span>
-              <div id="unlockAllFpsMenu">
-                <label id="unlockAllFpsBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="unlockAllFpsSwitch">
-                  <input type="checkbox" id="unlockAllFpsSwitch" class="mdl-switch__input" onchange="handleUnlockAllFps()">
-                  <span class="mdl-switch__label">Unlock all possible frame rate options for this device</span>
-                </label>
-              </div>
-            </div>
-            <div class="setting-option">
-              <label>Optimize bitrate presets</label>
-              <span class="mdl-list__item-text-body">
-                 - Calculates bitrate based on selected resolution, frame rate, codec, and HDR settings to determine the optimal value.
-              </span>
-              <div id="optimizeBitrateMenu">
-                <label id="optimizeBitrateBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="optimizeBitrateSwitch">
-                  <input type="checkbox" id="optimizeBitrateSwitch" class="mdl-switch__input">
-                  <span class="mdl-switch__label">Optimize bitrate to balance stream quality, performance, and bandwidth usage</span>
-                </label>
-              </div>
-            </div>
-            <div class="setting-option">
               <label>Connection warnings</label>
               <span class="mdl-list__item-text-body"></span>
               <div id="connectionWarningsMenu">
@@ -383,18 +355,6 @@
                 <button type="button" id="navigationGuideBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" aria-label="Navigation Guide">
                   Discover navigation controls for all input devices
                   <img src="static/res/ic_tv_remote_48px.svg" id="navigationGuideIcon">
-                </button>
-              </div>
-            </div>
-            <div class="setting-option">
-              <label>Check for updates</label>
-              <span class="mdl-list__item-text-body">
-                - Find out if a new application update is available.
-              </span>
-              <div id="checkForUpdatesMenu">
-                <button type="button" id="checkUpdatesBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" aria-label="Check for Updates">
-                  Check for new Moonlight updates
-                  <img src="static/res/ic_system_update_alt_48px.svg" id="checkUpdatesIcon">
                 </button>
               </div>
             </div>
@@ -519,21 +479,6 @@
       <div class="mdl-dialog__actions">
         <button type="button" id="cancelQuitApp" class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect">No</button>
         <button type="button" id="continueQuitApp" class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect">Yes</button>
-      </div>
-    </dialog>
-  </div>
-  <div id="appSupportDialogOverlay" class="dialog-overlay">
-    <dialog id="appSupportDialog" class="mdl-dialog">
-      <h3 id="appSupportDialogTitle" class="mdl-dialog__title">Moonlight Support</h3>
-      <div class="mdl-dialog__content">
-        <p id="appSupportDialogText">
-          If you're facing any problems with Moonlight, visit our comprehensive guide.<br><br>
-          Scan the QR code below to access an in-depth setup guide, troubleshooting tips, frequently asked questions, and more.<br><br>
-          <img src="static/res/support_qr_code.svg" id="supportQrCode"><br>
-        </p>
-      </div>
-      <div class="mdl-dialog__actions">
-        <button type="button" id="closeAppSupport" class="mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect">Close</button>
       </div>
     </dialog>
   </div>

@@ -161,8 +161,22 @@ function startGamepadSnapshot() {
     return;
   }
 
-  var tick = function() {
-    _gpPublish();
+  // Resolved apart from the block above on purpose: input is the critical path,
+  // and a rumble that cannot be resolved must cost input nothing.
+  try {
+    _rumblePtr = Module._rumbleStateAddress();
+  } catch (e) {
+    _rumblePtr = 0;
+    console.warn('%c[gamepad.js, startGamepadSnapshot]', 'color: orange;',
+      'Rumble unavailable; input is unaffected.', e);
+  }
+
+  // One gamepad list per frame, serving both consumers. Fetching it is not free,
+  // and there is no reason for the snapshot and the rumble to fetch it twice.
+  var tick = function(now) {
+    var pads = navigator.getGamepads ? navigator.getGamepads() : [];
+    _gpPublish(pads);
+    _rumbleApply(pads, now);
     _gpRafHandle = window.requestAnimationFrame(tick);
   };
   _gpRafHandle = window.requestAnimationFrame(tick);
@@ -171,6 +185,7 @@ function startGamepadSnapshot() {
 }
 
 function stopGamepadSnapshot() {
+  _rumbleStop();
   if (_gpRafHandle !== 0) {
     window.cancelAnimationFrame(_gpRafHandle);
     _gpRafHandle = 0;
@@ -181,12 +196,11 @@ function stopGamepadSnapshot() {
   }
 }
 
-function _gpPublish() {
-  if (_gpSnapshotPtr === 0) {
+function _gpPublish(pads) {
+  if (_gpSnapshotPtr === 0 || !pads) {
     return;
   }
 
-  var pads = navigator.getGamepads ? navigator.getGamepads() : [];
   var count = pads.length < _gpMaxPads ? pads.length : _gpMaxPads;
 
   var h32 = Module.HEAP32;
@@ -237,4 +251,133 @@ function _gpPublish() {
       }
     }
   }
+}
+
+// ─── Rumble ──────────────────────────────────────────────────────────────────
+//
+// The host sends rumble continuously during action. Applying each event the
+// moment it arrives meant a synchronous thread crossing, a gamepad lookup and a
+// console line per event, all on the thread that also schedules audio, and it
+// showed up as uneven video: the feature had to be switched off to get a smooth
+// picture.
+//
+// Events now only deposit their magnitudes here. The effect is applied from the
+// animation frame callback above, at most once per frame per pad, reusing the
+// gamepad list it has already fetched. A vibration cannot be felt changing more
+// often than that, so nothing is lost by holding an event for a few
+// milliseconds, and a burst of twenty events between two frames costs one call
+// instead of twenty.
+var _RUMBLE_MAX_PADS = 4;
+
+// The effect runs far longer than the interval between updates on purpose: each
+// new call supersedes the previous one, so a long duration means a vibration
+// that is meant to be continuous never gaps between frames. It is stopped
+// explicitly when the stream ends.
+var _RUMBLE_DURATION_MS = 5000;
+
+// Address of the magnitude words wasm/gamepad.cpp writes, one per pad, resolved
+// when the loop starts.
+var _rumblePtr = 0;
+
+// Last word acted on, per pad, so a magnitude that has not moved does not
+// produce a call. Games hold a steady vibration for long stretches.
+var _rumbleLastApplied = new Int32Array(_RUMBLE_MAX_PADS);
+
+// Floor on the interval between calls into the pad, per pad.
+//
+// A dual-rumble pad drives weighted motors whose spin-up and spin-down are
+// measured in tens of milliseconds; they cannot express a magnitude that moves
+// at frame rate, so calling at frame rate asks the TV to do work whose result
+// nobody can feel. Thirty times a second is already past what the hardware
+// reproduces, and it halves the one cost left on this path that is not ours.
+//
+// This is a floor on the interval, not a delay: the first change after a quiet
+// spell is applied on the very next frame, so an impulse - a shot, an impact -
+// is never held back. Only a sustained stream of changes gets thinned.
+var _RUMBLE_MIN_INTERVAL_MS = 32;
+var _rumbleNextAllowed = new Float64Array(_RUMBLE_MAX_PADS);
+
+// Swallows the promise the haptics calls return, when they return one at all.
+// Implementations that predate the promise-returning form give back undefined,
+// so the shape is checked rather than assumed.
+function _rumbleClaim(p) {
+  if (p && typeof p.then === 'function') {
+    p.then(function() {}, function() {});
+  }
+}
+
+// Reads the magnitudes the host asked for and hands them to the pads.
+//
+// Nothing is pushed here from C++; the word is simply read once per frame from
+// the animation frame callback, which is already walking the gamepad list. That
+// is what keeps the rumble off the main thread entirely: the rate at which the
+// host sends events is not ours to control, but the rate at which we act on
+// them is one per frame per pad, and a vibration cannot be felt changing faster
+// than that.
+//
+// Each word packs both magnitudes, written by a single aligned store, so the
+// pair read here is always the pair that was written - never a new low against
+// an old high.
+function _rumbleApply(pads, now) {
+  if (_rumblePtr === 0 || !pads) {
+    return;
+  }
+  var count = pads.length < _RUMBLE_MAX_PADS ? pads.length : _RUMBLE_MAX_PADS;
+  var base = _rumblePtr >> 2;
+  for (var i = 0; i < count; i++) {
+    var packed = Module.HEAP32[base + i];
+    if (packed === _rumbleLastApplied[i]) {
+      continue;
+    }
+    // Held back, not dropped. The word is left unclaimed, so the next frame
+    // compares against it again and applies whatever the newest value is by
+    // then - which is what a pad should be given, rather than a stale one that
+    // had been queued behind it.
+    if (now < _rumbleNextAllowed[i]) {
+      continue;
+    }
+    _rumbleLastApplied[i] = packed;
+    _rumbleNextAllowed[i] = now + _RUMBLE_MIN_INTERVAL_MS;
+
+    var gp = pads[i];
+    if (!gp || !gp.vibrationActuator) {
+      continue;
+    }
+    try {
+      // The returned promise has to be claimed. A try/catch does not cover it -
+      // it only covers a synchronous throw - so a pad that disconnects mid
+      // effect, or an actuator that refuses, would leave an unhandled rejection
+      // behind. Chromium reports each of those to the console, which is work on
+      // the very thread this whole path exists to keep clear.
+      _rumbleClaim(gp.vibrationActuator.playEffect('dual-rumble', {
+        startDelay: 0,
+        duration: _RUMBLE_DURATION_MS,
+        weakMagnitude: (packed & 0xffff) / 65535,
+        strongMagnitude: ((packed >>> 16) & 0xffff) / 65535
+      }));
+    } catch (e) {
+      // A pad that refuses the effect is not worth a line per event
+    }
+  }
+}
+
+// Silences every pad and forgets the last magnitudes. Without this, a stream
+// that ends mid-vibration leaves the controller buzzing until the effect's own
+// duration runs out.
+function _rumbleStop() {
+  _rumbleLastApplied.fill(0);
+  _rumbleNextAllowed.fill(0);
+  var pads = navigator.getGamepads ? navigator.getGamepads() : [];
+  for (var i = 0; i < pads.length && i < _RUMBLE_MAX_PADS; i++) {
+    var gp = pads[i];
+    if (!gp || !gp.vibrationActuator) {
+      continue;
+    }
+    try { _rumbleClaim(gp.vibrationActuator.reset()); } catch (e) {}
+  }
+  try {
+    if (typeof Module !== 'undefined' && Module._resetRumbleState) {
+      Module._resetRumbleState();
+    }
+  } catch (e) {}
 }

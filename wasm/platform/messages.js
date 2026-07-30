@@ -165,25 +165,6 @@ function handleMessage(msg) {
     // Show the performance statistics overlay
     $('#performance-stats').css('background', 'rgba(0, 0, 0, 0.5)');
     $('#performance-stats').text(msg.replace('StatMsg: ', ''));
-  } else if (msg.indexOf('controllerRumble: ') === 0) {
-    const eventData = msg.split(' ')[1].split(',');
-    const gamepadIdx = parseInt(eventData[0]);
-    const weakMagnitude = parseFloat(eventData[1]);
-    const strongMagnitude = parseFloat(eventData[2]);
-    const gamepads = navigator.getGamepads();
-    const gamepad = gamepads[gamepadIdx];
-    // Check if the gamepad exists and if it has a vibrationActuator associated with it
-    if (gamepad && gamepad.vibrationActuator) {
-      console.log('%c[messages.js, handleMessage]', 'color: gray;', 'Playing rumble on gamepad ' + gamepadIdx + ' with weak magnitude ' + weakMagnitude + ' and strong magnitude ' + strongMagnitude + '...');
-      gamepad.vibrationActuator.playEffect('dual-rumble', {
-        startDelay: 0,
-        duration: 5000, // Moonlight should be sending another rumble event when stopping
-        weakMagnitude: weakMagnitude,
-        strongMagnitude: strongMagnitude,
-      });
-    } else {
-      console.warn('%c[messages.js, handleMessage]', 'color: gray;', 'Warning: Gamepad ' + gamepadIdx + ' does not support the rumble feature!');
-    }
   } else if (msg.indexOf('mouseEmulationOn') === 0) {
     // Show mouse emulation enable status as a notification
     snackbarLogLong('Mouse emulation is activated');

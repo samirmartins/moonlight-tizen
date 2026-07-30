@@ -424,7 +424,6 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   m_ServerCodecModeSupport = serverCodecModeSupport;
   m_FramePacingEnabled = framePacing;
   m_OptimizeGamesEnabled = optimizeGames;
-  m_RumbleFeedbackEnabled = rumbleFeedback;
   m_MouseEmulationEnabled = mouseEmulation;
   m_FlipABfaceButtonsEnabled = flipABfaceButtons;
   m_FlipXYfaceButtonsEnabled = flipXYfaceButtons;

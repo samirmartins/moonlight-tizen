@@ -279,7 +279,6 @@ class MoonlightInstance {
 
   bool m_FramePacingEnabled;
   bool m_OptimizeGamesEnabled;
-  bool m_RumbleFeedbackEnabled;
   bool m_MouseEmulationEnabled;
   bool m_FlipABfaceButtonsEnabled;
   bool m_FlipXYfaceButtonsEnabled;

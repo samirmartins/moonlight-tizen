@@ -63,7 +63,6 @@ function attachListeners() {
 
   $('#addHostContainer').on('click', addHostDialog);
   $('#settingsBtn').on('click', showSettings);
-  $('#supportBtn').on('click', appSupportDialog);
   $('#goBackBtn').on('click', showHosts);
   $('#restoreDefaultsBtn').on('click', restoreDefaultsDialog);
   $('#quitRunningAppBtn').on('click', quitAppDialog);
@@ -86,12 +85,9 @@ function attachListeners() {
   $('#hdrModeSwitch').on('click', saveHdrMode);
   $('#fullRangeSwitch').on('click', saveFullRange);
   $('#gameModeSwitch').on('click', saveGameMode);
-  $('#unlockAllFpsSwitch').on('click', saveUnlockAllFps);
-  $('#optimizeBitrateSwitch').on('click', saveOptimizeBitrate);
   $('#disableWarningsSwitch').on('click', saveDisableWarnings);
   $('#performanceStatsSwitch').on('click', savePerformanceStats);
   $('#navigationGuideBtn').on('click', navigationGuideDialog);
-  $('#checkUpdatesBtn').on('click', checkForAppUpdates);
   $('#restartAppBtn').on('click', restartAppDialog);
 
   const registerMenu = (elementId, view) => {
@@ -402,9 +398,7 @@ function showHostsMode() {
   $('#header-logo').show();
   $('#main-header').show();
   $('.nav-menu-parent').show();
-  $('#updateAppBtn').show();
   $('#settingsBtn').show();
-  $('#supportBtn').show();
   $('#main-content').children().not('#listener, #loadingSpinner, #wasmSpinner').show();
   $('#settings-list').hide();
   $('#game-grid').hide();
@@ -503,7 +497,6 @@ function restoreUiAfterWasmLoad() {
 
 
   // Automatically check for a new update after 10 seconds delay at application startup once every 24 hours
-  setTimeout(() => checkForAppUpdatesAtStartup(), 10000);
 }
 
 function hostChosen(host) {
@@ -1414,29 +1407,6 @@ function hostDetailsDialog(host) {
   setTimeout(() => Navigation.switch(), 5);
 }
 
-// Show the Moonlight Support dialog
-function appSupportDialog() {
-  // Find the existing overlay and dialog elements
-  var appSupportDialogOverlay = document.querySelector('#appSupportDialogOverlay');
-  var appSupportDialog = document.querySelector('#appSupportDialog');
-
-  // Show the dialog and push the view
-  appSupportDialogOverlay.style.display = 'flex';
-  appSupportDialog.showModal();
-  isDialogOpen = true;
-  Navigation.push(Views.MoonlightSupportDialog);
-
-  // Close the dialog if the Close button is pressed
-  $('#closeAppSupport').off('click');
-  $('#closeAppSupport').on('click', function() {
-    console.log('%c[index.js, appSupportDialog]', 'color: green;', 'Closing app dialog and returning.');
-    appSupportDialogOverlay.style.display = 'none';
-    appSupportDialog.close();
-    isDialogOpen = false;
-    Navigation.pop();
-    Navigation.switch();
-  });
-}
 
 // Handle layout elements when displaying the Settings view
 function showSettingsMode() {
@@ -1450,9 +1420,7 @@ function showSettingsMode() {
   $('#host-grid').hide();
   $('#game-grid').hide();
   $('.nav-menu-parent').hide();
-  $('#updateAppBtn').hide();
   $('#settingsBtn').hide();
-  $('#supportBtn').hide();
   $('#quitRunningAppBtn').hide();
   $('#connection-warnings').css('display', 'none');
   $('#performance-stats').css('display', 'none');
@@ -1596,27 +1564,6 @@ function navigationGuideDialog() {
   });
 }
 
-// Fetch the latest version and release notes from GitHub API
-function fetchLatestRelease() {
-  // GitHub API endpoint to get the latest released version
-  const repoOwner = 'brightcraft';
-  const repoName = 'moonlight-tizen';
-  const apiUrl = `https://api.github.com/repos/${repoOwner}/${repoName}/releases/latest`;
-
-  // Fetch the latest release data from the GitHub API
-  return fetch(apiUrl).then(response => {
-    if (!response.ok) {
-      throw new Error('Network response failed: ' + response.statusText);
-    }
-    // Parse JSON response
-    return response.json();
-  }).then(data => {
-    // Get the latest version and release notes from the released update
-    let latestVersion = data.tag_name.startsWith('v') ? data.tag_name.slice(1) : data.tag_name;
-    const releaseNotes = extractReleaseNotes(data.body) || '• No relevant changes found.';
-    return { latestVersion, releaseNotes };
-  });
-}
 
 // Compare the current version with the latest version to determine if an update is available
 function checkVersionUpdate(currentVersion, latestVersion) {
@@ -1660,82 +1607,7 @@ function extractReleaseNotes(releaseNotes) {
   }).filter(line => line !== '').join('<br>');
 }
 
-// Format the update timestamp into a readable string as "dd/mm/yyyy hh:mm"
-function formatUpdateTimestamp(ms) {
-  var date = new Date(ms);
-  var day = date.getDate().toString().padStart(2, '0');
-  var month = (date.getMonth() + 1).toString().padStart(2, '0');
-  var year = date.getFullYear();
-  var hour = date.getHours().toString().padStart(2, '0');
-  var minute = date.getMinutes().toString().padStart(2, '0');
-  return `${day}/${month}/${year} ${hour}:${minute}`;
-}
 
-// Show the Update App button when a new update is found
-function updateAppButton(latestVersion) {
-  // Create the button dynamically
-  var updateAppBtn = $('<button>', {
-    type: 'button',
-    id: 'updateAppBtn',
-    class: 'mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect',
-    'aria-label': 'Update App'
-  });
-  // Create the badge icon dynamically
-  var updateAppBtnBadge = $('<div>', {
-    class: 'navigation-button-icons material-icons mdl-badge mdl-badge--overlap',
-    'data-badge': '1',
-    text: 'update'
-  });
-  // Create the button text dynamically
-  var updateAppBtnText = $('<span>', {
-    id: 'updateAppBtnText',
-    text: 'New update v' + latestVersion
-  });
-  // Create the button tooltip dynamically
-  var updateAppBtnTooltip = $('<div>', {
-    id: 'updateAppBtnTooltip',
-    class: 'mdl-tooltip',
-    'for': 'updateAppBtn',
-    text: 'Check what\'s new'
-  });
-  // Create the layout spacer dynamically
-  var extraLayoutSpacer = $('<div>', {
-    class: 'mdl-layout-spacer'
-  });
-  // Append elements inside the button
-  updateAppBtn.append(updateAppBtnBadge, updateAppBtnText);
-  // Insert elements after the existing layout spacer
-  $('.mdl-layout-spacer').after(updateAppBtn, updateAppBtnTooltip, extraLayoutSpacer);
-  // Upgrade newly added elements for MDL styling
-  componentHandler.upgradeElement(updateAppBtn[0]);
-  componentHandler.upgradeElement(updateAppBtnTooltip[0]);
-  componentHandler.upgradeDom();
-  // Smoothly fade-in the button after inserting
-  setTimeout(() => {
-    updateAppBtn.css({
-      opacity: 1,
-      transform: 'translateY(0)'
-    });
-  }, 1200);
-  // Attach the click event listener to the Update App button
-  updateAppBtn.off('click');
-  updateAppBtn.on('click', function() {
-    console.log('%c[index.js, updateAppButton]', 'color: green;', 'Checking for new update release notes...');
-    // Fetch the latest release data from the GitHub API
-    fetchLatestRelease().then(({ latestVersion, releaseNotes }) => {
-      setTimeout(() => {
-        // Check if a new version update is available
-        if (checkVersionUpdate(appInfo.version, latestVersion)) {
-          // Show the Update Moonlight dialog with new version and release notes to inform user to update the app
-          updateAppDialog(latestVersion, releaseNotes);
-        }
-      }, 500);
-    }).catch(error => {
-      console.error('%c[index.js, updateAppButton]', 'color: green;', 'Error: Failed to fetch the release data!', error);
-      snackbarLogLong('Unable to check update release notes at this time. Please try again later!');
-    });
-  });
-}
 
 // Show the Update Moonlight dialog
 function updateAppDialog(latestVersion, releaseNotes) {
@@ -1809,73 +1681,7 @@ function updateAppDialog(latestVersion, releaseNotes) {
   setTimeout(() => Navigation.switch(), 5);
 }
 
-// Check for updates when the Check for Updates button is pressed
-function checkForAppUpdates() {
-  console.log('%c[index.js, checkForAppUpdates]', 'color: green;', 'Checking for new application updates...');
-  snackbarLog('Checking for available Moonlight updates...');
-  // Fetch the latest release data from the GitHub API
-  fetchLatestRelease().then(({ latestVersion, releaseNotes }) => {
-    setTimeout(() => {
-      // Check if a new version update is available
-      if (checkVersionUpdate(appInfo.version, latestVersion)) {
-        // Show the Update Moonlight dialog with new version and release notes to inform user to update the app
-        updateAppDialog(latestVersion, releaseNotes);
-      } else {
-        // Otherwise, show a snackbar message to inform the user that the app is already up to date
-        snackbarLogLong(`✅ Your app is already up to date! You're on the latest version.`);
-      }
-    }, 1500);
-  }).catch(error => {
-    console.error('%c[index.js, checkForAppUpdates]', 'color: green;', 'Error: Failed to fetch the release data!', error);
-    snackbarLogLong('Unable to check for updates right now. Please try again later!');
-  });
-}
 
-// Automatically perform a scheduled app update check at startup if the interval condition is met and notify the user
-function checkForAppUpdatesAtStartup() {
-  // Fetch the current timestamp and stored version info
-  getData(UPDATE_TIMESTAMP, function(result) {
-    var lastChecked = result[UPDATE_TIMESTAMP];
-    var currentTime = Date.now();
-
-    if (lastChecked) {
-      console.log('%c[index.js, checkForAppUpdatesAtStartup]', 'color: green;', `Last auto-check performed: ${formatUpdateTimestamp(lastChecked)}`);
-    }
-
-    // Check if enough time has passed since the last update check
-    if (!lastChecked || currentTime - lastChecked > UPDATE_INTERVAL) {
-      console.log('%c[index.js, checkForAppUpdatesAtStartup]', 'color: green;', 'Performing auto-check for new application updates...');
-      // Fetch the latest release data from the GitHub API
-      fetchLatestRelease().then(({ latestVersion }) => {
-        setTimeout(() => {
-          // Check if a new version update is available
-          if (checkVersionUpdate(appInfo.version, latestVersion)) {
-            // Show snackbar message with new version to inform user to update the app
-            snackbarLogLong(`🚀 Version ${latestVersion} is now available! Check out the latest features & improvements.`);
-            // Create and display the Update App button with tooltip and additional layout spacer
-            updateAppButton(latestVersion);
-          }
-        }, 100);
-      }).catch(error => {
-        console.error('%c[index.js, checkForAppUpdatesAtStartup]', 'color: green;', 'Error: Failed to fetch the release data!', error);
-        snackbarLogLong('Cannot automatically check for updates at this time!');
-      });
-
-      // Save the current time
-      storeData(UPDATE_TIMESTAMP, currentTime);
-      console.log('%c[index.js, checkForAppUpdatesAtStartup]', 'color: green;', `New auto-check timestamp stored: ${formatUpdateTimestamp(currentTime)}`);
-    } else {
-      var timeLeft = UPDATE_INTERVAL - (currentTime - lastChecked);
-      var hoursLeft = Math.floor(timeLeft / (1000 * 60 * 60));
-      var minutesLeft = Math.floor((timeLeft % (1000 * 60 * 60)) / (1000 * 60));
-      console.log(
-        '%c[index.js, checkForAppUpdatesAtStartup]', 'color: green;', 
-        'Auto-update check skipped as the last one was within the past 24 hours. ' + 
-        `Next auto-check will occur in ${hoursLeft} hour${hoursLeft !== 1 ? 's' : ''} and ${minutesLeft} minute${minutesLeft !== 1 ? 's' : ''}.`
-      );
-    }
-  });
-}
 
 // Show a confirmation with the Restore Defaults dialog before restoring the default settings
 function restoreDefaultsDialog() {
@@ -2138,9 +1944,7 @@ function showAppsMode() {
   $('#host-grid').hide();
   $('#settings-list').hide();
   $('.nav-menu-parent').hide();
-  $('#updateAppBtn').hide();
   $('#settingsBtn').hide();
-  $('#supportBtn').hide();
   $('#restoreDefaultsBtn').hide();
   $('#connection-warnings').css('display', 'none');
   $('#performance-stats').css('display', 'none');
@@ -2865,7 +2669,7 @@ function saveResolution() {
   storeData('resolution', chosenResolution, null);
 
   // Update the bitrate value based on the selected resolution
-  $('#optimizeBitrateSwitch').prop('checked') ? optimizeBitratePresets() : standardBitratePresets();
+  standardBitratePresets();
   // Trigger warning check after changing video resolution
   warnResolutionFramerate();
 }
@@ -2877,7 +2681,7 @@ function saveFramerate() {
   storeData('frameRate', chosenFramerate, null);
 
   // Update the bitrate value based on the selected frame rate
-  $('#optimizeBitrateSwitch').prop('checked') ? optimizeBitratePresets() : standardBitratePresets();
+  standardBitratePresets();
   // Trigger warning check after changing video frame rate
   warnResolutionFramerate();
 }
@@ -2999,40 +2803,6 @@ function standardBitratePresets() {
   saveBitrate();
 }
 
-function optimizeBitratePresets() {
-  console.log('%c[index.js, optimizeBitratePresets]', 'color: green;', 'Applying optimize bitrate presets...');
-  var width = parseInt($('#selectResolution').data('value').split(':')[0]);
-  var height = parseInt($('#selectResolution').data('value').split(':')[1]);
-  var frameRate = $('#selectFramerate').data('value').toString();
-  var videoCodec = $('#selectCodec').data('value').toString();
-  var hdrMode = $('#hdrModeSwitch').parent().hasClass('is-checked') ? 1 : 0;
-
-  // Multiplier to adjust bitrate based on codec efficiency
-  // Sweet-spot formula reference: https://www.reddit.com/r/MoonlightStreaming/comments/1gg2cdy/sweet_spot_bitrate/
-  var codecMultiplier = {
-    "H264": 1.0,
-    "HEVC": 0.6,
-    "AV1": 0.4
-  }[videoCodec];
-
-  // Bitrate factor depends on HDR state
-  var bitrateFactor = hdrMode ? 6630.5 : 8309;
-
-  // Calculate optimized bitrate based on resolution, framerate, codec efficiency, and HDR state
-  var baseBitrate = width * height * frameRate / bitrateFactor;
-  var finalBitrate = Math.round(baseBitrate * codecMultiplier);
-
-  // Apply the default bitrate value in case of invalid calculation
-  if (finalBitrate <= 0) {
-    finalBitrate = 10;
-  }
-
-  // Set the bitrate slider value based on the calculated optimized bitrate
-  $('#bitrateSlider')[0].MaterialSlider.change(finalBitrate / 1000);
-
-  // Update the bitrate value
-  saveBitrate();
-}
 
 
 function saveIpAddressFieldMode() {
@@ -3156,9 +2926,6 @@ function updateVideoCodec(chosenCodecId, chosenCodecValue) {
   storeData('videoCodec', chosenCodecValue, null);
 
   // Update the bitrate value based on the selected codec
-  if ($('#optimizeBitrateSwitch').prop('checked')) {
-    optimizeBitratePresets();
-  }
   // Trigger warning check after changing video codec
   warnVideoCodec();
 }
@@ -3217,9 +2984,6 @@ function updateHdrMode() {
     storeData('hdrMode', chosenHdrMode, null);
 
     // Update the bitrate value based on the selected HDR state
-    if ($('#optimizeBitrateSwitch').prop('checked')) {
-      optimizeBitratePresets();
-    }
   }, 100);
 }
 
@@ -3254,57 +3018,8 @@ function saveGameMode() {
   }, 100);
 }
 
-function saveUnlockAllFps() {
-  setTimeout(() => {
-    const chosenUnlockAllFps = $('#unlockAllFpsSwitch').parent().hasClass('is-checked');
-    console.log('%c[index.js, saveUnlockAllFps]', 'color: green;', 'Saving unlock all FPS state: ' + chosenUnlockAllFps);
-    storeData('unlockAllFps', chosenUnlockAllFps, null);
-  }, 100);
-}
 
-function handleUnlockAllFps() {
-  var currentFps = $('#selectFramerate').data('value');
-  const addFramerate = $('.videoFramerateMenu').find('li[data-value="60"]');
 
-  // Check if the Unlock all FPS switch is checked
-  if ($('#unlockAllFpsSwitch').prop('checked')) {
-    console.log('%c[index.js, handleUnlockAllFps]', 'color: green;', 'Adding higher framerate options: 90, 120, 144 FPS');
-    // Check if any of the higher FPS options are absent to avoid duplicates
-    if (!$('.videoFramerateMenu').find('li[data-value="90"], li[data-value="120"], li[data-value="144"]').length) {
-      // Insert all higher FPS options in correct order (90, 120, 144)
-      addFramerate.after(`
-        <li class="mdl-menu__item" data-value="90">90 FPS</li>
-        <li class="mdl-menu__item" data-value="120">120 FPS</li>
-        <li class="mdl-menu__item" data-value="144">144 FPS</li>
-      `);
-      // Attach click listeners only to the newly added FPS options
-      $('.videoFramerateMenu li[data-value="90"], li[data-value="120"], li[data-value="144"]').on('click', saveFramerate);
-    }
-  } else {
-    console.log('%c[index.js, handleUnlockAllFps]', 'color: green;', 'Removing higher framerate options: 90, 120, 144 FPS');
-    // If unchecked, remove the higher FPS options from the selection menu
-    $('.videoFramerateMenu li[data-value="90"], li[data-value="120"], li[data-value="144"]').remove();
-    // After removal, if a higher FPS option remains selected, then reset it to the default option
-    if (['90', '120', '144'].includes(String(currentFps))) {
-      $('#selectFramerate').text('60 FPS').data('value', '60');
-      console.log('%c[index.js, handleUnlockAllFps]', 'color: green;', 'Resetting framerate value to 60 FPS');
-      storeData('frameRate', '60', null);
-      // Update the bitrate value based on the selected frame rate
-      $('#optimizeBitrateSwitch').prop('checked') ? optimizeBitratePresets() : standardBitratePresets();
-    }
-  }
-}
-
-function saveOptimizeBitrate() {
-  setTimeout(() => {
-    const chosenOptimizeBitrate = $('#optimizeBitrateSwitch').parent().hasClass('is-checked');
-    console.log('%c[index.js, saveOptimizeBitrate]', 'color: green;', 'Saving optimize bitrate state: ' + chosenOptimizeBitrate);
-    storeData('optimizeBitrate', chosenOptimizeBitrate, null);
-
-    // Update the bitrate value based on the selected preset mode
-    chosenOptimizeBitrate ? optimizeBitratePresets() : standardBitratePresets();
-  }, 100);
-}
 
 function saveDisableWarnings() {
   setTimeout(() => {
@@ -3362,9 +3077,12 @@ function restoreDefaultsSettingsValues() {
   document.querySelector('#optimizeGamesBtn').MaterialSwitch.on();
   storeData('optimizeGames', defaultOptimizeGames, null);
 
-  // moonlight-android has no switch for this at all; rumble is always forwarded.
-  const defaultRumbleFeedback = true;
-  document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.on();
+  // Off by default. Every rumble event currently crosses to the main thread
+  // synchronously, which competes with audio scheduling and is measurable as
+  // uneven frame delivery; until that path is rewritten, the smoother default is
+  // to leave it off.
+  const defaultRumbleFeedback = false;
+  document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.off();
   storeData('rumbleFeedback', defaultRumbleFeedback, null);
 
   // Matches DEFAULT_MOUSE_EMULATION in moonlight-android.
@@ -3427,13 +3145,7 @@ function restoreDefaultsSettingsValues() {
     document.querySelector('#gameModeBtn').MaterialSwitch.disable();
   }
 
-  const defaultUnlockAllFps = false;
-  document.querySelector('#unlockAllFpsBtn').MaterialSwitch.off();
-  storeData('unlockAllFps', defaultUnlockAllFps, null);
 
-  const defaultOptimizeBitrate = false;
-  document.querySelector('#optimizeBitrateBtn').MaterialSwitch.off();
-  storeData('optimizeBitrate', defaultOptimizeBitrate, null);
 
   const defaultDisableWarnings = false;
   document.querySelector('#disableWarningsBtn').MaterialSwitch.off();
@@ -3541,18 +3253,6 @@ function loadUserDataCb() {
     }
   });
 
-  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored unlockAllFps preferences.');
-  getData('unlockAllFps', function(previousValue) {
-    if (previousValue.unlockAllFps == null) {
-      document.querySelector('#unlockAllFpsBtn').MaterialSwitch.off(); // Set the default state
-    } else if (previousValue.unlockAllFps == false) {
-      document.querySelector('#unlockAllFpsBtn').MaterialSwitch.off();
-    } else {
-      document.querySelector('#unlockAllFpsBtn').MaterialSwitch.on();
-    }
-    // Handle the Unlocked FPS visibility based on switch state
-    handleUnlockAllFps();
-  });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored frameRate preferences.');
   getData('frameRate', function(previousValue) {
@@ -3612,7 +3312,7 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored rumbleFeedback preferences.');
   getData('rumbleFeedback', function(previousValue) {
     if (previousValue.rumbleFeedback == null) {
-      document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.on(); // Set the default state
+      document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.off(); // Set the default state
     } else if (previousValue.rumbleFeedback == false) {
       document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.off();
     } else {
@@ -3733,16 +3433,6 @@ function loadUserDataCb() {
     }
   });
 
-  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored optimizeBitrate preferences.');
-  getData('optimizeBitrate', function(previousValue) {
-    if (previousValue.optimizeBitrate == null) {
-      document.querySelector('#optimizeBitrateBtn').MaterialSwitch.off(); // Set the default state
-    } else if (previousValue.optimizeBitrate == false) {
-      document.querySelector('#optimizeBitrateBtn').MaterialSwitch.off();
-    } else {
-      document.querySelector('#optimizeBitrateBtn').MaterialSwitch.on();
-    }
-  });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored disableWarnings preferences.');
   getData('disableWarnings', function(previousValue) {

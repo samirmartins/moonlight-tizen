@@ -48,9 +48,10 @@ Installing one variant replaces the other and keeps your settings.
 
 ## Settings note
 
-> [!IMPORTANT]
-> **Performance is noticeably better with *Allow gamepad rumble feedback* switched off.**
-> This is currently under investigation.
+> [!NOTE]
+> *Allow gamepad rumble feedback* used to cost smooth video and had to be left off. That
+> was fixed in v3.3.1 and it is safe to turn on. It still **defaults to off**, because the
+> fix has only been confirmed on a DU7700.
 
 *Audio jitter buffer* (default 50 ms) replaces the old *Audio synchronization* toggle. It
 is the setpoint a rate servo holds, not a threshold above which audio is dropped. Raise it
