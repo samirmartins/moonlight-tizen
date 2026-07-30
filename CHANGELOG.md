@@ -2,6 +2,11 @@
 
 All notable changes to this project will be documented in this file.
 
+**Everything from v2.0.0 onwards is this fork.** Everything from v1.13.1 downwards is
+the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen),
+kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
+that reason: the two lines are separate and should never be read as one.
+
 ## v3.3.0
 
 Everything this client was adding to the stream's timing, removed.
@@ -109,8 +114,7 @@ between the two was reasoned about rather than measured.
 
 ## v2.0.0
 
-First release of this fork, based on upstream v1.13.1. The version starts a line of
-its own rather than continuing upstream's, so that the two are never confused.
+First release of this fork, branched from upstream v1.13.1.
 
 ### Fixed
 - Fixed video stuttering caused by the frame pacer busy-waiting on the decoder thread, and by its once-a-second step correction releasing held frames in a burst
@@ -124,6 +128,13 @@ its own rather than continuing upstream's, so that the two are never confused.
 - Builds with `-O3` instead of `-Os`
 - Reports the client refresh rate and colour space to the host
 - Widgets are named after the version and variant, and the ForceGM variant builds from the same tree with `--build-arg FORCE_GAME_MODE=1`
+
+---
+
+# Upstream history
+
+Everything below is [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen),
+before this fork existed. None of it is my work.
 
 ## v1.13.1
 
