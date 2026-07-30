@@ -2,6 +2,46 @@
 
 All notable changes to this project will be documented in this file.
 
+## v3.3.0
+
+Everything this client was adding to the stream's timing, removed.
+
+Measured on hardware: with a still picture the host delivers 56 FPS, in motion 59.1,
+because capture skips frames that did not change. Frames are two packets long in a
+still scene and network latency varies by a millisecond, yet the interval between
+frames reaching the platform varied by nearly ten. That gap was ours.
+
+### Changed
+- Frames are submitted on the thread that received their last packet, instead of being
+  queued for a decoder thread to collect. A handoff whose far end has to be woken by
+  the scheduler cannot be tighter than the scheduler is, and on a TV running a dozen
+  threads across few cores that is not tight
+- The timeline advances at the frame rate actually being delivered, measured as total
+  host time over total frames across a window, instead of at the rate that was
+  requested. The previous design tried to correct a nominal step towards the host with
+  a fifty microsecond cap, while the correction needed ranges from 250 microseconds at
+  59.1 FPS to 1190 at 56, so it saturated and never converged. A timeline claiming 60
+  while 56 arrive is a cadence the stream cannot sustain
+- The audio feeder no longer wakes a thousand times a second. Its condition variable is
+  signalled on every arriving packet; the one millisecond timeout was a safety net that
+  had become a poll
+- Gamepad polling drops from 200 Hz to 125 Hz. State is published by an animation frame
+  callback, so polling faster than the display refreshes cannot produce fresher input
+
+### Removed
+- The frame pacer, and its setting. Whatever wakes a pacer to release a frame is the
+  same scheduler whose unevenness the pacer exists to hide, so a timed hold can never
+  be more precise than the wake-up that ends it. Measured on hardware it was worse than
+  not pacing at all
+- The retry loop around handing a packet to the platform. It now runs on the thread that
+  drains the socket, where holding on for another attempt trades a lost frame for lost
+  packets
+
+### Added
+- The overlay reports the spread of the host's own send interval next to the spread of
+  our delivery interval. Side by side they separate a stream the host sent unevenly from
+  one this client made uneven, which nothing here could tell before
+
 ## v3.2.1
 
 Validated on a Samsung DU7700 streaming at 4K: no complaints about picture or audio.

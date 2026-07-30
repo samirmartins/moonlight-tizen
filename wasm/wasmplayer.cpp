@@ -71,23 +71,30 @@ static constexpr TimeStamp kPacingMaxDriftStep = 1ms;
 // seconds into the future.
 static constexpr int kMaxFrameNumberGap = 120;
 
-// Rate lock between the generated timeline and the host clock. The gain is
-// deliberately tiny: the error it corrects accumulates over seconds, and a
-// stiff response would turn the host's millisecond quantisation into exactly
-// the per-frame noise this design exists to remove.
-static constexpr double kPtsRateLockGain = 0.002;
+// Frames over which the delivered frame rate is averaged to derive the step.
+//
+// The host does not deliver the rate that was requested. Measured on hardware it
+// delivers 56 FPS with a still picture and 59.1 FPS in motion, because capture
+// skips frames that did not change. A timeline that advances at a nominal 60
+// while 56 arrive claims a cadence the stream cannot sustain, and the pipeline
+// runs out of picture several times a second.
+//
+// So the step is measured rather than assumed: total host time divided by total
+// frames over a window. That is unbiased by construction, whatever the host is
+// doing, and averaging a window of this size takes the host clock's millisecond
+// quantisation down to about a twentieth of a millisecond, which is what the
+// generated timeline was introduced to avoid in the first place.
+//
+// An earlier design tried to correct a nominal step towards the host with a
+// capped adjustment. The cap was fifty microseconds and the correction actually
+// needed ranges from 250 microseconds at 59.1 FPS to 1190 at 56, so it saturated
+// and never converged.
+static constexpr int kPtsRateWindowFrames = 64;
 
-// Hard cap on how far the step may sit from the nominal frame duration. Fifty
-// microseconds is three tenths of a percent of a 60 Hz frame, far below
-// anything visible. Sustaining a rate mismatch requires the correction to equal
-// it, and 59.94 against a nominal 60 needs about 17 us per frame, so the cap has
-// to sit comfortably above that rather than just above it.
-static constexpr double kPtsMaxStepAdjustS = 0.000050;
-
-// Accumulated error beyond which the timeline is re-anchored rather than
-// steered. No rate mismatch produces a quarter second of drift; a discontinuity
-// that slipped past the frame number check does.
-static constexpr double kPtsResyncThresholdS = 0.25;
+// Sanity bounds on the measured step, as a multiple of the nominal frame
+// duration. A window that produces anything outside this is not a frame rate.
+static constexpr double kPtsStepMinFactor = 0.5;
+static constexpr double kPtsStepMaxFactor = 2.0;
 
 // Stages of the H.264 SPS fixup, so a decoder that dislikes one of them can be
 // bisected by lowering this rather than by rebuilding with parts commented out.
@@ -101,17 +108,6 @@ static constexpr int kSpsFixupStage = 3;
 // keyframe costs several times a P-frame, so one request per rejected packet
 // turns a congested link into a worse one.
 static constexpr uint32_t kIdrRequestIntervalMs = 500;
-
-// Backoffs between attempts to hand a packet to the platform. The first attempt
-// is immediate, so the total added delay in the worst case is 1.75 ms.
-static constexpr std::chrono::microseconds kVideoAppendRetryBackoffs[] = {
-  std::chrono::microseconds(250),
-  std::chrono::microseconds(500),
-  std::chrono::microseconds(1000),
-};
-static constexpr unsigned int kVideoAppendMaxAttempts =
-  (unsigned int)(sizeof(kVideoAppendRetryBackoffs) /
-                 sizeof(kVideoAppendRetryBackoffs[0])) + 1;
 
 // ─── Presentation stall detection ────────────────────────────────────────────
 //
@@ -147,22 +143,20 @@ static std::vector<unsigned char> s_DecodeBuffer;
 static TimeStamp s_frameDuration;
 static TimeStamp s_pktPts;
 
-static TimeStamp s_ptsDiff;
 static TimeStamp s_lastSec;
-static bool s_ptsDiffSeeded = false;
 
 // Generated timeline state, see NextPacketPts()
 static uint32_t s_lastHostPtsMs = 0;
 static bool s_hasHostPtsRef = false;
 static bool s_loggedPtsSource = false;
 
-// Uniform step, adapted slowly so the timeline tracks the host's rate.
+// Uniform step, re-measured once per window from the host's own clock.
 static TimeStamp s_ptsStep;
-// Point the accumulated error is measured from, on both clocks, and the frame
-// number the last step was taken from.
-static uint32_t s_ptsAnchorHostMs = 0;
-static TimeStamp s_ptsAnchorPts;
 static int s_ptsFrameNumberRef = 0;
+
+// Window the step is measured over: host time and frame count at its start.
+static uint32_t s_ptsWindowHostMs = 0;
+static int s_ptsWindowFrames = 0;
 
 // One-shot log guard for the pipeline clock, so its absence is visible in the
 // log by omission rather than its presence being repeated every update.
@@ -182,18 +176,9 @@ static bool s_hasLastAppendTime = false;
 // stops being invisible.
 static constexpr double kAppendJitterToleranceMs = 4.0;
 
-static std::chrono::time_point<std::chrono::steady_clock> s_firstAppend;
-
 static bool s_hasFirstFrame = false;
-static bool s_FramePacingEnabled = false;
 
 static uint32_t s_lastIdrRequestMs = 0;
-
-// Parks the decoder thread while pacing. Nothing ever notifies it; wait_for()
-// is used because it lowers to a futex wait, which genuinely blocks the worker,
-// unlike sleep primitives that may degrade to a spin under Emscripten.
-static std::mutex s_PacerMutex;
-static std::condition_variable s_PacerCv;
 
 // PostToJsAsync() hands a raw pointer to the main thread and returns before the
 // main thread reads it, so the payload has to outlive the call. Only the video
@@ -482,17 +467,16 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
   s_lastSec = 0s;
 
   // Initialize the timestamp difference to zero
-  s_ptsDiff = 0s;
-  s_ptsDiffSeeded = false;
+
 
   // Reset the generated timeline for the new stream
   s_hasHostPtsRef = false;
   s_lastHostPtsMs = 0;
   s_loggedPtsSource = false;
   s_ptsStep = s_frameDuration;
-  s_ptsAnchorHostMs = 0;
-  s_ptsAnchorPts = TimeStamp(0);
   s_ptsFrameNumberRef = 0;
+  s_ptsWindowHostMs = 0;
+  s_ptsWindowFrames = 0;
 
   // Reset the IDR request throttle for the new stream
   s_lastIdrRequestMs = 0;
@@ -505,9 +489,6 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
   s_loggedSpsFixup = false;
   g_Instance->m_PipelinePositionUs.store(kNoPipelinePosition, std::memory_order_release);
   g_Instance->m_PipelinePositionAtMs.store(0, std::memory_order_relaxed);
-
-  // Set the frame pacing flag based on instance configuration
-  s_FramePacingEnabled = g_Instance->m_FramePacingEnabled;
 
   // Preallocate space for the performance stats string. The cadence block added
   // several lines, and FormatVideoStats() asserts rather than truncating.
@@ -680,8 +661,9 @@ static TimeStamp NextPacketPts(PDECODE_UNIT decodeUnit, TimeStamp previousPts) {
   if (!s_hasHostPtsRef) {
     s_hasHostPtsRef = true;
     s_lastHostPtsMs = hostMs;
-    s_ptsAnchorHostMs = hostMs;
     s_ptsFrameNumberRef = frameNumber;
+    s_ptsWindowHostMs = hostMs;
+    s_ptsWindowFrames = 0;
     s_ptsStep = s_frameDuration;
     // Anchor the timeline at zero, as every previous implementation did, so the
     // baseline offset against the audio track is unchanged.
@@ -690,177 +672,62 @@ static TimeStamp NextPacketPts(PDECODE_UNIT decodeUnit, TimeStamp previousPts) {
 
   int framesElapsed = frameNumber - s_ptsFrameNumberRef;
   s_ptsFrameNumberRef = frameNumber;
+
+  // A frame number that did not advance, ran backwards, or jumped further than a
+  // brief loss burst means the stream restarted or the host reset its numbering.
+  // The window measures nothing across that boundary, so it starts again.
+  if (framesElapsed < 1 || framesElapsed > kMaxFrameNumberGap) {
+    s_lastHostPtsMs = hostMs;
+    s_ptsWindowHostMs = hostMs;
+    s_ptsWindowFrames = 0;
+    s_ptsStep = s_frameDuration;
+    return previousPts + s_frameDuration;
+  }
+
+  // Fold this frame's host interval into the cadence statistics before the
+  // window arithmetic consumes it. This is the host's own spacing, independent
+  // of anything that happens to the frame afterwards, and it is the only way to
+  // tell an unevenly delivered stream from one this client made uneven.
+  {
+    double hostDeltaMs =
+      (double)((int64_t)hostMs - (int64_t)s_lastHostPtsMs) / framesElapsed;
+    double frameMs = std::chrono::duration<double, std::milli>(s_frameDuration).count();
+    if (hostDeltaMs > 0.0 && hostDeltaMs < frameMs * 4) {
+      m_ActiveWndVideoStats.hostIntervalCount++;
+      m_ActiveWndVideoStats.hostIntervalSumMs += hostDeltaMs;
+      m_ActiveWndVideoStats.hostIntervalSumSqMs += hostDeltaMs * hostDeltaMs;
+    }
+  }
   s_lastHostPtsMs = hostMs;
 
-  // A frame number that did not advance, ran backwards, or jumped further than
-  // a brief loss burst means the stream restarted or the host reset its
-  // numbering. Neither the step nor the accumulated error means anything across
-  // that boundary, so re-anchor rather than trying to interpolate through it.
-  if (framesElapsed < 1 || framesElapsed > kMaxFrameNumberGap) {
-    s_ptsAnchorHostMs = hostMs;
-    s_ptsAnchorPts = previousPts + s_frameDuration;
-    s_ptsStep = s_frameDuration;
-    return s_ptsAnchorPts;
-  }
+  s_ptsWindowFrames += framesElapsed;
 
-  TimeStamp framePts = previousPts + s_ptsStep * framesElapsed;
+  // Re-measure the step once the window is full: total host time over total
+  // frames. Nothing here assumes what the rate should be.
+  if (s_ptsWindowFrames >= kPtsRateWindowFrames) {
+    int64_t spanMs = (int64_t)hostMs - (int64_t)s_ptsWindowHostMs;
+    if (spanMs > 0) {
+      double measuredS = (double)spanMs / 1000.0 / (double)s_ptsWindowFrames;
+      double nominalS = s_frameDuration.count();
+      if (measuredS >= nominalS * kPtsStepMinFactor &&
+          measuredS <= nominalS * kPtsStepMaxFactor) {
+        s_ptsStep = TimeStamp(measuredS);
 
-  // Slow rate lock. The host may not be producing exactly the nominal frame
-  // rate: 59.94 against a nominal 60 is a third of a percent, which is
-  // imperceptible per frame and a second of drift every five minutes.
-  //
-  // The error is measured over the whole run rather than per frame, so the
-  // millisecond quantisation of the host clock averages out instead of being
-  // differentiated into noise. The correction is capped hard enough that the
-  // step can never move far enough from nominal to be seen as a cadence change.
-  double hostElapsedS =
-    (double)((int64_t)hostMs - (int64_t)s_ptsAnchorHostMs) / 1000.0;
-  double ourElapsedS = (framePts - s_ptsAnchorPts).count();
-  double errorS = hostElapsedS - ourElapsedS;
-
-  if (std::abs(errorS) > kPtsResyncThresholdS) {
-    // Far beyond anything a rate mismatch produces: a discontinuity we did not
-    // detect from the frame numbers. Re-anchor here.
-    s_ptsAnchorHostMs = hostMs;
-    s_ptsAnchorPts = framePts;
-    s_ptsStep = s_frameDuration;
-  } else {
-    double adjustS = errorS * kPtsRateLockGain;
-    if (adjustS > kPtsMaxStepAdjustS) {
-      adjustS = kPtsMaxStepAdjustS;
-    } else if (adjustS < -kPtsMaxStepAdjustS) {
-      adjustS = -kPtsMaxStepAdjustS;
-    }
-    s_ptsStep = s_frameDuration + TimeStamp(adjustS);
-  }
-
-  if (!s_loggedPtsSource) {
-    s_loggedPtsSource = true;
-    MoonlightInstance::ClLogMessage(
-      "Video PTS is generated at a uniform step, rate locked to the host\n");
-  }
-
-  return framePts;
-}
-
-// Holds the decoder thread until the frame is due.
-//
-// The previous implementation was a bare spin on steady_clock::now(), which
-// under Emscripten is a JS call per iteration and keeps the decoder worker at
-// 100% CPU for most of every frame interval. On a TV SoC that starves the audio
-// receive thread and the main thread, and the resulting delay backs up the
-// 15-entry decode unit queue until it is flushed wholesale.
-//
-// Two references are possible. The pipeline's own reported position is exact and
-// is used whenever the platform provides it. Failing that, elapsed local time
-// since the first append plus an estimated offset is the best available guess,
-// which is what every version up to now used unconditionally.
-static void PaceFrame(TimeStamp framePts) {
-  TimeStamp lead = s_frameDuration * kPacingLeadFrames;
-
-  // Preferred path: wait until the pipeline has actually reached the point where
-  // this frame is one lead away from being needed. No estimator, no drift.
-  int64_t positionUs = g_Instance->m_PipelinePositionUs.load(std::memory_order_acquire);
-  if (positionUs != MoonlightInstance::kNoPipelinePosition) {
-    uint64_t reportedAtMs = g_Instance->m_PipelinePositionAtMs.load(std::memory_order_relaxed);
-    double targetMs = std::chrono::duration<double, std::milli>(framePts - lead).count();
-
-    // Bound the wait the same way the fallback does, so a stalled or stale
-    // position report cannot park the decoder thread indefinitely.
-    auto waitStart = std::chrono::steady_clock::now();
-    auto maxWait = std::chrono::duration_cast<std::chrono::microseconds>(
-      s_frameDuration * kPacingMaxWaitFrames);
-
-    while (true) {
-      uint64_t nowMs = LiGetMillis();
-      double sinceReportMs = (nowMs >= reportedAtMs) ? (double)(nowMs - reportedAtMs) : 0.0;
-      double positionMs = (positionUs / 1000.0) + sinceReportMs;
-
-      double remainingMs = targetMs - positionMs;
-      if (remainingMs <= 0.0) {
-        return;
+        if (!s_loggedPtsSource) {
+          s_loggedPtsSource = true;
+          MoonlightInstance::ClLogMessage(
+            "Video timeline is following the delivered frame rate (%.2f FPS)\n",
+            1.0 / measuredS);
+        }
       }
-      if (std::chrono::steady_clock::now() - waitStart >= maxWait) {
-        return;
-      }
-
-      if (remainingMs > 1.0) {
-        std::unique_lock<std::mutex> lock(s_PacerMutex);
-        s_PacerCv.wait_for(lock, std::chrono::microseconds((int64_t)(remainingMs * 1000.0) - 1000));
-      } else {
-        std::this_thread::yield();
-      }
-
-      // Pick up any newer report published while we waited
-      positionUs = g_Instance->m_PipelinePositionUs.load(std::memory_order_acquire);
-      reportedAtMs = g_Instance->m_PipelinePositionAtMs.load(std::memory_order_relaxed);
     }
+    // A host that never fills the timestamp leaves spanMs at zero, and the step
+    // simply stays nominal, which is the right thing to do knowing nothing.
+    s_ptsWindowHostMs = hostMs;
+    s_ptsWindowFrames = 0;
   }
 
-  // Fallback: local clock against the estimated offset.
-  auto now = std::chrono::steady_clock::now();
-  TimeStamp fromStart = now - s_firstAppend;
-
-  TimeStamp deadline = framePts + s_ptsDiff - lead - kFrameTimeMargin;
-  if (fromStart >= deadline) {
-    return;
-  }
-
-  // Never hold a frame for more than a couple of frame intervals, whatever the
-  // pacing reference happens to say.
-  TimeStamp maxDeadline = fromStart + s_frameDuration * kPacingMaxWaitFrames;
-  if (deadline > maxDeadline) {
-    deadline = maxDeadline;
-  }
-
-  while (fromStart < deadline) {
-    TimeStamp remaining = deadline - fromStart;
-    if (remaining > kPacingSleepFloor) {
-      std::unique_lock<std::mutex> lock(s_PacerMutex);
-      s_PacerCv.wait_for(
-        lock,
-        std::chrono::duration_cast<std::chrono::microseconds>(remaining - kPacingSleepFloor)
-      );
-    } else {
-      std::this_thread::yield();
-    }
-    now = std::chrono::steady_clock::now();
-    fromStart = now - s_firstAppend;
-  }
-}
-
-// Re-anchors the pacing reference to the drift observed between the host
-// presentation clock and the local clock.
-static void UpdatePacingDrift(TimeStamp fromStart, TimeStamp framePts) {
-  if (fromStart <= s_lastSec + kTimeWindow) {
-    return;
-  }
-
-  if (fromStart > s_lastSec + kTimeWindow * 2) {
-    // A long stall left us far behind the window schedule; resync rather than
-    // walking forward one window per frame.
-    s_lastSec = fromStart;
-  } else {
-    s_lastSec += kTimeWindow;
-  }
-
-  TimeStamp measured = fromStart - framePts;
-
-  if (!s_ptsDiffSeeded) {
-    // One-off: lock on to the real offset immediately, so pacing starts working
-    // right away instead of creeping towards it a millisecond per second.
-    s_ptsDiffSeeded = true;
-    s_ptsDiff = measured;
-    return;
-  }
-
-  TimeStamp step = (measured - s_ptsDiff) * kPacingDriftGain;
-  if (step > kPacingMaxDriftStep) {
-    step = kPacingMaxDriftStep;
-  } else if (step < -kPacingMaxDriftStep) {
-    step = -kPacingMaxDriftStep;
-  }
-  s_ptsDiff += step;
+  return previousPts + s_ptsStep * framesElapsed;
 }
 
 // Folds the interval since the previous append into the window statistics.
@@ -1108,9 +975,6 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
 
   // Check if this is the first video frame
   if (!s_hasFirstFrame) {
-    // Record the time of the first frame
-    s_firstAppend = now;
-    // Update the flag to indicate that the first frame has been processed
     s_hasFirstFrame = true;
   }
 
@@ -1291,22 +1155,6 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     packetData = s_DecodeBuffer.data();
   }
 
-  // Calculate the start of the pacing duration in milliseconds
-  uint32_t pacingStart = LiGetMillis();
-
-  // Check if the frame pacing is enabled
-  if (s_FramePacingEnabled) {
-    // Hold the frame until it is due, then update the pacing reference
-    PaceFrame(framePts);
-    UpdatePacingDrift(std::chrono::steady_clock::now() - s_firstAppend, framePts);
-  }
-
-  // Calculate the end of the pacing duration in milliseconds
-  uint32_t pacingEnd = LiGetMillis();
-
-  // Measure total pacer time based on calculated pacing duration
-  m_ActiveWndVideoStats.totalPacerTime += pacingEnd - pacingStart;
-
   const auto packetSessionId = g_Instance->m_VideoSessionId.load();
 
   // Create an ElementaryMediaPacket and start decoding with the decoded video data
@@ -1332,33 +1180,12 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   // Calculate time before rendering
   uint32_t beforeRender = LiGetMillis();
 
-  // Hand the packet over, retrying briefly if the platform refuses it.
+  // Hand the packet over.
   //
-  // A refusal is not necessarily a rejection of the frame: the pipeline can be
-  // momentarily unable to accept one, and the previous behaviour turned that
-  // instant into either a lost frame or a keyframe request, both of which are
-  // visible. A few hundred microseconds of patience covers the transient. The
-  // total worst case is under two milliseconds, well inside one frame interval,
-  // and this runs on the decoder thread where the pacer already sleeps.
-  bool appended = false;
-  unsigned int attempts = 0;
-  for (; attempts < kVideoAppendMaxAttempts; attempts++) {
-    if (attempts > 0) {
-      // Nothing to retry into if the track went away or the session moved on
-      // underneath us; the frame is stale either way.
-      if (!g_Instance->m_VideoStarted.load() ||
-          g_Instance->m_VideoSessionId.load() != packetSessionId) {
-        break;
-      }
-      std::this_thread::sleep_for(kVideoAppendRetryBackoffs[attempts - 1]);
-      m_ActiveWndVideoStats.appendRetries++;
-    }
-
-    if (g_Instance->m_VideoTrack.AppendPacket(pkt)) {
-      appended = true;
-      break;
-    }
-  }
+  // There is no retry loop. This now runs on the thread that drains the socket,
+  // and holding it for a further attempt would trade a lost frame for lost
+  // packets, which is the worse of the two.
+  const bool appended = (bool)g_Instance->m_VideoTrack.AppendPacket(pkt);
 
   if (appended) {
     // Calculate time after rendering
@@ -1377,8 +1204,7 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     uint32_t nowMs = LiGetMillis();
     if (nowMs - s_lastIdrRequestMs >= kIdrRequestIntervalMs) {
       s_lastIdrRequestMs = nowMs;
-      ClLogMessage("Append video packet failed after %u attempts, requesting IDR\n",
-                   attempts);
+      ClLogMessage("Append video packet failed, requesting IDR\n");
       return DR_NEED_IDR;
     }
     // A refresh is already on its way, so drop this frame quietly
@@ -1406,6 +1232,9 @@ void MoonlightInstance::AddVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst) {
   dst.appendIntervalSumMs += src.appendIntervalSumMs;
   dst.appendIntervalSumSqMs += src.appendIntervalSumSqMs;
   dst.appendJitterOutliers += src.appendJitterOutliers;
+  dst.hostIntervalCount += src.hostIntervalCount;
+  dst.hostIntervalSumMs += src.hostIntervalSumMs;
+  dst.hostIntervalSumSqMs += src.hostIntervalSumSqMs;
   dst.pipelineClockSamples += src.pipelineClockSamples;
   dst.pipelineClockLeadSumMs += src.pipelineClockLeadSumMs;
   dst.pipelineClockLeadSumSqMs += src.pipelineClockLeadSumSqMs;
@@ -1610,6 +1439,30 @@ void MoonlightInstance::FormatVideoStats(VIDEO_STATS& stats, char* output, int l
       return;
     }
     offset += ret;
+
+    // Same spread as measured by the host itself. If this matches the line
+    // above, the stream arrived as unevenly as it was sent and there is nothing
+    // left here to fix.
+    if (stats.hostIntervalCount > 1) {
+      double hn = (double)stats.hostIntervalCount;
+      double hmean = stats.hostIntervalSumMs / hn;
+      double hvar = (stats.hostIntervalSumSqMs / hn) - (hmean * hmean);
+      if (hvar < 0.0) {
+        hvar = 0.0;
+      }
+      ret = snprintf(
+        &output[offset], length - offset,
+        "Host send interval: %.2f ms average, %.2f ms deviation\n",
+        hmean, sqrt(hvar)
+      );
+    } else {
+      ret = 0;
+    }
+    if (ret < 0 || ret >= length - offset) {
+      assert(false);
+      return;
+    }
+    offset += ret;
   }
 
   // Assembly and hand-over behaviour. Each of these three is zero in the healthy
@@ -1683,9 +1536,23 @@ DECODER_RENDERER_CALLBACKS MoonlightInstance::s_DrCallbacks = {
   .setup = MoonlightInstance::VidDecSetup,
   .cleanup = MoonlightInstance::VidDecCleanup,
   .submitDecodeUnit = MoonlightInstance::VidDecSubmitDecodeUnit,
+  // DIRECT_SUBMIT hands each frame over on the thread that received its last
+  // packet, instead of queueing it for a decoder thread to pick up.
+  //
+  // That queue was costing more than it was worth. Measured on hardware with a
+  // still picture, where frames are two packets long and network latency varies
+  // by a millisecond, the interval between frames reaching the platform still
+  // varied by nearly ten. A handoff whose far end has to be woken by the
+  // scheduler cannot be tighter than the scheduler is, and on a TV running a
+  // dozen threads across few cores that is not tight. Submitting where the frame
+  // is completed removes the wake-up entirely.
+  //
+  // This is only safe because nothing on the submission path waits: the pacer
+  // that used to hold frames is gone, and the append is attempted once.
+  //
   // One slice per frame. Slicing exists to let a multithreaded software decoder
   // work on a frame in parallel; this pipeline hands the bitstream to the TV's
   // hardware decoder, where extra slices only add bitstream overhead and cost
   // compression efficiency at the same bitrate.
-  .capabilities = CAPABILITY_SLICES_PER_FRAME(1),
+  .capabilities = CAPABILITY_DIRECT_SUBMIT | CAPABILITY_SLICES_PER_FRAME(1),
 };

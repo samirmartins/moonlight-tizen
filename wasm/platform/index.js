@@ -70,7 +70,6 @@ function attachListeners() {
   $('.videoResolutionMenu li:not(.unsupported-resolution)').on('click', saveResolution);
   $('.videoFramerateMenu li').on('click', saveFramerate);
   $('#bitrateSlider').on('input', saveBitrate);
-  $('#framePacingSwitch').on('click', saveFramePacing);
   $('#ipAddressFieldModeSwitch').on('click', saveIpAddressFieldMode);
   $('#ipAddressTextInput').on('input', updateIpAddressInputValidationState);
   $('#sortAppsListSwitch').on('click', saveSortAppsList);
@@ -2521,7 +2520,9 @@ function startGame(host, appID) {
       var rikey = generateRemoteInputKey();
       var rikeyid = generateRemoteInputKeyId();
       var gamepadMask = getConnectedGamepadMask();
-      const framePacing = $('#framePacingSwitch').parent().hasClass('is-checked') ? 1 : 0;
+      // Frames are handed over as soon as they are complete; there is nothing
+      // left to pace. Kept in the call signature so the binding is unchanged.
+      const framePacing = 0;
       const optimizeGames = $('#optimizeGamesSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const rumbleFeedback = $('#rumbleFeedbackSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const mouseEmulation = $('#mouseEmulationSwitch').parent().hasClass('is-checked') ? 1 : 0;
@@ -2542,7 +2543,6 @@ function startGame(host, appID) {
       '\n Video resolution: ' + streamWidth + 'x' + streamHeight + 
       '\n Video frame rate: ' + frameRate + ' FPS' + 
       '\n Video bitrate: ' + bitrate + ' Kbps' + 
-      '\n Video frame pacing: ' + framePacing + 
       '\n Optimize game settings: ' + optimizeGames + 
       '\n Rumble feedback: ' + rumbleFeedback + 
       '\n Mouse emulation: ' + mouseEmulation + 
@@ -3034,13 +3034,6 @@ function optimizeBitratePresets() {
   saveBitrate();
 }
 
-function saveFramePacing() {
-  setTimeout(() => {
-    const chosenFramePacing = $('#framePacingSwitch').parent().hasClass('is-checked');
-    console.log('%c[index.js, saveFramePacing]', 'color: green;', 'Saving frame pacing state: ' + chosenFramePacing);
-    storeData('framePacing', chosenFramePacing, null);
-  }, 100);
-}
 
 function saveIpAddressFieldMode() {
   setTimeout(() => {
@@ -3354,9 +3347,6 @@ function restoreDefaultsSettingsValues() {
   // frame is presented immediately rather than held for a display deadline.
   // Holding frames back is available for anyone who wants it, but it is not what
   // the reference implementations do out of the box.
-  const defaultFramePacing = false;
-  document.querySelector('#framePacingBtn').MaterialSwitch.off();
-  storeData('framePacing', defaultFramePacing, null);
 
   const defaultIpAddressFieldMode = false;
   document.querySelector('#ipAddressFieldModeBtn').MaterialSwitch.off();
@@ -3583,16 +3573,6 @@ function loadUserDataCb() {
     $('#selectBitrate').html($('#bitrateSlider').val() + ' Mbps');
   });
 
-  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored framePacing preferences.');
-  getData('framePacing', function(previousValue) {
-    if (previousValue.framePacing == null) {
-      document.querySelector('#framePacingBtn').MaterialSwitch.off(); // Set the default state
-    } else if (previousValue.framePacing == false) {
-      document.querySelector('#framePacingBtn').MaterialSwitch.off();
-    } else {
-      document.querySelector('#framePacingBtn').MaterialSwitch.on();
-    }
-  });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored ipAddressFieldMode preferences.');
   getData('ipAddressFieldMode', function(previousValue) {

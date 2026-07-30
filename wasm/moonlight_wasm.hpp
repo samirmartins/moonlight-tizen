@@ -91,6 +91,14 @@ typedef struct _VIDEO_STATS {
   double appendIntervalSumSqMs;     // sum of squares, for the standard deviation
   uint32_t appendJitterOutliers;    // intervals outside the tolerance window
 
+  // The same spread, measured on the host's own timestamps instead of on when
+  // the frame reached us. Side by side the two separate a stream the host
+  // delivered unevenly from one this client made uneven, which is the one thing
+  // the overlay could never tell before.
+  uint32_t hostIntervalCount;
+  double hostIntervalSumMs;
+  double hostIntervalSumSqMs;
+
   // Distance between the timestamp we hand to the pipeline and where the
   // pipeline reports it actually is. This is the depth of the TV's own buffer:
   // if it grows, the pipeline is queueing our frames rather than presenting

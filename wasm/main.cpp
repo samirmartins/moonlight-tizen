@@ -162,8 +162,12 @@ void* MoonlightInstance::InputThreadFunc(void* context) {
     me->PollGamepads();
     me->ReportMouseMovement();
 
-    // Poll every 5 ms
-    usleep(5 * 1000);
+    // Poll every 8 ms.
+    //
+    // Gamepad state is published by an animation frame callback now, so polling
+    // faster than the display refreshes cannot produce fresher input. What it
+    // does produce is wake-ups competing for the same cores as the video path.
+    usleep(8 * 1000);
   }
 
   return NULL;

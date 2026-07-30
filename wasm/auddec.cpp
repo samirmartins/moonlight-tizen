@@ -190,10 +190,17 @@ static void FeederLoop() {
       s_slotIdx++;
     }
 
-    // Wait for the next packet
+    // Wait for the next packet.
+    //
+    // The condition variable is signalled on every arriving packet, so the
+    // timeout is only a safety net against a missed notification. It used to be
+    // one millisecond, which woke this thread a thousand times a second to find
+    // nothing and go back to sleep. On a TV with a handful of cores and a dozen
+    // threads that is scheduler time taken from the path that delivers video,
+    // for no work done.
     {
       std::unique_lock<std::mutex> lock(s_pktMutex);
-      s_pktCv.wait_for(lock, std::chrono::milliseconds(1), [] {
+      s_pktCv.wait_for(lock, std::chrono::milliseconds(20), [] {
         return s_pktCount > 0 || !s_feederRunning.load(std::memory_order_relaxed);
       });
     }
