@@ -4,12 +4,21 @@ A fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight
 
 ## About this fork
 
-I was getting both audio and video stuttering streaming to my Samsung **DU7700** with [brightcraft's 1.13.1 build](https://github.com/brightcraft/moonlight-tizen). [ruanformigoni's fork](https://github.com/ruanformigoni/moonlight-tizen) had already fixed the audio, but the video stutter was still there (at least with my TV). I used Claude Code to help me work on both, and this fork is the result: audio goes through the Web Audio API instead of the Tizen elementary media source, and the video path stopped adding timing of its own — frames are handed to the platform the moment they are complete, on a timeline that follows the frame rate actually being delivered.
+This fork addresses audio and video stuttering observed on a Samsung DU7700 running
+[brightcraft's 1.13.1 build](https://github.com/brightcraft/moonlight-tizen). The audio
+side had already been solved in [ruanformigoni's fork](https://github.com/ruanformigoni/moonlight-tizen),
+which moves playback to the Web Audio API rather than the Tizen elementary media source;
+that approach is ported here. The video side is the work added on top: the client no
+longer imposes timing of its own, handing each frame to the platform as soon as it is
+complete, on a timeline that follows the frame rate actually being delivered rather than
+the one requested. It was developed with Claude Code.
 
 > [!IMPORTANT]
-> **It works very well on my DU7700, at Full HD, 1440p and 4K alike — I found no problems at any of the three.** That is one TV, though. I have not tested it on any other.
+> Testing has been limited to a single Samsung DU7700, where the result is smooth at
+> 1080p, 1440p and 4K alike. Behaviour on other models is unknown.
 >
-> **This is provided as is. I cannot maintain it regularly, but pull requests and issues are welcome and encouraged.**
+> The project is offered as is. Regular maintenance is not planned, but pull requests
+> and issues are welcome.
 
 ---
 
@@ -21,38 +30,50 @@ Two variants, identical except for one line of `config.xml` metadata:
 
 | | |
 |---|---|
-| `Moonlight-…-samirmartins.wgt` | The normal build. |
-| `Moonlight-…-samirmartins-ForceGM.wgt` | Asks the TV firmware to put the panel into Game Mode. Measured lower latency here. Behaviour varies by model and firmware. |
+| `Moonlight-…-samirmartins-ForceGM.wgt` | Asks the TV firmware to put the panel into Game Mode. **Recommended.** |
+| `Moonlight-…-samirmartins.wgt` | The plain build, without that metadata. |
 
-**Keep the in-app *Game Mode* switch off on both.** It is a different setting: it selects the decoder's ultra-low latency mode, which freezes playback on the first frame on some models. It defaults to off.
+Both are published, following the convention of the upstream project. On the DU7700 the
+ForceGM build performed better, and enabling the in-app *Game Mode* switch on the plain
+build froze playback entirely.
 
-Installing one replaces the other and keeps your settings.
+**Install the ForceGM build and leave the in-app *Game Mode* switch off.** The two are
+unrelated settings: the switch selects the decoder's ultra-low latency mode, while Game
+Mode for the panel is requested from the firmware by the widget metadata. The switch
+defaults to off and should stay there.
+
+Installing one variant replaces the other and keeps your settings.
 
 ---
 
 ## Settings note
 
-*Audio jitter buffer* (default 50 ms) replaces the old *Audio synchronization* toggle. It is the setpoint a rate servo holds, not a threshold above which audio is dropped. Raise it if audio breaks up.
+> [!IMPORTANT]
+> **Performance is noticeably better with *Allow gamepad rumble feedback* switched off.**
+> This is currently under investigation.
 
-Performance is noticeably better with *Allow gamepad rumble feedback* switched off. That is being looked into.
+*Audio jitter buffer* (default 50 ms) replaces the old *Audio synchronization* toggle. It
+is the setpoint a rate servo holds, not a threshold above which audio is dropped. Raise it
+if audio breaks up.
 
 ---
 
 ## Network note
 
-The Ethernet port on some Samsung TVs is not gigabit. Depending on the resolution you stream at — 4K in particular — and on the distance to the router, the quality of the link and its signal-to-noise ratio, Wi-Fi can outperform the TV's own wired connection.
+The Ethernet port on some Samsung TVs is not gigabit. Where the bitrate required exceeds
+what that link sustains - 4K in particular - Wi-Fi can outperform it, depending on
+distance to the router/access point, wireless link quality and signal-to-noise ratio.
 
-A wired connection is preferable whenever the bitrate you need stays comfortably below what that link can actually sustain. When it does not, Wi-Fi to a nearby access point with a cabled uplink is worth trying. On the DU7700 that turned out to be the better of the two.
+A wired connection remains preferable whenever the required bitrate stays comfortably
+below its ceiling, such as in 1080p. Otherwise, Wi-Fi to a nearby wireless/access point with a cabled uplink is worth testing; on my DU7700 it proved the better of the two.
 
 ---
 
 ## Documentation
 
-Everything about using the app is in the upstream wiki, which applies here unchanged:
-[Installation Guide](https://github.com/brightcraft/moonlight-tizen/wiki/Installation-Guide) ·
-[Updating Guide](https://github.com/brightcraft/moonlight-tizen/wiki/Updating-Guide) ·
-[FAQ](https://github.com/brightcraft/moonlight-tizen/wiki/Frequently-Asked-Questions) ·
-[Known Issues & Limitations](https://github.com/brightcraft/moonlight-tizen/wiki/Known-Issues-&-Limitations)
+Installing the widget on a TV is covered by the upstream
+[Installation Guide](https://github.com/brightcraft/moonlight-tizen/wiki/Installation-Guide),
+which applies here unchanged.
 
 ---
 

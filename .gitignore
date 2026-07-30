@@ -54,3 +54,9 @@ dir.stamp
 
 # Packaged widgets are build output and belong in releases, not here
 *.wgt
+
+# Working files left behind by file sync clients when the tree lives in a synced
+# folder. They appear and vanish on their own and must never be committed.
+*.insyncdl
+*.insyncdl.*
+.~*

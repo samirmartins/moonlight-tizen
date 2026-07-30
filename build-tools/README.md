@@ -1,22 +1,22 @@
 # build-tools
 
-Ferramentas de build para este fork. O `Dockerfile` na raiz do projeto continua
-sendo o processo oficial; o que está aqui existe por dois motivos: registrar uma
-descoberta que bloqueia o build, e permitir um ciclo de iteração rápido.
+Build tooling for this fork. The `Dockerfile` at the project root remains the official
+process; what lives here exists for two reasons: to record a finding that blocks the
+build outright, and to allow a fast iteration cycle.
 
 ---
 
-## O `--ulimit` é obrigatório
+## The `--ulimit` is mandatory
 
-O `Dockerfile` da raiz **falha** com uma mensagem enganosa:
+The root `Dockerfile` **fails** with a misleading message:
 
 ```
 /bin/sh: 1: tizen: not found
 ```
 
-A causa não é o `tizen` CLI estar fora do PATH nem faltar JDK. O instalador do
-Tizen Studio **traz o próprio JDK embutido** (em `~/.package-manager/jdk`), mas
-essa JVM aborta durante a instalação:
+The cause is neither the `tizen` CLI being off the PATH nor a missing JDK. The Tizen
+Studio installer **bundles its own JDK** (under `~/.package-manager/jdk`), but that JVM
+aborts during installation:
 
 ```
 setting up jdk at /home/moonlight/.package-manager/jdk
@@ -24,49 +24,48 @@ library initialization failed - unable to allocate file descriptor table - out o
 ./installer.sh: line 19: 54 Aborted (core dumped) ".../jdk/bin/java" -jar installer.jar
 ```
 
-O instalador então **sai com código 0** sem ter instalado nada — por isso o passo
-seguinte é que quebra, e com uma mensagem que aponta para o lugar errado.
+The installer then **exits 0 having installed nothing**, which is why the next step is
+the one that breaks, with a message pointing somewhere else entirely.
 
-É o comportamento clássico de JVM antiga em container quando `RLIMIT_NOFILE` é
-muito alto: a JVM tenta alocar uma tabela de descritores proporcional ao limite.
-O BuildKit roda os passos com um limite altíssimo; o `docker run` normal usa 1024
-e por isso o mesmo instalador funciona lá.
+This is the classic behaviour of an older JVM in a container when `RLIMIT_NOFILE` is very
+high: the JVM tries to allocate a descriptor table proportional to the limit. BuildKit
+runs steps with an extremely high limit, while a plain `docker run` uses 1024, which is
+why the same installer works there.
 
-**Solução — passar o limite explicitamente no build:**
+**Fix — pass the limit explicitly at build time:**
 
 ```bash
 docker build --ulimit nofile=1024:524288 -t moonlight-tizen .
 ```
 
-Isso não exige nenhuma alteração no `Dockerfile`.
+No change to the `Dockerfile` is required.
 
-> Verificado: o instalador conclui e gera `tizen-studio/tools/ide/bin/tizen`.
-> Ainda **não** foi testado um build completo de ponta a ponta com o `Dockerfile`
-> da raiz + `--ulimit`; o `.wgt` existente foi produzido pelo caminho em dois
-> estágios descrito abaixo.
+> Verified: the installer completes and produces `tizen-studio/tools/ide/bin/tizen`.
+> A full end-to-end build with the root `Dockerfile` plus `--ulimit` has **not** been
+> exercised; the widgets shipped so far came from the two-stage path described below.
 
 ---
 
-## Ciclo rápido em dois estágios
+## Two-stage fast cycle
 
-O `Dockerfile` da raiz baixa o SDK Emscripten (~1 GB) e o Tizen Studio (~280 MB)
-na mesma cadeia de camadas, então qualquer mudança em código invalida tudo.
-Separar compilação de empacotamento evita isso.
+The root `Dockerfile` downloads the Emscripten SDK (~1 GB) and Tizen Studio (~280 MB) in
+the same layer chain, so any code change invalidates everything. Separating compilation
+from packaging avoids that.
 
-**1. Compilar e linkar** (valida todo o C/C++, sem Tizen Studio):
+**1. Compile and link** (validates all the C/C++, no Tizen Studio involved):
 
 ```bash
 docker build -f build-tools/Dockerfile.buildonly -t moonlight-wasm-check .
 ```
 
-**2. Empacotar e assinar** (parte da imagem acima):
+**2. Package and sign** (starts from the image above):
 
 ```bash
 docker build --ulimit nofile=1024:524288 \
   -f build-tools/Dockerfile.package -t moonlight-wgt .
 ```
 
-**3. Extrair o `.wgt`:**
+**3. Extract the `.wgt`:**
 
 ```bash
 CID=$(docker create moonlight-wgt)
@@ -74,60 +73,59 @@ docker cp "$CID:/home/moonlight/$(docker run --rm moonlight-wgt sh -c 'ls -1 /ho
 docker rm "$CID"
 ```
 
-O nome do arquivo é montado no build a partir da versão declarada em `config.xml`
-e da variante — `Moonlight-v<versão>-samirmartins[-ForceGM].wgt` — por isso a
-receita descobre o nome em vez de fixá-lo.
+The filename is assembled during the build from the version declared in `config.xml` and
+the variant — `Moonlight-v<version>-samirmartins[-ForceGM].wgt` — which is why the recipe
+discovers the name rather than hardcoding it.
 
-Durante iteração em código, só o passo 1 precisa rodar — ele é o que pega erro de
-compilação e link.
+While iterating on code, only step 1 needs to run: it is the one that catches compile and
+link errors.
 
 ---
 
-## A variante ForceGM
+## The ForceGM variant
 
-O upstream publica dois widgets a cada release, **construídos do mesmo código**. A
-única diferença é uma linha em `config.xml`:
+Upstream publishes two widgets per release, **built from the same code**. The only
+difference is one line in `config.xml`:
 
 ```xml
 <tizen:metadata key="http://samsung.com/tv/metadata/use.game.mode" value="true"/>
 ```
 
-Ela pede ao firmware da TV que coloque o **painel** em Game Mode enquanto o app
-roda. Morou em `res/config.xml` até `ac6ba96` (dez/2024), que a removeu por
-travar o app em Tizen mais novo; desde então é download separado.
+It asks the TV firmware to put the **panel** into Game Mode while the app runs. It lived
+in `res/config.xml` until `ac6ba96` (Dec 2024), which removed it because it froze the app
+on newer Tizen; since then it has been a separate download.
 
-**Não confundir com o interruptor "Game Mode" dentro do app**, que escolhe o modo
-de latência `kUltraLow` do EMSS (`wasm/main.cpp:371`). São coisas independentes, e
-é o interruptor — não a metadata — que quebra no Tizen 9.0. Nesta variante o
-interruptor deve ficar **desligado**: aí o decoder usa `kLow`, que é estável, e o
-painel entra em Game Mode pela metadata.
+**Not to be confused with the in-app "Game Mode" switch**, which selects the EMSS
+`kUltraLow` latency mode (`wasm/main.cpp`). They are independent, and it is the switch,
+not the metadata, that breaks on Tizen 9.0. In this variant the switch must stay **off**:
+the decoder then uses `kLow`, which is stable, and the panel gets Game Mode from the
+metadata.
 
-Para construir, basta o `--build-arg` no passo 2; o resto é idêntico e o cache das
-camadas é reaproveitado inteiro:
+Building it needs only the `--build-arg` on step 2; everything else is identical and the
+whole layer cache is reused:
 
 ```bash
 docker build --ulimit nofile=1024:524288 --build-arg FORCE_GAME_MODE=1 \
   -f build-tools/Dockerfile.package -t moonlight-wgt-forcegm .
 ```
 
-O mesmo `--build-arg` funciona no `Dockerfile` da raiz, se você preferir o caminho
-oficial em uma etapa só.
+The same `--build-arg` works on the root `Dockerfile` if you prefer the official
+single-step path.
 
-Os dois widgets têm o **mesmo** `tizen:application id` e `package`, como no
-upstream: instalar um substitui o outro, e as configurações salvas são
-preservadas. Voltar atrás é reinstalar o outro `.wgt`.
+Both widgets carry the **same** `tizen:application id` and `package`, as upstream does:
+installing one replaces the other, and saved settings are preserved. Going back is just
+installing the other `.wgt`.
 
 ---
 
-## Notas
+## Notes
 
-- O `openjdk-17-jdk-headless` instalado em `Dockerfile.package` acabou sendo
-  **desnecessário** (o instalador traz o próprio JDK). Foi mantido porque a
-  receita foi validada com ele presente; remover é seguro em princípio, mas não
-  foi testado.
-- O `.wgt` é assinado com o certificado de teste do projeto (perfil `Moonlight`,
-  senha `123456`), igual às releases oficiais.
-- Os placeholders `__BUILD_TYPE__` / `__BUILD_COMMIT__` em
-  `wasm/platform/index.js` são substituídos pelo workflow de CI, não pelo build
-  local. Em build local eles ficam literais, o que só afeta a string de versão
-  exibida na tela de System Info.
+- The `openjdk-17-jdk-headless` installed in `Dockerfile.package` turned out to be
+  **unnecessary** (the installer brings its own JDK). It was kept because the recipe was
+  validated with it present; removing it should be safe in principle, but has not been
+  tested.
+- The `.wgt` is signed with the project's test certificate (profile `Moonlight`), the same
+  as the official releases.
+- The `__BUILD_TYPE__` / `__BUILD_COMMIT__` placeholders in `wasm/platform/index.js` are
+  substituted by the CI workflow, not by a local build. Locally they stay literal, which
+  only affects the version string shown on the System Info screen.
