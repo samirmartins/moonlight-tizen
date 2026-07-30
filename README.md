@@ -4,15 +4,12 @@ A fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight
 
 ## About this fork
 
-I was getting both audio and video stuttering streaming to my Samsung **DU7700** with [brightcraft's 1.13.1 build](https://github.com/brightcraft/moonlight-tizen). [ruanformigoni's fork](https://github.com/ruanformigoni/moonlight-tizen) had already fixed the audio, but the video stutter was still there (at least with my TV). I used Claude Code to help me work on both, and this fork is the result: audio now goes through the Web Audio API instead of the Tizen elementary media source, and the video frame pacer no longer busy-waits or drifts away from the host's presentation clock.
+I was getting both audio and video stuttering streaming to my Samsung **DU7700** with [brightcraft's 1.13.1 build](https://github.com/brightcraft/moonlight-tizen). [ruanformigoni's fork](https://github.com/ruanformigoni/moonlight-tizen) had already fixed the audio, but the video stutter was still there (at least with my TV). I used Claude Code to help me work on both, and this fork is the result: audio goes through the Web Audio API instead of the Tizen elementary media source, and the video path stopped adding timing of its own — frames are handed to the platform the moment they are complete, on a timeline that follows the frame rate actually being delivered.
 
 > [!IMPORTANT]
-> **It works well on my DU7700. I have not tested it on any other TV.**
+> **It works very well on my DU7700, at Full HD, 1440p and 4K alike — I found no problems at any of the three.** That is one TV, though. I have not tested it on any other.
 >
 > **This is provided as is. I cannot maintain it regularly, but pull requests and issues are welcome and encouraged.**
-
-> [!NOTE]
-> **Enormous thanks to [brightcraft](https://github.com/brightcraft) and [ruanformigoni](https://github.com/ruanformigoni), and to every contributor to their forks, for the excellent work this is built on.** Practically all of this application is theirs. This fork changes two pipelines and nothing else.
 
 ---
 
@@ -24,8 +21,10 @@ Two variants, identical except for one line of `config.xml` metadata:
 
 | | |
 |---|---|
-| `Moonlight-v2.0.0-samirmartins.wgt` | The normal build. |
-| `Moonlight-v2.0.0-samirmartins-ForceGM.wgt` | Asks the TV firmware to put the panel into Game Mode. **Keep the in-app Game Mode switch off with this one** — that switch selects the decoder's ultra-low latency mode, which is what freezes on Tizen 9.0. Experimental, and behaviour varies by model and firmware. |
+| `Moonlight-…-samirmartins.wgt` | The normal build. |
+| `Moonlight-…-samirmartins-ForceGM.wgt` | Asks the TV firmware to put the panel into Game Mode. Measured lower latency here. Behaviour varies by model and firmware. |
+
+**Keep the in-app *Game Mode* switch off on both.** It is a different setting: it selects the decoder's ultra-low latency mode, which freezes playback on the first frame on some models. It defaults to off.
 
 Installing one replaces the other and keeps your settings.
 
@@ -33,7 +32,17 @@ Installing one replaces the other and keeps your settings.
 
 ## Settings note
 
-*Audio jitter buffer* (default 100 ms) replaces the old *Audio synchronization* toggle. Lower it if audio lags behind video, raise it if audio breaks up.
+*Audio jitter buffer* (default 50 ms) replaces the old *Audio synchronization* toggle. It is the setpoint a rate servo holds, not a threshold above which audio is dropped. Raise it if audio breaks up.
+
+Performance is noticeably better with *Allow gamepad rumble feedback* switched off. That is being looked into.
+
+---
+
+## Network note
+
+The Ethernet port on some Samsung TVs is not gigabit. Depending on the resolution you stream at — 4K in particular — and on the distance to the router, the quality of the link and its signal-to-noise ratio, Wi-Fi can outperform the TV's own wired connection.
+
+A wired connection is preferable whenever the bitrate you need stays comfortably below what that link can actually sustain. When it does not, Wi-Fi to a nearby access point with a cabled uplink is worth trying. On the DU7700 that turned out to be the better of the two.
 
 ---
 
