@@ -269,11 +269,30 @@ function _gpPublish(pads) {
 // instead of twenty.
 var _RUMBLE_MAX_PADS = 4;
 
-// The effect runs far longer than the interval between updates on purpose: each
-// new call supersedes the previous one, so a long duration means a vibration
-// that is meant to be continuous never gaps between frames. It is stopped
-// explicitly when the stream ends.
-var _RUMBLE_DURATION_MS = 5000;
+// How long one call asks the pad to run for, and how long a held magnitude is
+// allowed to go before the call is made again.
+//
+// A held magnitude produces no new calls - the value has not changed, so there
+// is nothing to send - and the effect used to be given a five second duration to
+// cover that. Two things were wrong with it. A vibration held longer than five
+// seconds died while the host was still asking for it, because nothing renewed
+// it. And if the platform queues effects rather than superseding them, five
+// seconds of overlap is thirty of them alive at once, for a session's length.
+//
+// A short duration with an explicit renewal fixes both. The renewal is well
+// inside the duration so a continuous vibration never gaps, and at most two
+// calls a second are outstanding for a pad that is being held steady.
+var _RUMBLE_DURATION_MS = 1000;
+var _RUMBLE_RENEW_MS = 700;
+
+// Last renewal per pad, and whether that pad is currently meant to be silent.
+// A silent pad is not renewed: there is nothing to keep alive.
+var _rumbleRenewedAt = new Float64Array(_RUMBLE_MAX_PADS);
+
+// Shared, so claiming a promise does not allocate a pair of closures on every
+// call. At tens of calls a second for a session measured in hours, allocation
+// that could be hoisted should be.
+function _rumbleNoop() {}
 
 // Address of the magnitude words wasm/gamepad.cpp writes, one per pad, resolved
 // when the loop starts.
@@ -294,7 +313,7 @@ var _rumbleLastApplied = new Int32Array(_RUMBLE_MAX_PADS);
 // This is a floor on the interval, not a delay: the first change after a quiet
 // spell is applied on the very next frame, so an impulse - a shot, an impact -
 // is never held back. Only a sustained stream of changes gets thinned.
-var _RUMBLE_MIN_INTERVAL_MS = 32;
+var _RUMBLE_MIN_INTERVAL_MS = 50;
 var _rumbleNextAllowed = new Float64Array(_RUMBLE_MAX_PADS);
 
 // Swallows the promise the haptics calls return, when they return one at all.
@@ -302,7 +321,7 @@ var _rumbleNextAllowed = new Float64Array(_RUMBLE_MAX_PADS);
 // so the shape is checked rather than assumed.
 function _rumbleClaim(p) {
   if (p && typeof p.then === 'function') {
-    p.then(function() {}, function() {});
+    p.then(_rumbleNoop, _rumbleNoop);
   }
 }
 
@@ -326,8 +345,14 @@ function _rumbleApply(pads, now) {
   var base = _rumblePtr >> 2;
   for (var i = 0; i < count; i++) {
     var packed = Module.HEAP32[base + i];
+
+    // A magnitude that has not changed still has to be renewed before the
+    // effect it started runs out, or a vibration the host is still asking for
+    // stops on its own. A pad meant to be silent is left alone.
     if (packed === _rumbleLastApplied[i]) {
-      continue;
+      if (packed === 0 || (now - _rumbleRenewedAt[i]) < _RUMBLE_RENEW_MS) {
+        continue;
+      }
     }
     // Held back, not dropped. The word is left unclaimed, so the next frame
     // compares against it again and applies whatever the newest value is by
@@ -338,6 +363,7 @@ function _rumbleApply(pads, now) {
     }
     _rumbleLastApplied[i] = packed;
     _rumbleNextAllowed[i] = now + _RUMBLE_MIN_INTERVAL_MS;
+    _rumbleRenewedAt[i] = now;
 
     var gp = pads[i];
     if (!gp || !gp.vibrationActuator) {
@@ -367,6 +393,7 @@ function _rumbleApply(pads, now) {
 function _rumbleStop() {
   _rumbleLastApplied.fill(0);
   _rumbleNextAllowed.fill(0);
+  _rumbleRenewedAt.fill(0);
   var pads = navigator.getGamepads ? navigator.getGamepads() : [];
   for (var i = 0; i < pads.length && i < _RUMBLE_MAX_PADS; i++) {
     var gp = pads[i];

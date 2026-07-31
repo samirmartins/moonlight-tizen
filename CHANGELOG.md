@@ -7,6 +7,52 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.3.2
+
+A long session was breaking down. Roughly half an hour in, the picture would jump, then
+jump again at a similar interval, each time worse, until the stream was unplayable and only
+restarting cleared it. Restarting being the cure is the whole clue: it resets state held in
+this client and nothing else.
+
+### Fixed
+- **The video timeline is now re-anchored when the pipeline is recovered.** The generated
+  timeline is an accumulator, and it was reset in exactly one place: setting up a stream.
+  When a stall was detected the recovery flushed the pipeline and asked for a keyframe, but
+  never touched the accumulator - so it discarded the buffered frames and left the offset
+  that caused the stall completely intact. Recovery could not recover. Each cycle began
+  further out than the last, which is why the glitches escalated instead of repeating, and
+  why only a restart helped. The flush now anchors the timeline onto the position the
+  platform reports, advanced to the present, because that reading can be most of a second
+  old and anchoring onto it raw would place the timeline in the past
+- **The timeline is held against the platform's clock instead of running open loop.** Its
+  step is measured from the host's clock while the pipeline plays on the TV's. Two
+  independent crystals differ by tens of parts per million and the difference integrates
+  without bound; ten to fifteen ppm - entirely ordinary - exhausts a twenty millisecond
+  buffer in about half an hour. The distance between the two was already being measured and
+  reported as buffer depth; it is now also used. The loop is inert until that distance
+  strays past eight milliseconds, which is above the noise on a healthy stream, and it may
+  move a frame by at most a twentieth of a millisecond - a fiftieth of what can be seen,
+  and fifty times the authority the drift requires
+- **A held vibration no longer dies after five seconds.** A magnitude that does not change
+  produces no new calls, and the effect was given a five second duration to cover that, so
+  a rumble the host held for longer simply stopped. The duration is now one second with an
+  explicit renewal well inside it
+
+### Changed
+- Rumble effects are capped at twenty a second per pad rather than thirty, and the pair of
+  handlers that claims each promise is now shared rather than allocated per call. A pad
+  that is meant to be silent produces no calls at all. Shorter effects also bound what is
+  outstanding at any moment, which matters if the platform queues effects rather than
+  superseding them
+
+### Known issues
+- **Rumble is still not fixed, and the recommendation is to play with it off.** With the
+  setting enabled there is added latency and a noticeable loss of smoothness. Each release
+  since v3.3.1 has reduced what the feature costs and none has brought it to zero, so what
+  remains is either inside the platform's own haptics implementation or somewhere this
+  client has not yet found. This supersedes the note in v3.3.1 below, which said the
+  feature should be safe to enable; on hardware it is not. The setting defaults to off
+
 ## v3.3.1
 
 Rumble was costing smooth video. With it switched off the picture was already close to
@@ -38,6 +84,7 @@ effectively nothing, so it can be left on.
   which is work on the very thread this path exists to keep clear
 - Rumble now defaults to off. The work above should make it safe to turn on, and on the
   DU7700 it is, but the default is left off for anyone whose hardware has not been tried
+  — **this proved wrong in longer testing; see Known issues under v3.3.2**
 - A controller left mid-vibration when a stream ends is now silenced explicitly, rather
   than buzzing until the effect's own duration expires
 

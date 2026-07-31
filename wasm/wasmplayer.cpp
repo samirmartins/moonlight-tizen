@@ -133,6 +133,57 @@ static constexpr uint32_t kStallHealthyGapMultiple = 4;
 static constexpr uint32_t kStallMinAppendsWithoutProgress = 30;
 static constexpr uint32_t kStallRecoveryCooldownMs = 3000;
 
+// ─── Timeline anchoring ──────────────────────────────────────────────────────
+//
+// The generated timeline is an accumulator: each frame's timestamp is the
+// previous one plus a step. Nothing re-anchors it to the platform once the
+// stream is running, and that is a problem in two different ways.
+//
+// The step is measured from the *host's* clock; the pipeline plays on the
+// *TV's*. Two independent crystals differ by tens of parts per million, and the
+// difference integrates without bound. Ten to fifteen ppm is ordinary, and it
+// exhausts a twenty millisecond buffer in half an hour - which is a stall, a
+// recovery, and a visible jump. Then it starts over.
+//
+// A flush does not help: it empties the platform's queue but leaves the
+// accumulator exactly where it was, so the offset survives every recovery and
+// each cycle begins worse than the last. That is what turns one glitch into an
+// unplayable stream that only restarting clears.
+
+// Where the timeline is placed relative to the platform's reported position
+// when it is re-anchored after a flush. Slightly ahead is the safe side: frames
+// wait a moment. Behind, they arrive already due and may be dropped outright.
+static constexpr double kReanchorLeadMs = 30.0;
+
+// The lead is measured per frame but the position underneath it only updates
+// about once a second, so single samples are extrapolation, not observation.
+// This averages over roughly seventeen seconds at 60 fps, which is far shorter
+// than the drift being corrected and far longer than the noise being rejected.
+static constexpr double kLeadFilterAlpha = 1.0 / 1024.0;
+
+// Samples to collect before the filtered lead is trusted, and before the
+// operating point is taken from it. Thirty seconds: long enough that the value
+// describes the running stream rather than its first moments.
+static constexpr int kLeadSettleSamples = 1800;
+
+// The operating point is learned rather than assumed, because how much the
+// pipeline holds is the platform's business and differs by model. It is clamped
+// only to reject a value that could not describe a working stream.
+static constexpr double kLeadTargetMinMs = 2.0;
+static constexpr double kLeadTargetMaxMs = 200.0;
+
+// The correction does nothing until the lead has strayed further than the noise
+// floor. Measured deviation on a healthy stream is around five milliseconds, so
+// eight keeps the loop inert in normal operation - it acts on drift, not jitter.
+static constexpr double kLeadDeadbandMs = 8.0;
+
+// Ceiling on how far one frame's timestamp may be moved. Three hundredths of a
+// millisecond is two tenths of one percent of a frame, far below anything that
+// can be seen, and still three milliseconds per second of authority - fifty
+// times what fifteen ppm of clock drift produces. It cannot saturate the way
+// the old step-correction did, and it cannot produce a visible step either.
+static constexpr double kLeadCorrectionPerFrameMs = 0.05;
+
 static uint32_t s_VideoFormat = 0;
 static uint32_t s_Width = 0;
 static uint32_t s_Height = 0;
@@ -157,6 +208,19 @@ static int s_ptsFrameNumberRef = 0;
 // Window the step is measured over: host time and frame count at its start.
 static uint32_t s_ptsWindowHostMs = 0;
 static int s_ptsWindowFrames = 0;
+
+// Set by the recovery worker after it flushes, consumed by the submission
+// thread on its next frame. Crossing threads through the timestamp itself would
+// mean writing the accumulator from two places; a request that the owner acts on
+// keeps it single-writer.
+static std::atomic<bool> s_ptsReanchorRequested{false};
+
+// Filtered distance between the timeline and where the platform says it is,
+// with the operating point learned from it once it has settled.
+static double s_leadFilteredMs = 0.0;
+static int s_leadSamples = 0;
+static double s_leadTargetMs = 0.0;
+static bool s_leadTargetSet = false;
 
 // One-shot log guard for the pipeline clock, so its absence is visible in the
 // log by omission rather than its presence being repeated every update.
@@ -477,6 +541,11 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
   s_ptsFrameNumberRef = 0;
   s_ptsWindowHostMs = 0;
   s_ptsWindowFrames = 0;
+  s_ptsReanchorRequested.store(false, std::memory_order_relaxed);
+  s_leadFilteredMs = 0.0;
+  s_leadSamples = 0;
+  s_leadTargetMs = 0.0;
+  s_leadTargetSet = false;
 
   // Reset the IDR request throttle for the new stream
   s_lastIdrRequestMs = 0;
@@ -670,6 +739,49 @@ static TimeStamp NextPacketPts(PDECODE_UNIT decodeUnit, TimeStamp previousPts) {
     return TimeStamp(0);
   }
 
+  // A flush emptied the platform's queue while this accumulator kept running.
+  // Anchoring onto the position the platform is actually at is the whole point
+  // of the exercise: without it the recovery discards frames and changes
+  // nothing, and the next stall arrives sooner than the last.
+  if (s_ptsReanchorRequested.exchange(false, std::memory_order_acq_rel)) {
+    const int64_t positionUs =
+      g_Instance->m_PipelinePositionUs.load(std::memory_order_acquire);
+
+    s_lastHostPtsMs = hostMs;
+    s_ptsFrameNumberRef = frameNumber;
+    s_ptsWindowHostMs = hostMs;
+    s_ptsWindowFrames = 0;
+
+    // The operating point described the stream before the flush. Whatever it is
+    // afterwards has to be measured again rather than carried across.
+    s_leadSamples = 0;
+    s_leadTargetSet = false;
+
+    if (positionUs != MoonlightInstance::kNoPipelinePosition) {
+      // The position is only reported about once a second, so the stored value
+      // can be most of a second old. Anchoring onto it raw would place the
+      // timeline that far into the past, and frames would arrive already due -
+      // which is the failure this is supposed to prevent, not cause. Advance it
+      // to now at real time, exactly as the lead measurement does.
+      const uint64_t reportedAtMs =
+        g_Instance->m_PipelinePositionAtMs.load(std::memory_order_relaxed);
+      const uint64_t nowMs = LiGetMillis();
+      const double sinceReportMs =
+        (nowMs >= reportedAtMs) ? (double)(nowMs - reportedAtMs) : 0.0;
+
+      const double anchorS =
+        positionUs / 1000000.0 + (sinceReportMs + kReanchorLeadMs) / 1000.0;
+
+      MoonlightInstance::ClLogMessage(
+        "Re-anchoring the video timeline onto the pipeline clock at %.3f s\n",
+        anchorS);
+      return TimeStamp(anchorS);
+    }
+
+    // Nothing to anchor onto. Carrying on unchanged is no worse than before.
+    return previousPts + s_ptsStep;
+  }
+
   int framesElapsed = frameNumber - s_ptsFrameNumberRef;
   s_ptsFrameNumberRef = frameNumber;
 
@@ -727,7 +839,22 @@ static TimeStamp NextPacketPts(PDECODE_UNIT decodeUnit, TimeStamp previousPts) {
     s_ptsWindowFrames = 0;
   }
 
-  return previousPts + s_ptsStep * framesElapsed;
+  // Hold the timeline against the platform's clock. The step above tracks the
+  // host's *rate*; this corrects the accumulated *offset*, which the step alone
+  // can never see. Inert unless the lead has strayed past the noise floor, and
+  // capped so far below a frame that a correction cannot be seen even when it
+  // runs continuously.
+  double correctionMs = 0.0;
+  if (s_leadTargetSet) {
+    const double errorMs = s_leadFilteredMs - s_leadTargetMs;
+    if (errorMs > kLeadDeadbandMs) {
+      correctionMs = -kLeadCorrectionPerFrameMs * framesElapsed;
+    } else if (errorMs < -kLeadDeadbandMs) {
+      correctionMs = kLeadCorrectionPerFrameMs * framesElapsed;
+    }
+  }
+
+  return previousPts + s_ptsStep * framesElapsed + TimeStamp(correctionMs / 1000.0);
 }
 
 // Folds the interval since the previous append into the window statistics.
@@ -789,6 +916,24 @@ void MoonlightInstance::RecordPipelineLead(VIDEO_STATS& stats, TimeStamp framePt
 
   double framePtsMs = std::chrono::duration<double, std::milli>(framePts).count();
   double leadMs = framePtsMs - positionMs;
+
+  // Feed the holding loop. This is the same number the overlay reports as
+  // buffer depth; the loop keeps it where it was rather than letting it walk.
+  if (s_leadSamples == 0) {
+    s_leadFilteredMs = leadMs;
+  } else {
+    s_leadFilteredMs += (leadMs - s_leadFilteredMs) * kLeadFilterAlpha;
+  }
+  if (s_leadSamples < kLeadSettleSamples) {
+    s_leadSamples++;
+    if (s_leadSamples == kLeadSettleSamples && !s_leadTargetSet &&
+        s_leadFilteredMs >= kLeadTargetMinMs && s_leadFilteredMs <= kLeadTargetMaxMs) {
+      s_leadTargetMs = s_leadFilteredMs;
+      s_leadTargetSet = true;
+      MoonlightInstance::ClLogMessage(
+        "Holding the video timeline at %.1f ms of pipeline lead\n", s_leadTargetMs);
+    }
+  }
 
   stats.pipelineClockSamples++;
   stats.pipelineClockLeadSumMs += leadMs;
@@ -860,6 +1005,12 @@ void MoonlightInstance::PerformPresentationRecovery() {
   if (!g_Instance->m_Source->Flush()) {
     ClLogMessage("Pipeline flush was refused\n");
   }
+
+  // The flush threw away what was queued but not where the timeline stands.
+  // Without this the offset that caused the stall survives it untouched, and
+  // every recovery leaves the stream worse than it found it - which is what
+  // turns one visible jump into a stream that degrades until it is restarted.
+  s_ptsReanchorRequested.store(true, std::memory_order_release);
 
   LiRequestIdrFrame();
 }
