@@ -244,9 +244,7 @@ static bool s_hasFirstFrame = false;
 
 static uint32_t s_lastIdrRequestMs = 0;
 
-// PostToJsAsync() hands a raw pointer to the main thread and returns before the
-// main thread reads it, so the payload has to outlive the call. Only the video
-// decoder thread writes this, and only once per second.
+// Reused formatting buffer for the once-per-second optional stats update.
 static std::string s_PendingStatMsg;
 
 static uint32_t total_bytes = 0;

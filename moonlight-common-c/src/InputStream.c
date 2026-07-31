@@ -720,8 +720,12 @@ int startInputStream(void) {
     // Allow input packets to be queued now
     initialized = true;
 
-    // GFE will not send haptics events without this magic packet first
-    sendEnableHaptics();
+    // GFE will not send haptics events without this magic packet first. Do not
+    // advertise the feature when the user disabled it: receiving and dropping
+    // those packets still consumes the control path and callback allocator.
+    if (StreamConfig.enableHaptics) {
+        sendEnableHaptics();
+    }
 
     return err;
 }

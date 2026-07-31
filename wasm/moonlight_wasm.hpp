@@ -131,7 +131,7 @@ class MoonlightInstance {
     std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
     bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
     std::string audioConfig, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
-    bool disableWarnings, bool performanceStats);
+    bool disableWarnings, bool performanceStats, int clientRefreshRateX100);
   MessageResult StopStream();
 
   MessageResult CancelRequest();
@@ -289,10 +289,10 @@ class MoonlightInstance {
   bool m_FullRangeEnabled;
   bool m_GameModeEnabled;
   bool m_DisableWarningsEnabled;
-  bool m_PerformanceStatsEnabled;
+  std::atomic<bool> m_PerformanceStatsEnabled;
 
   STREAM_CONFIGURATION m_StreamConfig;
-  bool m_Running;
+  std::atomic<bool> m_Running;
 
   pthread_t m_ConnectionThread;
   pthread_t m_InputThread;
@@ -306,8 +306,8 @@ class MoonlightInstance {
   long m_MouseLastPosX;
   long m_MouseLastPosY;
   bool m_WaitingForAllModifiersUp;
-  float m_AccumulatedTicks;
-  int32_t m_MouseDeltaX, m_MouseDeltaY;
+  std::atomic<int32_t> m_AccumulatedTicks;
+  std::atomic<int32_t> m_MouseDeltaX, m_MouseDeltaY;
   uint32_t m_HttpThreadPoolSequence;
 
   Dispatcher m_Dispatcher;
@@ -319,6 +319,7 @@ class MoonlightInstance {
   std::atomic<bool> m_VideoStarted;
   std::atomic<bool> m_ConnectionCancelled;
   pthread_t m_StopThread;
+  std::atomic<bool> m_StopNeedsLiStop;
   std::atomic<samsung::wasm::SessionId> m_VideoSessionId;
 
 
@@ -334,8 +335,9 @@ class MoonlightInstance {
 extern MoonlightInstance* g_Instance;
 
 void PostToJs(std::string msg);
-// The referenced string must outlive the call, see the definition in main.cpp
 void PostToJsAsync(const std::string& msg);
+void NotifyInputEvent();
+void WaitForInputEvent(uint32_t& observedGeneration, int timeoutMs);
 void PostPromiseMessage(int callbackId, const std::string& type, const std::string& response);
 void PostPromiseMessage(int callbackId, const std::string& type, const std::vector<uint8_t>& response);
 
@@ -348,7 +350,7 @@ MessageResult startStream(std::string host, int httpPort, std::string width, std
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
   std::string audioConfig, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
-  bool disableWarnings, bool performanceStats);
+  bool disableWarnings, bool performanceStats, int clientRefreshRateX100);
 MessageResult stopStream();
 
 MessageResult cancelRequest();

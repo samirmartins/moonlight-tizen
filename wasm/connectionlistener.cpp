@@ -23,9 +23,9 @@ void MoonlightInstance::ClConnectionStarted(void) {
 }
 
 void MoonlightInstance::ClConnectionTerminated(int errorCode) {
-  // Teardown the connection
-  LiStopConnection();
-
+  // LiStopConnection joins the thread invoking this callback, so execute it in
+  // the same teardown worker used for manual stops after this callback returns.
+  g_Instance->m_StopNeedsLiStop.store(true, std::memory_order_release);
   emscripten_sync_run_in_main_runtime_thread(EM_FUNC_SIG_VI, onConnectionStopped, errorCode);
 }
 

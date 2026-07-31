@@ -7,6 +7,51 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.3.3
+
+The two timing-sensitive paths that still depended on the browser's main thread have
+been rebuilt: PCM rendering and controller haptics. This release also removes duplicate
+gamepad work, reports the TV's measured refresh rate to the host, and hardens stream
+startup and teardown. The implementation uses capability detection rather than TV model
+checks and targets Tizen 5.5 and newer. An initial hardware test on a Samsung DU7700
+running Tizen 9.0 with a DualSense over Bluetooth was reported as very smooth.
+
+### Fixed
+- **Audio is rendered by an `AudioWorklet` fed from a shared SPSC PCM ring.** Decoded
+  Opus no longer creates and schedules one Web Audio source node per packet on the main
+  thread. The worklet establishes a small real prebuffer, corrects clock drift smoothly,
+  adapts its target after underruns, and keeps a `ScriptProcessor` fallback for engines
+  without AudioWorklet support
+- **Rumble no longer turns host update rate into work on timing-critical threads.** The
+  control stream publishes the newest motor state directly through atomics, browser-side
+  updates are coalesced with latest-state-wins semantics, and actuator calls run after the
+  animation frame at a maximum of 10 Hz. A zero state is applied immediately and all
+  actuator promises are claimed
+- **Turning rumble off now disables it at the protocol boundary.** The client does not
+  advertise haptics to the host and discards no hidden stream of rumble callbacks, so the
+  disabled setting has no per-event cost
+- Fixed gamepad snapshots being readable while partially updated. State is now published
+  as a coherent atomic snapshot, with stable logical pad slots, correct connection and
+  removal events, an accurate active-controller mask, and deduplicated input packets
+- Fixed asynchronous JS messages retaining pointers to temporary native memory, and made
+  stream flags and input accumulators used across threads atomic
+- Fixed teardown paths being able to leave work from the previous session alive. Manual
+  stop, connection failure and unexpected termination now share an idempotent cleanup
+  path that closes audio and joins the relevant workers before another stream begins
+
+### Changed
+- The client refresh rate sent to the host is measured from the TV's animation cadence
+  before streaming, with outlier rejection and recognition of common fractional rates,
+  instead of assuming that requested stream FPS equals physical display refresh
+- Gamepads are sampled once per animation frame and native input is event-driven. The
+  periodic wake-up remains only while analog-stick mouse emulation is actively moving
+- The existing direct low-latency video submission path, bitrate, resolution, codec and
+  colour handling are preserved; the changes do not trade picture quality for smoothness
+
+### Added
+- Deterministic native and JavaScript tests for the PCM ring, AudioWorklet, audio fallback,
+  gamepad snapshots, post-frame rumble limiting and display refresh estimation
+
 ## v3.3.2
 
 A long session was breaking down. Roughly half an hour in, the picture would jump, then

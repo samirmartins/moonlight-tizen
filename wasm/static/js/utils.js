@@ -51,6 +51,12 @@ function cryptoRand(upper_bound) {
 
 var _realGamepads = new Set();
 function getConnectedGamepadMask() {
+  if (typeof getStreamingGamepadMask === 'function') {
+    var streamingMask = getStreamingGamepadMask();
+    console.log('%c[utils.js, getConnectedGamepadMask]', 'color: gray;',
+      'Detected gamepad mask: 0x' + streamingMask.toString(16));
+    return streamingMask;
+  }
   var count = 0;
   var mask = 0;
   var gamepads = navigator.getGamepads ? navigator.getGamepads() : [];

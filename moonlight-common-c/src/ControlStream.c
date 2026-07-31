@@ -967,6 +967,15 @@ static void asyncCallbackThreadFunc(void* context) {
 }
 
 static bool needsAsyncCallback(unsigned short packetType) {
+    if (!StreamConfig.enableHaptics &&
+            (packetType == packetTypes[IDX_RUMBLE_DATA] ||
+             packetType == packetTypes[IDX_RUMBLE_TRIGGER_DATA])) {
+        return false;
+    }
+    if (StreamConfig.directRumbleCallbacks &&
+            packetType == packetTypes[IDX_RUMBLE_TRIGGER_DATA]) {
+        return false;
+    }
     return packetType == packetTypes[IDX_RUMBLE_DATA] ||
            packetType == packetTypes[IDX_RUMBLE_TRIGGER_DATA] ||
            packetType == packetTypes[IDX_SET_MOTION_EVENT] ||
@@ -981,12 +990,29 @@ static void queueAsyncCallback(PNVCTL_ENET_PACKET_HEADER_V1 ctlHdr, int packetLe
 
     LC_ASSERT(needsAsyncCallback(ctlHdr->type));
 
+    BbInitializeWrappedBuffer(&bb, (char*)ctlHdr, sizeof(*ctlHdr), packetLength - sizeof(*ctlHdr), BYTE_ORDER_LITTLE);
+
+    // The Tizen callback only coalesces two magnitudes into one atomic word. It
+    // is safe on this thread and direct delivery avoids a malloc/free pair plus
+    // two queue operations for every host rumble update. Other clients retain
+    // the original asynchronous behavior by default.
+    if (StreamConfig.directRumbleCallbacks &&
+            ctlHdr->type == packetTypes[IDX_RUMBLE_DATA]) {
+        uint16_t controllerNumber;
+        uint16_t lowFreqRumble;
+        uint16_t highFreqRumble;
+        BbAdvanceBuffer(&bb, 4);
+        BbGet16(&bb, &controllerNumber);
+        BbGet16(&bb, &lowFreqRumble);
+        BbGet16(&bb, &highFreqRumble);
+        ListenerCallbacks.rumble(controllerNumber, lowFreqRumble, highFreqRumble);
+        return;
+    }
+
     queuedCb = malloc(sizeof(*queuedCb));
     if (!queuedCb) {
         return;
     }
-
-    BbInitializeWrappedBuffer(&bb, (char*)ctlHdr, sizeof(*ctlHdr), packetLength - sizeof(*ctlHdr), BYTE_ORDER_LITTLE);
 
     if (ctlHdr->type == packetTypes[IDX_RUMBLE_DATA]) {
         BbAdvanceBuffer(&bb, 4);

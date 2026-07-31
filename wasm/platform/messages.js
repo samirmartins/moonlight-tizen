@@ -77,7 +77,7 @@ function handleMessage(msg) {
   // If it's a recognized event, notify the appropriate function
   if (msg.indexOf('streamTerminated: ') === 0) {
     // Reset the Web Audio scheduler so the next stream starts from a clean clock
-    stopAudioScheduler();
+    stopAudioScheduler(true);
     // Remove the on-screen overlays
     $('#connection-warnings, #performance-stats').css('display', 'none');
     // Remove the video stream now

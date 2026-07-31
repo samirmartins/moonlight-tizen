@@ -1955,6 +1955,10 @@ function showAppsMode() {
   $('#wasm_module').css('display', 'none');
 
   isInGame = false;
+  // A failed launch can return here without ever creating a native stream, so
+  // there may be no cleanup callback to close the gesture-created context.
+  stopAudioScheduler(true);
+  startDisplayRefreshEstimator();
   // Resume the JavaScript gamepad polling that showStreamMode() stopped, so the
   // pads drive UI navigation again. Calling this when already running is a no-op.
   Controller.startWatching();
@@ -2186,6 +2190,7 @@ function showStreamMode() {
   $('#loadingSpinner').css('display', 'inline-block');
 
   isInGame = true;
+  stopDisplayRefreshEstimator();
   // Stop the JavaScript gamepad polling for the duration of the stream. It runs
   // on the main thread alongside the media element, and the native input thread
   // already covers the pads while streaming.
@@ -2239,7 +2244,7 @@ function startGame(host, appID) {
   // the constructor block indefinitely.
   try {
     if (window._mlAudioCtx) {
-      try { window._mlAudioCtx.close(); } catch (e) {}
+      stopAudioScheduler(true);
     }
     var AudioCtx = window.AudioContext || window.webkitAudioContext;
     if (AudioCtx) {
@@ -2324,6 +2329,7 @@ function startGame(host, appID) {
       var rikey = generateRemoteInputKey();
       var rikeyid = generateRemoteInputKeyId();
       var gamepadMask = getConnectedGamepadMask();
+      var clientRefreshRateX100 = getDisplayRefreshRateX100(frameRate);
       // Frames are handed over as soon as they are complete; there is nothing
       // left to pace. Kept in the call signature so the binding is unchanged.
       const framePacing = 0;
@@ -2402,7 +2408,7 @@ function startGame(host, appID) {
             host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
             framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
             audioConfig, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
-            performanceStats
+            performanceStats, clientRefreshRateX100
           ]);
         }, function(failedResumeApp) {
           console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to resume app with id: ' + appID + '\n Returned error was: ' + failedResumeApp + '!');
@@ -2454,7 +2460,7 @@ function startGame(host, appID) {
           host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
           framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
           audioConfig, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
-          performanceStats
+          performanceStats, clientRefreshRateX100
         ]);
       }, function(failedLaunchApp) {
         console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to launch app with id: ' + appID + '\n Returned error was: ' + failedLaunchApp + '!');
@@ -3077,10 +3083,9 @@ function restoreDefaultsSettingsValues() {
   document.querySelector('#optimizeGamesBtn').MaterialSwitch.on();
   storeData('optimizeGames', defaultOptimizeGames, null);
 
-  // Off by default. Every rumble event currently crosses to the main thread
-  // synchronously, which competes with audio scheduling and is measurable as
-  // uneven frame delivery; until that path is rewritten, the smoother default is
-  // to leave it off.
+  // Keep the conservative default across Tizen/controller implementations. When
+  // disabled, haptics are not advertised to the host; when enabled, updates use
+  // the coalesced post-frame path rather than competing with frame delivery.
   const defaultRumbleFeedback = false;
   document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.off();
   storeData('rumbleFeedback', defaultRumbleFeedback, null);
@@ -3535,6 +3540,7 @@ function onWindowLoad() {
   initSpecialKeys();
   loadSystemInfo();
   loadUserData();
+  startDisplayRefreshEstimator();
 }
 
 window.onload = onWindowLoad;
@@ -3543,24 +3549,8 @@ window.onload = onWindowLoad;
 window.addEventListener('gamepadconnected', function(e) {
   const connectedGamepad = e.gamepad;
   const gamepadIndex = connectedGamepad.index;
-  const rumbleFeedbackSwitch = document.getElementById('rumbleFeedbackSwitch');
   console.log('%c[index.js, gamepadconnected]', 'color: green;', 'Gamepad connected:\n' + JSON.stringify(connectedGamepad), connectedGamepad);
   snackbarLog('Gamepad ' + gamepadIndex + ' has been connected.');
-  // Check if the rumble feedback switch is checked
-  if (rumbleFeedbackSwitch.checked) {
-    // Check if the connected gamepad has a vibrationActuator associated with it
-    if (connectedGamepad.vibrationActuator) {
-      console.log('%c[index.js, gamepadconnected]', 'color: green;', 'Playing rumble on the connected gamepad ' + gamepadIndex + '...');
-      connectedGamepad.vibrationActuator.playEffect('dual-rumble', {
-        startDelay: 0,
-        duration: 500,
-        weakMagnitude: 0.5,
-        strongMagnitude: 0.5,
-      });
-    } else {
-      console.warn('%c[index.js, gamepadconnected]', 'color: green;', 'Warning: Connected gamepad ' + gamepadIndex + ' does not support the rumble feature!');
-    }
-  }
 });
 
 // Gamepad disconnected events

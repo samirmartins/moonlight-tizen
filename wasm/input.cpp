@@ -1,5 +1,7 @@
 #include "moonlight_wasm.hpp"
 
+#include <cmath>
+
 #include <Limelight.h>
 
 #define KEY_PREFIX 0x80
@@ -50,8 +52,9 @@ EM_BOOL MoonlightInstance::HandleMouseMove(const EmscriptenMouseEvent &event) {
     return EM_FALSE;
   }
 
-  m_MouseDeltaX += event.movementX;
-  m_MouseDeltaY += event.movementY;
+  m_MouseDeltaX.fetch_add(event.movementX, std::memory_order_relaxed);
+  m_MouseDeltaY.fetch_add(event.movementY, std::memory_order_relaxed);
+  NotifyInputEvent();
 
   m_MouseLastPosX = event.screenX;
   m_MouseLastPosY = event.screenY;
@@ -74,7 +77,12 @@ EM_BOOL MoonlightInstance::HandleWheel(const EmscriptenWheelEvent &event) {
   }
 
   // Inverted delta y-axis to restore correct wheel direction
-  m_AccumulatedTicks -= event.deltaY;
+  // Preserve fractional wheel deltas without sharing a non-atomic float with
+  // the input worker. Values are stored as milli-ticks until they are sent.
+  m_AccumulatedTicks.fetch_add(
+    static_cast<int32_t>(std::lround(-event.deltaY * 1000.0)),
+    std::memory_order_relaxed);
+  NotifyInputEvent();
   return EM_TRUE;
 }
 
@@ -168,16 +176,19 @@ EM_BOOL handlePointerLockError(int eventType, const void *reserved, void *userDa
 }
 
 void MoonlightInstance::ReportMouseMovement() {
-  if (m_MouseDeltaX != 0 || m_MouseDeltaY != 0) {
-    LiSendMouseMoveEvent(m_MouseDeltaX, m_MouseDeltaY);
-    m_MouseDeltaX = m_MouseDeltaY = 0;
+  const int32_t deltaX = m_MouseDeltaX.exchange(0, std::memory_order_acq_rel);
+  const int32_t deltaY = m_MouseDeltaY.exchange(0, std::memory_order_acq_rel);
+  if (deltaX != 0 || deltaY != 0) {
+    LiSendMouseMoveEvent(deltaX, deltaY);
   }
 
-  if (m_AccumulatedTicks != 0) {
+  const int32_t accumulatedTicks =
+    m_AccumulatedTicks.exchange(0, std::memory_order_acq_rel);
+  if (accumulatedTicks != 0) {
     // We can have fractional ticks here, so multiply by WHEEL_DELTA
     // to get actual scroll distance and use the high-res variant.
-    LiSendHighResScrollEvent(m_AccumulatedTicks * 5);
-    m_AccumulatedTicks = 0;
+    LiSendHighResScrollEvent(static_cast<short>(std::lround(
+      accumulatedTicks * 5.0 / 1000.0)));
   }
 }
 

@@ -2,6 +2,7 @@
 
 #include <pthread.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
@@ -12,6 +13,7 @@ extern char* g_UniqueId;
 
 #include <emscripten.h>
 #include <emscripten/html5.h>
+#include <emscripten/threading.h>
 
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -35,7 +37,11 @@ using EmssRenderingMode = samsung::wasm::ElementaryMediaStreamSource::RenderingM
 MoonlightInstance* g_Instance;
 
 MoonlightInstance::MoonlightInstance()
-  : m_OpusDecoder(NULL),
+  : m_PerformanceStatsEnabled(false),
+    m_Running(false),
+    m_ConnectionThread(0),
+    m_InputThread(0),
+    m_OpusDecoder(NULL),
     m_MouseLocked(false),
     m_MouseLastPosX(-1),
     m_MouseLastPosY(-1),
@@ -60,6 +66,7 @@ MoonlightInstance::MoonlightInstance()
     m_VideoTrack(),
     m_ConnectionCancelled(false),
     m_StopThread(0),
+    m_StopNeedsLiStop(false),
     m_SourceClosed(false) {
       m_Dispatcher.start();
     }
@@ -76,6 +83,7 @@ void MoonlightInstance::OnConnectionStarted(uint32_t unused) {
 void MoonlightInstance::OnConnectionStopped(uint32_t error) {
   // Not running anymore
   m_Running = false;
+  NotifyInputEvent();
 
   // Stop publishing gamepad state; nothing reads it once the input thread ends
   MAIN_THREAD_ASYNC_EM_ASM({
@@ -83,6 +91,13 @@ void MoonlightInstance::OnConnectionStopped(uint32_t error) {
       stopGamepadSnapshot();
     }
   });
+
+  // Manual stops already created this worker. Unexpected termination and
+  // setup failures arrive here without one, but require the same input-thread
+  // join and media-source close before another session can safely start.
+  if (m_StopThread == 0) {
+    pthread_create(&m_StopThread, NULL, MoonlightInstance::StopThreadFunc, NULL);
+  }
 
   // Unlock the mouse
   UnlockMouse();
@@ -93,6 +108,7 @@ void MoonlightInstance::OnConnectionStopped(uint32_t error) {
 
 void MoonlightInstance::StopConnection() {
   m_ConnectionCancelled = true;
+  m_StopNeedsLiStop.store(true, std::memory_order_release);
   g_Instance->m_EmssStateChanged.notify_all();
   g_Instance->m_EmssVideoStateChanged.notify_all();
 
@@ -109,47 +125,72 @@ void MoonlightInstance::StopConnection() {
 void* MoonlightInstance::StopThreadFunc(void* context) {
   // We must join the connection thread first, because LiStopConnection must
   // not be invoked during LiStartConnection.
-  pthread_join(g_Instance->m_ConnectionThread, NULL);
+  if (g_Instance->m_ConnectionThread != 0) {
+    pthread_join(g_Instance->m_ConnectionThread, NULL);
+    g_Instance->m_ConnectionThread = 0;
+  }
 
-  // Force raise all modifier keys to avoid leaving them down after disconnecting
-  LiSendKeyboardEvent(0xA0, KEY_ACTION_UP, 0);
-  LiSendKeyboardEvent(0xA1, KEY_ACTION_UP, 0);
-  LiSendKeyboardEvent(0xA2, KEY_ACTION_UP, 0);
-  LiSendKeyboardEvent(0xA3, KEY_ACTION_UP, 0);
-  LiSendKeyboardEvent(0xA4, KEY_ACTION_UP, 0);
-  LiSendKeyboardEvent(0xA5, KEY_ACTION_UP, 0);
+  const bool stopCommon =
+    g_Instance->m_StopNeedsLiStop.exchange(false, std::memory_order_acq_rel);
+
+  if (stopCommon) {
+    // Force raise all modifier keys to avoid leaving them down after disconnecting
+    LiSendKeyboardEvent(0xA0, KEY_ACTION_UP, 0);
+    LiSendKeyboardEvent(0xA1, KEY_ACTION_UP, 0);
+    LiSendKeyboardEvent(0xA2, KEY_ACTION_UP, 0);
+    LiSendKeyboardEvent(0xA3, KEY_ACTION_UP, 0);
+    LiSendKeyboardEvent(0xA4, KEY_ACTION_UP, 0);
+    LiSendKeyboardEvent(0xA5, KEY_ACTION_UP, 0);
+  }
 
   // Not running anymore
   g_Instance->m_Running = false;
+  NotifyInputEvent();
 
   // We also need to stop this thread after the connection thread, because it
   // depends on being initialized there.
-  pthread_join(g_Instance->m_InputThread, NULL);
+  if (g_Instance->m_InputThread != 0) {
+    pthread_join(g_Instance->m_InputThread, NULL);
+    g_Instance->m_InputThread = 0;
+  }
 
-  // Stop the connection
-  LiStopConnection();
+  if (stopCommon) {
+    LiStopConnection();
+  }
 
   // Close the media source and release tracks to ensure WebKit garbage collection
   if (g_Instance && g_Instance->m_Source) {
-    g_Instance->m_Source->Close([](samsung::wasm::OperationResult err) {
-      g_Instance->m_VideoTrack = samsung::wasm::ElementaryMediaTrack();
-      
-      std::unique_lock<std::mutex> lock(g_Instance->m_Mutex);
-      g_Instance->m_SourceClosed = true;
-      g_Instance->m_SourceClosedCV.notify_all();
-    });
-    
-    // Synchronously wait for the source to close before exiting,
-    // which prevents the next StartStream from stomping on our teardown.
     std::unique_lock<std::mutex> lock(g_Instance->m_Mutex);
-    g_Instance->m_SourceClosedCV.wait(lock, [] {
-      return g_Instance->m_SourceClosed.load();
-    });
+    const bool sourceNeedsClose =
+      g_Instance->m_EmssReadyState != EmssReadyState::kDetached &&
+      g_Instance->m_EmssReadyState != EmssReadyState::kClosed;
+    lock.unlock();
+
+    if (sourceNeedsClose) {
+      g_Instance->m_Source->Close([](samsung::wasm::OperationResult err) {
+        g_Instance->m_VideoTrack = samsung::wasm::ElementaryMediaTrack();
+        std::unique_lock<std::mutex> callbackLock(g_Instance->m_Mutex);
+        g_Instance->m_SourceClosed = true;
+        g_Instance->m_SourceClosedCV.notify_all();
+      });
+
+      // Prevent the next StartStream from stomping on teardown in flight.
+      lock.lock();
+      g_Instance->m_SourceClosedCV.wait(lock, [] {
+        return g_Instance->m_SourceClosed.load();
+      });
+      lock.unlock();
+    } else {
+      g_Instance->m_VideoTrack = samsung::wasm::ElementaryMediaTrack();
+    }
     
     // Reset EMSS state variables for the next stream
+    lock.lock();
     g_Instance->m_EmssReadyState = EmssReadyState::kDetached;
     g_Instance->m_VideoStarted = false;
     g_Instance->m_VideoSessionId = 0;
+    lock.unlock();
+    g_Instance->m_Source.reset();
   }
 
   return NULL;
@@ -157,17 +198,15 @@ void* MoonlightInstance::StopThreadFunc(void* context) {
 
 void* MoonlightInstance::InputThreadFunc(void* context) {
   MoonlightInstance* me = (MoonlightInstance*)context;
+  uint32_t observedInputGeneration = 0;
 
   while (me->m_Running) {
     me->PollGamepads();
     me->ReportMouseMovement();
 
-    // Poll every 8 ms.
-    //
-    // Gamepad state is published by an animation frame callback now, so polling
-    // faster than the display refreshes cannot produce fresher input. What it
-    // does produce is wake-ups competing for the same cores as the video path.
-    usleep(8 * 1000);
+    // Wake immediately for a new animation-frame snapshot or mouse movement;
+    // the timeout keeps held-stick mouse emulation moving continuously.
+    WaitForInputEvent(observedInputGeneration, 8);
   }
 
   return NULL;
@@ -226,13 +265,10 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
   err = LiStartConnection(&serverInfo, &me->m_StreamConfig, &MoonlightInstance::s_ClCallbacks,
     &MoonlightInstance::s_DrCallbacks, &MoonlightInstance::s_ArCallbacks, NULL, 0, NULL, 0);
   if (err != 0) {
-    // Notify the JS code that the stream has ended!
-    // NB: We pass error code 0 here to avoid triggering a "Connection terminated" warning message.
-    if (me->m_ConnectionCancelled) {
-      PostToJs(MSG_STREAM_TERMINATED + std::to_string(0));
-    } else {
-      PostToJs(MSG_STREAM_TERMINATED + std::to_string(err));
-    }
+    me->m_StopNeedsLiStop.store(false, std::memory_order_release);
+    emscripten_sync_run_in_main_runtime_thread(
+      EM_FUNC_SIG_VI, onConnectionStopped,
+      me->m_ConnectionCancelled ? 0 : err);
     return NULL;
   }
 
@@ -264,13 +300,14 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
   std::string audioConfig, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
-  bool disableWarnings, bool performanceStats) {
+  bool disableWarnings, bool performanceStats, int clientRefreshRateX100) {
   
   if (m_StopThread != 0) {
     pthread_join(m_StopThread, NULL);
     m_StopThread = 0;
   }
   m_ConnectionCancelled = false;
+  m_StopNeedsLiStop.store(false, std::memory_order_release);
   m_SourceClosed = false;
 
   PostToJs("Setting the Host address to: " + host + ":" + std::to_string(httpPort));
@@ -301,6 +338,8 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
 
   // Populate the stream configuration
   LiInitializeStreamConfiguration(&m_StreamConfig);
+  m_StreamConfig.enableHaptics = rumbleFeedback;
+  m_StreamConfig.directRumbleCallbacks = rumbleFeedback;
   m_StreamConfig.width = stoi(width);
   m_StreamConfig.height = stoi(height);
   m_StreamConfig.fps = stoi(fps);
@@ -312,7 +351,11 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   // x-nv-video[0].clientRefreshRateX100 and lets the host align its encoder
   // cadence to the display; left at zero, the host has no reference and the
   // delivered cadence can beat against the panel.
-  m_StreamConfig.clientRefreshRateX100 = stoi(fps) * 100;
+  m_StreamConfig.clientRefreshRateX100 =
+    clientRefreshRateX100 >= 2000 && clientRefreshRateX100 <= 24000
+      ? clientRefreshRateX100 : stoi(fps) * 100;
+  PostToJs("Setting the Client display refresh rate to: " +
+    std::to_string(m_StreamConfig.clientRefreshRateX100 / 100.0) + " Hz");
 
   // Initialize the audio configuration with default value
   m_StreamConfig.audioConfiguration = 0;
@@ -603,11 +646,12 @@ MessageResult startStream(std::string host, int httpPort, std::string width, std
   std::string rikey, std::string rikeyid, std::string appversion, std::string gfeversion, std::string rtspurl, int serverCodecModeSupport,
   bool framePacing, bool optimizeGames, bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons,
   std::string audioConfig, int audioJitterMs, bool playHostAudio, std::string videoCodec, bool hdrMode, bool fullRange, bool gameMode,
-  bool disableWarnings, bool performanceStats) {
+  bool disableWarnings, bool performanceStats, int clientRefreshRateX100) {
   PostToJs("Starting the streaming session...");
   return g_Instance->StartStream(host, httpPort, width, height, fps, bitrate, rikey, rikeyid, appversion, gfeversion, rtspurl, serverCodecModeSupport,
   framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons, audioConfig,
-  audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings, performanceStats);
+  audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
+  performanceStats, clientRefreshRateX100);
 }
 
 MessageResult stopStream() {
@@ -646,16 +690,22 @@ void PostToJs(std::string msg) {
   }, msg.c_str());
 }
 
-// Asynchronous counterpart to PostToJs(). The main thread runs the callback
-// after this function has already returned, and only the pointer is handed
-// across, so the caller has to keep `msg` alive until the message has been
-// consumed. Passing a temporary would leave the main thread reading freed
-// memory, which is why this takes a reference rather than a value.
+// Asynchronous counterpart to PostToJs(). Own a copy until the main-thread task
+// has consumed it; otherwise a delayed DOM task can read a string that the
+// decoder thread has already changed or destroyed.
 void PostToJsAsync(const std::string& msg) {
+  char* copy = static_cast<char*>(malloc(msg.size() + 1));
+  if (copy == nullptr) {
+    return;
+  }
+  memcpy(copy, msg.c_str(), msg.size() + 1);
   MAIN_THREAD_ASYNC_EM_ASM({
-    const msg = UTF8ToString($0);
-    handleMessage(msg);
-  }, msg.c_str());
+    try {
+      handleMessage(UTF8ToString($0));
+    } finally {
+      Module._free($0);
+    }
+  }, copy);
 }
 
 void PostPromiseMessage(int callbackId, const std::string& type, const std::string& response) {

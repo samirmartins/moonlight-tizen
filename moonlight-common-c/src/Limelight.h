@@ -100,6 +100,17 @@ typedef struct _STREAM_CONFIGURATION {
     // in /launch and /resume requests.
     char remoteInputAesKey[16];
     char remoteInputAesIv[16];
+
+    // If false, the client neither advertises haptics nor dispatches rumble
+    // callbacks. This prevents disabled rumble from consuming receive-thread,
+    // allocation, and callback-queue time. Defaults to true for compatibility.
+    bool enableHaptics;
+
+    // Rumble callbacks are normally delivered by the shared asynchronous
+    // callback thread because an arbitrary client callback may block. Clients
+    // whose callback only performs an atomic state update may opt into direct
+    // dispatch to remove per-event allocation and queue wakeups.
+    bool directRumbleCallbacks;
 } STREAM_CONFIGURATION, *PSTREAM_CONFIGURATION;
 
 // Use this function to zero the stream configuration when allocated on the stack or heap

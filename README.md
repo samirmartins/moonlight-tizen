@@ -11,7 +11,8 @@ which moves playback to the Web Audio API rather than the Tizen elementary media
 that approach is ported here. The video side is the work added on top: the client no
 longer imposes timing of its own, handing each frame to the platform as soon as it is
 complete, on a timeline that follows the frame rate actually being delivered rather than
-the one requested. It was developed with Claude Code.
+the one requested. Development of this fork has been assisted by Claude Code and
+OpenAI Codex.
 
 > [!IMPORTANT]
 > Testing has been limited to a single Samsung DU7700, where the result is smooth at
@@ -49,10 +50,10 @@ Installing one variant replaces the other and keeps your settings.
 ## Settings note
 
 > [!IMPORTANT]
-> **Leave *Allow gamepad rumble feedback* switched off.** It still costs added latency and
-> a noticeable loss of smoothness while enabled, and that is not resolved. Successive
-> releases have reduced what the feature costs, but not to zero, so the recommendation is
-> unchanged: play with it off. The setting **defaults to off** for that reason.
+> *Allow gamepad rumble feedback* remains off by default as a conservative choice across
+> different TV and controller implementations. Since v3.3.3, leaving it off also disables
+> haptics at the streaming protocol boundary. When enabled, host updates are coalesced and
+> actuator calls run after frame delivery rather than in a timing-critical path.
 
 *Audio jitter buffer* (default 50 ms) replaces the old *Audio synchronization* toggle. It
 is the setpoint a rate servo holds, not a threshold above which audio is dropped. Raise it
@@ -124,5 +125,6 @@ Almost none of this application is my work. It exists because of:
 - **[KyroFrCode](https://github.com/KyroFrCode/moonlight-chrome-tizen)** — for turning it into an installable application, and for the build method.
 - **[OneLiberty](https://github.com/OneLiberty/moonlight-chrome-tizen)** — for codec selection, gamepad mouse emulation, Wake-on-LAN, and more.
 - **[ToyPoodleGaming](https://github.com/toypoodlegaming/moonlight-chrome-tizen)** — for surround sound, performance statistics, and improved bitrate calculation.
+- **Claude Code and OpenAI Codex** — used as development assistants for analysis, implementation, review, testing, and documentation in this fork.
 
 And to **every contributor** to those projects.
