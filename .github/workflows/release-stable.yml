@@ -121,8 +121,8 @@ jobs:
             - Choose one of the two variants from the release assets. They are built from the same code and differ only in one line of widget metadata:
               - `Moonlight-v${{ env.VERSION }}-samirmartins-ForceGM.wgt` — asks the TV firmware to put the panel into Game Mode. **Leave the in-app Game Mode switch off when using it.**
               - `Moonlight-v${{ env.VERSION }}-samirmartins.wgt` — no Game Mode metadata. Use this one if the variant above misbehaves on your model or firmware.
-            - Both share the same application ID, so installing one replaces the other and keeps your saved settings.
-            - Follow one of the [installation methods](https://github.com/brightcraft/moonlight-tizen/wiki/Installation-Guide) documented in the upstream wiki to install the application on your TV.
+            - Both share the same application ID and signing identity, so installing one replaces the other and keeps your saved settings.
+            - Follow this fork's [Installation Guide](https://github.com/samirmartins/moonlight-tizen/blob/master/INSTALLATION.md) to install the application on your TV.
 
             ## What's Changed:
 

@@ -2,81 +2,73 @@
 
 A fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen) — an open-source client for NVIDIA GameStream and [Sunshine](https://app.lizardbyte.dev/Sunshine/) that streams games from your PC to a Samsung Smart TV.
 
-## About this fork
+## Why this fork
 
-This fork addresses audio and video stuttering observed on a Samsung DU7700 running
-[brightcraft's 1.13.1 build](https://github.com/brightcraft/moonlight-tizen). The audio
-side had already been solved in [ruanformigoni's fork](https://github.com/ruanformigoni/moonlight-tizen),
-which moves playback to the Web Audio API rather than the Tizen elementary media source;
-that approach is ported here. The video side is the work added on top: the client no
-longer imposes timing of its own, handing each frame to the platform as soon as it is
-complete, on a timeline that follows the frame rate actually being delivered rather than
-the one requested. Development of this fork has been assisted by Claude Code and
-OpenAI Codex.
+This fork focuses on smooth playback, low latency and full picture quality on Samsung TVs:
 
-> [!IMPORTANT]
-> Testing has been limited to a single Samsung DU7700, where the result is smooth at
-> 1080p, 1440p and 4K alike. Behaviour on other models is unknown.
->
-> The project is offered as is. Regular maintenance is not planned, but pull requests
-> and issues are welcome.
+- Audio builds on the Web Audio approach from [ruanformigoni's fork](https://github.com/ruanformigoni/moonlight-tizen), now rendering in an `AudioWorklet` from a shared PCM ring away from the browser main thread.
+- Video is submitted directly on a clock disciplined against the TV, whose real refresh rate is reported to the host.
+- Gamepad input and rumble use coherent, coalesced state instead of blocking timing-critical paths.
+- Stream cleanup prevents work from one session leaking into the next.
+
+The implementation is capability-driven rather than tied to one TV model. Hardware
+validation is currently limited to a Samsung DU7700 running Tizen 9.0, with smooth
+1080p, 1440p and 4K playback. Reports from other models are welcome.
+
+Development of this fork has been assisted by Claude Code and OpenAI Codex.
 
 ---
 
 ## Installation
 
-Requires a Samsung TV running Tizen 5.5 or newer (2020 models onwards). Download a `.wgt` from the [releases](../../releases) and follow one of the [installation methods](https://github.com/brightcraft/moonlight-tizen/wiki/Installation-Guide) in the upstream wiki.
+Requires Tizen 5.5 or newer. Download a `.wgt` from the
+[latest release](https://github.com/samirmartins/moonlight-tizen/releases/latest) and
+follow this fork's [Installation Guide](INSTALLATION.md).
 
 Two variants, identical except for one line of `config.xml` metadata:
 
-| | |
+| Build | Purpose |
 |---|---|
-| `Moonlight-…-samirmartins-ForceGM.wgt` | Asks the TV firmware to put the panel into Game Mode. **Recommended.** |
+| `Moonlight-…-samirmartins-ForceGM.wgt` | Asks the TV firmware to put the panel into Game Mode. **Recommended on the tested DU7700.** |
 | `Moonlight-…-samirmartins.wgt` | The plain build, without that metadata. |
 
-Both are published, following the convention of the upstream project. On the DU7700 the
-ForceGM build performed better, and enabling the in-app *Game Mode* switch on the plain
-build froze playback entirely.
+On the tested DU7700, ForceGM performed better. **With ForceGM, leave the in-app
+*Game Mode* switch off.** The metadata controls the TV panel; the switch selects a
+decoder mode that freezes playback on some models. Use the plain build if ForceGM
+misbehaves on your TV.
 
-**Install the ForceGM build and leave the in-app *Game Mode* switch off.** The two are
-unrelated settings: the switch selects the decoder's ultra-low latency mode, while Game
-Mode for the panel is requested from the firmware by the widget metadata. The switch
-defaults to off and should stay there.
-
-Installing one variant replaces the other and keeps your settings.
+Both variants of the same release share an application ID and signing identity, so one
+replaces the other and keeps settings. Upgrades from older releases may be rejected if
+their author certificate differs. In that case the old widget must be uninstalled first,
+which removes its saved settings. A persistent release-signing certificate is still needed.
 
 ---
 
-## Settings note
+## Recommended settings
 
-> [!IMPORTANT]
-> *Allow gamepad rumble feedback* remains off by default as a conservative choice across
-> different TV and controller implementations. Since v3.3.3, leaving it off also disables
-> haptics at the streaming protocol boundary. When enabled, host updates are coalesced and
-> actuator calls run after frame delivery rather than in a timing-critical path.
-
-*Audio jitter buffer* (default 50 ms) replaces the old *Audio synchronization* toggle. It
-is the setpoint a rate servo holds, not a threshold above which audio is dropped. Raise it
-if audio breaks up.
+- **Rumble feedback** defaults off for broad controller compatibility. Off also disables
+  haptics at the protocol boundary. When enabled, updates are coalesced and applied after
+  frame delivery.
+- **Audio jitter buffer** defaults to 50 ms, but this is an adaptive ceiling rather than
+  fixed latency. Playback starts near two Opus frames and raises protection after a real
+  underrun, never beyond the selected value. Raise it only if audio still breaks up.
 
 ---
 
 ## Network note
 
-The Ethernet port on some Samsung TVs is not gigabit. Where the bitrate required exceeds
-what that link sustains - 4K in particular - Wi-Fi can outperform it, depending on
-distance to the router/access point, wireless link quality and signal-to-noise ratio.
-
-A wired connection remains preferable whenever the required bitrate stays comfortably
-below its ceiling, such as in 1080p. Otherwise, Wi-Fi to a nearby wireless/access point with a cabled uplink is worth testing; on my DU7700 it proved the better of the two.
+Some Samsung TVs have 100 Mbps Ethernet. Wired is preferable while the stream stays
+comfortably below that limit; at high 4K bitrates, strong Wi-Fi through a nearby access
+point with a wired uplink is worth trying.
 
 ---
 
-## Documentation
+## Documentation and feedback
 
-Installing the widget on a TV is covered by the upstream
-[Installation Guide](https://github.com/brightcraft/moonlight-tizen/wiki/Installation-Guide),
-which applies here unchanged.
+- [Changelog](CHANGELOG.md)
+- [Installation Guide](INSTALLATION.md)
+- [Issues](https://github.com/samirmartins/moonlight-tizen/issues)
+- [Contributing](.github/CONTRIBUTING.md)
 
 ---
 
@@ -86,45 +78,36 @@ which applies here unchanged.
 docker build --ulimit nofile=1024:524288 -t moonlight-tizen .
 ```
 
-> [!IMPORTANT]
-> **The `--ulimit` is mandatory.** Without it the build fails at the packaging step with
-> `/bin/sh: 1: tizen: not found`, which points at the wrong thing entirely: the Tizen Studio
-> installer bundles its own JDK, that JVM aborts with `unable to allocate file descriptor
-> table` because BuildKit runs steps with a very high `RLIMIT_NOFILE`, and the installer then
-> **exits 0 having installed nothing**. The failure only surfaces fifteen steps later. No
-> change to the `Dockerfile` is needed — just the flag.
-
-Add `--build-arg FORCE_GAME_MODE=1` for the ForceGM variant. The widget is left in
-`/home/moonlight/` inside the image, named after the version in `config.xml` and the variant:
+The `--ulimit` is required by the bundled Tizen Studio JDK. Add
+`--build-arg FORCE_GAME_MODE=1` for ForceGM. Copy the resulting widget with:
 
 ```bash
-CID=$(docker create moonlight-tizen)
-docker cp "$CID:/home/moonlight/$(docker run --rm moonlight-tizen sh -c 'ls -1 /home/moonlight/*.wgt | xargs -n1 basename')" .
-docker rm "$CID"
+docker run --rm -v "$PWD:/out" --entrypoint sh moonlight-tizen \
+  -c 'cp /home/moonlight/*.wgt /out/'
 ```
 
-For a faster edit-compile loop that skips Tizen Studio entirely, see [`build-tools/README.md`](build-tools/README.md).
-
+For the faster compile/test/package workflow and the full `--ulimit` explanation, see
+[`build-tools/README.md`](build-tools/README.md).
 
 ---
 
 ## License
 
-`GNU General Public License v3.0`.
+[GNU General Public License v3.0](LICENSE).
 
 ---
 
 ## Credits
 
-Almost none of this application is my work. It exists because of:
+This fork builds on work from:
 
-- **[brightcraft](https://github.com/brightcraft/moonlight-tizen)** — for maintaining the repository this fork is based on, and for years of refactoring, bug fixing, UI/UX work, and new features that made it the most complete Moonlight client for Tizen. Consider [supporting his work](https://www.patreon.com/cw/BrightCraft/membership).
-- **[ruanformigoni](https://github.com/ruanformigoni/moonlight-tizen)** — for working out that the Tizen elementary media source is what breaks the audio, and for the Web Audio backend that fixes it, which this fork ports.
+- **[brightcraft](https://github.com/brightcraft/moonlight-tizen)** — for the repository this fork is based on and years of Tizen UI, feature and maintenance work. Consider [supporting it](https://www.patreon.com/cw/BrightCraft/membership).
+- **[ruanformigoni](https://github.com/ruanformigoni/moonlight-tizen)** — for identifying the Tizen elementary media source as the audio problem and providing the Web Audio foundation.
 - **[Moonlight Game Streaming Project](https://github.com/moonlight-stream)** — for the NVIDIA GameStream protocol implementation and the Chrome OS client.
 - **[Samsung Developers Forum](https://github.com/SamsungDForum/moonlight-chrome)** — for the original WASM port to Tizen, including the video and audio pipelines built on the Tizen WASM Player.
 - **[KyroFrCode](https://github.com/KyroFrCode/moonlight-chrome-tizen)** — for turning it into an installable application, and for the build method.
 - **[OneLiberty](https://github.com/OneLiberty/moonlight-chrome-tizen)** — for codec selection, gamepad mouse emulation, Wake-on-LAN, and more.
 - **[ToyPoodleGaming](https://github.com/toypoodlegaming/moonlight-chrome-tizen)** — for surround sound, performance statistics, and improved bitrate calculation.
-- **Claude Code and OpenAI Codex** — used as development assistants for analysis, implementation, review, testing, and documentation in this fork.
+- **Claude Code and OpenAI Codex** — development assistance with analysis, implementation, review, tests and documentation.
 
 And to **every contributor** to those projects.

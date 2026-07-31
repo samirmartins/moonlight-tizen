@@ -124,8 +124,9 @@ installing the other `.wgt`.
   **unnecessary** (the installer brings its own JDK). It was kept because the recipe was
   validated with it present; removing it should be safe in principle, but has not been
   tested.
-- The `.wgt` is signed with the project's test certificate (profile `Moonlight`), the same
-  as the official releases.
+- The packaging image creates a test certificate (profile `Moonlight`). Its author
+  identity is not guaranteed to match earlier releases; use a persistent certificate for
+  seamless upgrades across release builds.
 - The `__BUILD_TYPE__` / `__BUILD_COMMIT__` placeholders in `wasm/platform/index.js` are
   substituted by the CI workflow, not by a local build. Locally they stay literal, which
   only affects the version string shown on the System Info screen.

@@ -5,4 +5,4 @@ contact_links:
     about: General questions, ideas, and conversations
   - name: Upstream project
     url: https://github.com/brightcraft/moonlight-tizen
-    about: This fork is based on brightcraft/moonlight-tizen. Issues unrelated to the audio and video pipeline changes likely belong there
+    about: Issues that also reproduce upstream or concern unchanged upstream behavior may belong there

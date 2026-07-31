@@ -149,7 +149,7 @@ jobs:
             # Moonlight Tizen v${{ env.TIMESTAMP }}
 
             - Download `Moonlight-v${{ env.VERSION }}-samirmartins.wgt` from the release assets.
-            - Follow one of the [installation methods](https://github.com/brightcraft/moonlight-tizen/wiki/Installation-Guide) documented in the upstream wiki to install the application on your TV.
+            - Follow this fork's [Installation Guide](https://github.com/samirmartins/moonlight-tizen/blob/master/INSTALLATION.md) to install the application on your TV.
 
             ## What's Changed:
 
