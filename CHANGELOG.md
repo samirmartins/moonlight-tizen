@@ -9,8 +9,9 @@ that reason: the two lines are separate and should never be read as one.
 
 ## v3.3.5
 
-This release keeps the 3.3.4 streaming behaviour while removing unused code,
-assets and background work.
+This release includes the cumulative 3.3.4 improvements and keeps its streaming
+behaviour while removing unused code, assets and background work. Hardware testing
+on a Samsung TV running Tizen 9.0 found it to be the smoothest version to date.
 
 ### Changed
 - Removed legacy mDNS/update UI code, unused fonts, icons, headers and profiling
@@ -21,6 +22,7 @@ assets and background work.
 - Skipped overlay-only clocks and cadence calculations while statistics are hidden;
   video timing, decoding, quality and latency settings are unchanged
 - Removed two performance lines whose counters were never populated
+- Kept the reusable Tizen author key outside Docker image layers during packaging
 
 ### Fixed
 - Fixed the app-quit refresh running before the cancel request completed
