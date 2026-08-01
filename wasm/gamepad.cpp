@@ -111,6 +111,9 @@ static std::mutex s_inputWakeMutex;
 static std::condition_variable s_inputWakeCv;
 static std::atomic<uint32_t> s_inputWakeGeneration{0};
 static std::atomic<uint32_t> s_gamepadSession{0};
+// True only while an unchanged snapshot still needs time-based work: a held
+// stick driving mouse emulation or the one-second mouse-mode long press.
+static std::atomic<bool> s_inputNeedsTimedWake{false};
 
 // Copies a coherent snapshot. Every payload word is accessed atomically on
 // both sides of the WASM heap; the sequence word detects an update that began
@@ -169,10 +172,20 @@ void WaitForInputEvent(uint32_t& observedGeneration, int timeoutMs) {
     return;
   }
   std::unique_lock<std::mutex> lock(s_inputWakeMutex);
-  s_inputWakeCv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [&] {
-    return s_inputWakeGeneration.load(std::memory_order_acquire) != observedGeneration;
-  });
+  if (timeoutMs >= 0) {
+    s_inputWakeCv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [&] {
+      return s_inputWakeGeneration.load(std::memory_order_acquire) != observedGeneration;
+    });
+  } else {
+    s_inputWakeCv.wait(lock, [&] {
+      return s_inputWakeGeneration.load(std::memory_order_acquire) != observedGeneration;
+    });
+  }
   observedGeneration = s_inputWakeGeneration.load(std::memory_order_acquire);
+}
+
+bool InputNeedsTimedWake() {
+  return s_inputNeedsTimedWake.load(std::memory_order_acquire);
 }
 
 extern "C" EMSCRIPTEN_KEEPALIVE void notifyGamepadSnapshot() {
@@ -278,6 +291,7 @@ void MoonlightInstance::HandleGamepadInputState(bool rumbleFeedback, bool mouseE
   flipABfaceButtonsSwitch = flipABfaceButtons;
   flipXYfaceButtonsSwitch = flipXYfaceButtons;
   mouseEmulationActive = false;
+  s_inputNeedsTimedWake.store(false, std::memory_order_release);
   s_gamepadSession.fetch_add(1, std::memory_order_release);
 }
 
@@ -342,14 +356,16 @@ void MoonlightInstance::PollGamepads() {
       return;
     }
     lastSequence = coherentSequence;
-  } else if (!mouseEmulationActive) {
-    // Stationary controllers require no network packet. Mouse emulation is the
-    // exception because a held stick must continue moving the pointer.
+  } else if (!s_inputNeedsTimedWake.load(std::memory_order_acquire)) {
+    // Stationary controllers require no network packet. The timed-wake flag is
+    // set only for a held-stick mouse movement or a pending long press.
     return;
   }
 
   int numGamepads = std::max(0, std::min(kMaxSnapshotPads, snapshot.numGamepads));
   const short activeGamepadMask = GetActiveGamepadMask(snapshot, numGamepads);
+  bool pendingLongPress = false;
+  bool continuousMouseMovement = false;
 
   if (activeGamepadMask != lastConnectedMask) {
     for (int gamepadID = 0; gamepadID < kMaxSnapshotPads; gamepadID++) {
@@ -438,6 +454,9 @@ void MoonlightInstance::PollGamepads() {
           }
           longPressLatched[gamepadID] = true;
         }
+        if (!longPressLatched[gamepadID]) {
+          pendingLongPress = true;
+        }
       } else {
         playPressedAt[gamepadID] = {};
         longPressLatched[gamepadID] = false;
@@ -469,6 +488,10 @@ void MoonlightInstance::PollGamepads() {
       const float scrollSpeed = baseScrollSpeed * rightStickMagnitude;
       const float scrollXDelta = static_cast<float>(packet.rightStickX) / 32767.0f * scrollSpeed;
       const float scrollYDelta = static_cast<float>(packet.rightStickY) / 32767.0f * scrollSpeed;
+
+      continuousMouseMovement = continuousMouseMovement ||
+        std::abs(mouseXDelta) >= 1.0f || std::abs(mouseYDelta) >= 1.0f ||
+        std::abs(scrollXDelta) >= 1.0f || std::abs(scrollYDelta) >= 1.0f;
       
       // Send mouse scroll events with the specified delta values for both horizontal (X-axis) and vertical (Y-axis) coordinates
       LiSendHScrollEvent(static_cast<int>(scrollXDelta));
@@ -501,6 +524,12 @@ void MoonlightInstance::PollGamepads() {
       }
     }
   }
+
+  // An ordinary stationary controller now sleeps indefinitely. Snapshot and
+  // mouse events notify the condition variable immediately, so this removes
+  // idle wakeups without adding input latency.
+  s_inputNeedsTimedWake.store(
+    pendingLongPress || continuousMouseMovement, std::memory_order_release);
 }
 
 // Rumble magnitudes, published where the animation frame callback can read them.

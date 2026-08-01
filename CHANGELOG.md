@@ -7,6 +7,35 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.3.4
+
+This release targets cumulative scheduler, haptics and logging pressure in long sessions.
+The v3.3.3 video path is preserved exactly after newer timing experiments proved less
+smooth on hardware.
+
+### Fixed
+- Idle audio and input workers now sleep until real work arrives. Timed input wakes
+  remain only for held-stick mouse movement and the controller long-press timer
+- Rumble actuator promises are bounded per controller, with latest-state retry, a
+  watchdog for platform promises that never settle, and immediate stop/reset handling
+- Periodic performance statistics no longer generate retained console strings
+- Controller identity and capabilities are cached at connection time; with rumble off,
+  the display-frame callback no longer reads or schedules any haptics work
+- Fixed the Audio jitter buffer selector missing the dimensions of every other settings
+  button, and made its displayed, stored and native fallback defaults agree
+
+### Changed
+- Video timestamps, submission, zero-copy frames, decoder configuration, performance
+  instrumentation and presentation behaviour are identical to v3.3.3
+- AudioWorklet startup latency, codec, bitrate, resolution, colour handling and visible
+  metrics are unchanged
+- Audio jitter buffer now defaults to a 100 ms adaptive ceiling, based on the smoother
+  hardware result. Playback still starts near two Opus frames and grows only after an
+  underrun; the old 50 ms default is migrated once without overriding later user choices
+
+### Added
+- Deterministic rumble backlog, watchdog and disabled-path coverage
+
 ## v3.3.3
 
 The two timing-sensitive paths that still depended on the browser's main thread have

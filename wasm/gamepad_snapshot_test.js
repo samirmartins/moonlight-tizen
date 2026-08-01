@@ -85,7 +85,7 @@ vm.runInContext(fs.readFileSync('wasm/platform/gamepad.js', 'utf8'), context);
 
 // A physical index hole is compacted to logical controller zero.
 assert.strictEqual(context.getStreamingGamepadMask(), 1);
-context.startGamepadSnapshot();
+context.startGamepadSnapshot(true);
 assert(rafCallback);
 rafCallback();
 assert.strictEqual(notifications, 1);
@@ -128,6 +128,46 @@ timerCallback = null;
 pendingTimer();
 assert.strictEqual(rumbleCalls.length, 2);
 
+// If the platform retains preempted Promises, calls are bounded rather than
+// accumulating forever. The latest state remains pending and the watchdog
+// eventually lets it through without disturbing the input animation frame.
+now = 220;
+Atomics.store(heap32, rumbleBase, (0x3000 << 16) | 0x1000);
+rafCallback();
+assert(timerCallback);
+pendingTimer = timerCallback;
+timerCallback = null;
+pendingTimer();
+assert.strictEqual(rumbleCalls.length, 2);
+
+now = 900;
+rafCallback();
+assert(timerCallback);
+pendingTimer = timerCallback;
+timerCallback = null;
+pendingTimer();
+assert.strictEqual(rumbleCalls.length, 3);
+
+// Zero always preempts, even while an actuator operation is outstanding.
+now = 910;
+Atomics.store(heap32, rumbleBase, 0);
+rafCallback();
+assert(timerCallback);
+pendingTimer = timerCallback;
+timerCallback = null;
+pendingTimer();
+assert.strictEqual(rumbleCalls[3].type, 'reset');
+
 context.stopGamepadSnapshot();
 assert.strictEqual(Atomics.load(heap32, base + 1), 0);
+
+// With haptics disabled at the protocol boundary, the animation frame does not
+// even scan the rumble mailboxes or schedule a post-frame task.
+const callsBeforeDisabledRun = rumbleCalls.length;
+context.startGamepadSnapshot(false);
+Atomics.store(heap32, rumbleBase, (0x7000 << 16) | 0x3000);
+rafCallback();
+assert.strictEqual(timerCallback, null);
+assert.strictEqual(rumbleCalls.length, callsBeforeDisabledRun);
+context.stopGamepadSnapshot();
 console.log('gamepad_snapshot_test: ok');

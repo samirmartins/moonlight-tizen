@@ -73,7 +73,13 @@ var handlePromiseMessage = function(callbackId, type, msg) {
  * @return {void}
  */
 function handleMessage(msg) {
-  console.log('%c[messages.js, handleMessage]', 'color: gray;', 'Message data: ', msg);
+  // The performance overlay updates once per second and can remain enabled for
+  // hours. Logging every full update lets some WebKit builds retain thousands
+  // of large strings and creates avoidable GC pressure. Other, infrequent
+  // control messages remain visible for diagnostics.
+  if (msg.indexOf('StatMsg: ') !== 0) {
+    console.log('%c[messages.js, handleMessage]', 'color: gray;', 'Message data: ', msg);
+  }
   // If it's a recognized event, notify the appropriate function
   if (msg.indexOf('streamTerminated: ') === 0) {
     // Reset the Web Audio scheduler so the next stream starts from a clean clock

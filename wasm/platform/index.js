@@ -54,6 +54,8 @@ const ACTION_THRESHOLD = 0.5; // Threshold for initial navigation set to 0.5
 const NAVIGATION_DELAY = 150; // Navigation delay set to 150ms (milliseconds)
 const UPDATE_TIMESTAMP = 'lastUpdateCheck'; // Use the update check timestamp key to determine the last update check
 const UPDATE_INTERVAL = 24 * 60 * 60 * 1000; // Automatic check for updates interval is set to 24 hours
+const DEFAULT_AUDIO_JITTER_MS = '100';
+const AUDIO_JITTER_DEFAULT_REVISION = 2;
 
 // Called by the common.js module
 function attachListeners() {
@@ -2897,6 +2899,9 @@ function saveAudioJitter() {
   $('#selectAudioJitter').html(chosenJitter + ' ms');
   console.log('%c[index.js, saveAudioJitter]', 'color: green;', 'Saving audio jitter buffer value: ' + chosenJitter);
   storeData('audioJitterMs', chosenJitter, null);
+  // Marks this as an explicit post-v3.3.3 choice. It prevents a user who later
+  // selects 50 ms deliberately from being mistaken for the old 50 ms default.
+  storeData('audioJitterDefaultRevision', AUDIO_JITTER_DEFAULT_REVISION, null);
 }
 
 function savePlayHostAudio() {
@@ -3107,14 +3112,14 @@ function restoreDefaultsSettingsValues() {
   $('#selectAudio').text('Stereo').data('value', defaultAudioConfig);
   storeData('audioConfig', defaultAudioConfig, null);
 
-  // The setpoint the scheduler's rate servo holds. It no longer has to carry
-  // slack for bursts, because a backlog is now drained by consuming slightly
-  // faster rather than by discarding frames, so it can sit at the low end of the
-  // slider. moonlight-android bounds its pending audio at 40 ms.
-  const defaultAudioJitterMs = '50';
+  // This is an adaptive ceiling. Playback still starts at two Opus frames and
+  // grows only after an underrun, but hardware testing found that allowing it
+  // to reach 100 ms produces the most stable result on Tizen.
+  const defaultAudioJitterMs = DEFAULT_AUDIO_JITTER_MS;
   $('#jitterSlider')[0].MaterialSlider.change(defaultAudioJitterMs);
   $('#selectAudioJitter').html(defaultAudioJitterMs + ' ms');
   storeData('audioJitterMs', defaultAudioJitterMs, null);
+  storeData('audioJitterDefaultRevision', AUDIO_JITTER_DEFAULT_REVISION, null);
 
   const defaultPlayHostAudio = false;
   document.querySelector('#playHostAudioBtn').MaterialSwitch.off();
@@ -3371,10 +3376,22 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioJitterMs preferences.');
-  getData('audioJitterMs', function(previousValue) {
-    var value = (previousValue.audioJitterMs != null) ? String(previousValue.audioJitterMs) : '50';
-    $('#jitterSlider')[0].MaterialSlider.change(value);
-    $('#selectAudioJitter').html(value + ' ms');
+  getData('audioJitterDefaultRevision', function(previousRevision) {
+    getData('audioJitterMs', function(previousValue) {
+      var storedValue = previousValue.audioJitterMs != null
+        ? String(previousValue.audioJitterMs) : null;
+      var isLegacyDefault = previousRevision.audioJitterDefaultRevision == null &&
+        storedValue === '50';
+      var value = storedValue == null || isLegacyDefault
+        ? DEFAULT_AUDIO_JITTER_MS : storedValue;
+      $('#jitterSlider')[0].MaterialSlider.change(value);
+      $('#selectAudioJitter').html(value + ' ms');
+
+      if (storedValue !== value) {
+        storeData('audioJitterMs', value, null);
+      }
+      storeData('audioJitterDefaultRevision', AUDIO_JITTER_DEFAULT_REVISION, null);
+    });
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored playHostAudio preferences.');

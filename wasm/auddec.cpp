@@ -36,7 +36,7 @@
 // Default depth of the jitter buffer when the user has not chosen one. This is
 // the setpoint the scheduler's rate servo holds, not a threshold above which
 // audio is thrown away; see platform/audio.js.
-static constexpr int kDefaultJitterMs = 50;
+static constexpr int kDefaultJitterMs = 100;
 
 // Minimum interval between audio problem log lines. This code runs on the audio
 // path, and logging crosses into JS; an unthrottled line per lost packet is
@@ -88,7 +88,7 @@ static std::condition_variable s_pktCv;
 
 // ─── Decoded PCM ring ────────────────────────────────────────────────────────
 // 65536 frames are 1.36 seconds at 48 kHz. This is intentionally much deeper
-// than the active target (normally 20-50 ms): capacity absorbs a temporarily
+// than the active target (normally 20-100 ms): capacity absorbs a temporarily
 // unavailable backend, while the consumer's target controls actual latency.
 // A power of two makes wrap arithmetic cheap in the AudioWorklet hot path.
 static constexpr size_t kPcmRingFrames = 65536;
@@ -158,17 +158,13 @@ static void FeederLoop() {
       }
     }
 
-    // Wait for the next packet.
-    //
-    // The condition variable is signalled on every arriving packet, so the
-    // timeout is only a safety net against a missed notification. It used to be
-    // one millisecond, which woke this thread a thousand times a second to find
-    // nothing and go back to sleep. On a TV with a handful of cores and a dozen
-    // threads that is scheduler time taken from the path that delivers video,
-    // for no work done.
+    // Wait for the next packet. The queue state is changed under the same mutex
+    // used by this predicate, so a notification cannot be missed. A periodic
+    // timeout only wakes a worker that has no work and, over a long session,
+    // adds scheduler and thermal pressure for no recovery benefit.
     {
       std::unique_lock<std::mutex> lock(s_pktMutex);
-      s_pktCv.wait_for(lock, std::chrono::milliseconds(20), [] {
+      s_pktCv.wait(lock, [] {
         return s_pktCount > 0 || !s_feederRunning.load(std::memory_order_relaxed);
       });
     }

@@ -338,6 +338,7 @@ void PostToJs(std::string msg);
 void PostToJsAsync(const std::string& msg);
 void NotifyInputEvent();
 void WaitForInputEvent(uint32_t& observedGeneration, int timeoutMs);
+bool InputNeedsTimedWake();
 void PostPromiseMessage(int callbackId, const std::string& type, const std::string& response);
 void PostPromiseMessage(int callbackId, const std::string& type, const std::vector<uint8_t>& response);
 

@@ -204,9 +204,10 @@ void* MoonlightInstance::InputThreadFunc(void* context) {
     me->PollGamepads();
     me->ReportMouseMovement();
 
-    // Wake immediately for a new animation-frame snapshot or mouse movement;
-    // the timeout keeps held-stick mouse emulation moving continuously.
-    WaitForInputEvent(observedInputGeneration, 8);
+    // Wake immediately for a new animation-frame snapshot or mouse movement.
+    // A short timeout exists only while unchanged state still has time-based
+    // work (held-stick mouse movement or the mouse-mode long press).
+    WaitForInputEvent(observedInputGeneration, InputNeedsTimedWake() ? 8 : -1);
   }
 
   return NULL;
@@ -281,9 +282,9 @@ void* MoonlightInstance::ConnectionThreadFunc(void* context) {
   // blocking round trips a second on the main thread. See wasm/gamepad.cpp.
   MAIN_THREAD_ASYNC_EM_ASM({
     if (typeof startGamepadSnapshot === 'function') {
-      startGamepadSnapshot();
+      startGamepadSnapshot(!!$0);
     }
-  });
+  }, me->m_StreamConfig.enableHaptics ? 1 : 0);
 
   pthread_create(&me->m_InputThread, NULL, MoonlightInstance::InputThreadFunc, me);
 

@@ -99,15 +99,33 @@ var _gpNextFloats = null;
 var _gpLastWords = null;
 var _gpPhysicalForSlot = null;
 var _gpLogicalPads = null;
+var _gpTypeForSlot = null;
+var _gpCapabilitiesForSlot = null;
 var _gpKnownPhysical = new Set();
 
 function _gpEnsureMappings(maxPads) {
-  if (_gpPhysicalForSlot && _gpPhysicalForSlot.length === maxPads) {
+  if (_gpPhysicalForSlot && _gpPhysicalForSlot.length === maxPads &&
+      _gpTypeForSlot && _gpCapabilitiesForSlot) {
     return;
   }
   _gpPhysicalForSlot = new Int32Array(maxPads);
   _gpPhysicalForSlot.fill(-1);
   _gpLogicalPads = new Array(maxPads);
+  _gpTypeForSlot = new Int32Array(maxPads);
+  _gpCapabilitiesForSlot = new Int32Array(maxPads);
+}
+
+function _gpClearSlotMetadata(slot) {
+  _gpTypeForSlot[slot] = _GP_TYPE_UNKNOWN;
+  _gpCapabilitiesForSlot[slot] = 0;
+}
+
+function _gpCacheSlotMetadata(slot, gamepad) {
+  var buttons = gamepad && gamepad.buttons ? gamepad.buttons : [];
+  _gpTypeForSlot[slot] = _gpControllerType(gamepad);
+  _gpCapabilitiesForSlot[slot] =
+    (buttons.length > 7 ? _GP_CAP_ANALOG_TRIGGERS : 0) |
+    (_gpGetActuator(gamepad) ? _GP_CAP_RUMBLE : 0);
 }
 
 function _gpGetActuator(gamepad) {
@@ -149,6 +167,7 @@ function _gpRefreshMappings(pads, maxPads) {
     if (physical >= 0 && !_gpIsUsable(existing)) {
       _gpPhysicalForSlot[slot] = -1;
       _gpLogicalPads[slot] = null;
+      _gpClearSlotMetadata(slot);
       _rumbleForgetSlot(slot);
     }
   }
@@ -158,6 +177,7 @@ function _gpRefreshMappings(pads, maxPads) {
     for (var freeSlot = 0; freeSlot < maxPads; freeSlot++) {
       if (_gpPhysicalForSlot[freeSlot] < 0) {
         _gpPhysicalForSlot[freeSlot] = gamepad.index;
+        _gpCacheSlotMetadata(freeSlot, gamepad);
         _rumbleForgetSlot(freeSlot);
         break;
       }
@@ -178,6 +198,7 @@ window.addEventListener('gamepaddisconnected', function(event) {
   if (slot >= 0) {
     _gpPhysicalForSlot[slot] = -1;
     _gpLogicalPads[slot] = null;
+    _gpClearSlotMetadata(slot);
     _rumbleForgetSlot(slot);
   }
 });
@@ -212,9 +233,12 @@ function _gpBuildSnapshot(pads) {
     _gpNextWords[offset + 1] = numAxes;
     _gpNextWords[offset + 2] = numButtons;
     _gpNextWords[offset + 3] = gamepad.timestamp ? 1 : 0;
-    _gpNextWords[offset + 4] = _gpControllerType(gamepad);
-    _gpNextWords[offset + 5] = (numButtons > 7 ? _GP_CAP_ANALOG_TRIGGERS : 0) |
-      (_gpGetActuator(gamepad) ? _GP_CAP_RUMBLE : 0);
+    // Type detection lowercases the controller name and runs several regular
+    // expressions. Capabilities also inspect the actuator object. Both are
+    // immutable for a connected pad, so they are cached when its slot is made
+    // rather than rebuilt on every animation frame.
+    _gpNextWords[offset + 4] = _gpTypeForSlot[slot];
+    _gpNextWords[offset + 5] = _gpCapabilitiesForSlot[slot];
     _gpNextWords[offset + 6] = _GP_STANDARD_BUTTON_FLAGS;
     var axisBase = offset + 7;
     for (var axis = 0; axis < numAxes; axis++) {
@@ -255,7 +279,9 @@ function _gpPublishIfChanged() {
   try { Module._notifyGamepadSnapshot(); } catch (e) {}
 }
 
-function startGamepadSnapshot() {
+var _rumbleEnabled = false;
+
+function startGamepadSnapshot(rumbleEnabled) {
   if (_gpRafHandle) { return; }
   try {
     _gpSnapshotPtr = Module._gamepadSnapshotAddress();
@@ -263,7 +289,8 @@ function startGamepadSnapshot() {
     _gpButtonCount = Module._gamepadSnapshotButtonCount();
     _gpStride = Module._gamepadSnapshotStride();
     _gpWordCount = Module._gamepadSnapshotWordCount();
-    _rumblePtr = Module._rumbleStateAddress();
+    _rumbleEnabled = !!rumbleEnabled;
+    _rumblePtr = _rumbleEnabled ? Module._rumbleStateAddress() : 0;
   } catch (e) {
     console.error('%c[gamepad.js]', 'color: red;', 'Unable to initialize input snapshot.', e);
     return;
@@ -279,7 +306,7 @@ function startGamepadSnapshot() {
     var pads = navigator.getGamepads ? navigator.getGamepads() : [];
     _gpBuildSnapshot(pads);
     _gpPublishIfChanged();
-    _rumbleMaybeSchedule();
+    if (_rumbleEnabled) { _rumbleMaybeSchedule(); }
     _gpRafHandle = window.requestAnimationFrame(tick);
   };
   _gpRafHandle = window.requestAnimationFrame(tick);
@@ -287,6 +314,8 @@ function startGamepadSnapshot() {
 
 function stopGamepadSnapshot() {
   _rumbleStop();
+  _rumbleEnabled = false;
+  _rumblePtr = 0;
   if (_gpRafHandle) {
     window.cancelAnimationFrame(_gpRafHandle);
     _gpRafHandle = 0;
@@ -304,17 +333,49 @@ var _RUMBLE_MAX_PADS = 4;
 var _RUMBLE_DURATION_MS = 500;
 var _RUMBLE_RENEW_MS = 400;
 var _RUMBLE_MIN_INTERVAL_MS = 100;
+var _RUMBLE_MAX_IN_FLIGHT = 2;
+var _RUMBLE_WATCHDOG_MS = 750;
 var _rumblePtr = 0;
 var _rumbleTask = 0;
 var _rumbleLastApplied = new Int32Array(_RUMBLE_MAX_PADS);
 var _rumbleRenewedAt = new Float64Array(_RUMBLE_MAX_PADS);
 var _rumbleNextAllowed = new Float64Array(_RUMBLE_MAX_PADS);
+var _rumbleInFlight = new Uint8Array(_RUMBLE_MAX_PADS);
+var _rumbleInFlightSince = new Float64Array(_RUMBLE_MAX_PADS);
+var _rumbleGeneration = new Uint32Array(_RUMBLE_MAX_PADS);
 
-function _rumbleNoop() {}
-function _rumbleClaim(result) {
+function _rumbleInvalidateInflight(slot) {
+  _rumbleGeneration[slot]++;
+  _rumbleInFlight[slot] = 0;
+  _rumbleInFlightSince[slot] = 0;
+}
+
+function _rumbleClaim(result, slot, now) {
   if (result && typeof result.then === 'function') {
-    result.then(_rumbleNoop, _rumbleNoop);
+    var generation = _rumbleGeneration[slot];
+    if (_rumbleInFlight[slot] === 0) {
+      _rumbleInFlightSince[slot] = now;
+    }
+    _rumbleInFlight[slot]++;
+    var settled = function() {
+      if (_rumbleGeneration[slot] !== generation) { return; }
+      if (_rumbleInFlight[slot] > 0) { _rumbleInFlight[slot]--; }
+      if (_rumbleInFlight[slot] === 0) { _rumbleInFlightSince[slot] = 0; }
+    };
+    result.then(settled, settled);
   }
+}
+
+function _rumbleCanStart(slot, now) {
+  if (_rumbleInFlight[slot] < _RUMBLE_MAX_IN_FLIGHT) { return true; }
+  if (now - _rumbleInFlightSince[slot] >= _RUMBLE_WATCHDOG_MS) {
+    // The platform failed to settle preempted effects. Forget the stale logical
+    // claims and allow the newest state through; late settlements are ignored
+    // by the generation check above.
+    _rumbleInvalidateInflight(slot);
+    return true;
+  }
+  return false;
 }
 
 function _rumbleNow() {
@@ -326,6 +387,7 @@ function _rumbleForgetSlot(slot) {
   _rumbleLastApplied[slot] = 0;
   _rumbleRenewedAt[slot] = 0;
   _rumbleNextAllowed[slot] = 0;
+  _rumbleInvalidateInflight(slot);
 }
 
 function _rumbleNeedsPump(now) {
@@ -365,16 +427,25 @@ function _rumblePump() {
     if (packed !== 0 && now < _rumbleNextAllowed[slot]) { continue; }
 
     var actuator = _gpGetActuator(_gpLogicalPads && _gpLogicalPads[slot]);
+    if (packed !== 0 && !_rumbleCanStart(slot, now)) {
+      // Keep the state pending and retry no faster than the existing 10 Hz
+      // limit. Normal actuators never enter this branch.
+      _rumbleNextAllowed[slot] = now + _RUMBLE_MIN_INTERVAL_MS;
+      continue;
+    }
     _rumbleLastApplied[slot] = packed;
     _rumbleRenewedAt[slot] = now;
     _rumbleNextAllowed[slot] = packed === 0 ? 0 : now + _RUMBLE_MIN_INTERVAL_MS;
     if (!actuator) { continue; }
     try {
       if (packed === 0) {
+        // Stop is never held behind a slow effect. Invalidate old logical
+        // claims before issuing reset so their late Promises cannot affect it.
+        _rumbleInvalidateInflight(slot);
         if (typeof actuator.reset === 'function') {
-          _rumbleClaim(actuator.reset());
+          _rumbleClaim(actuator.reset(), slot, now);
         } else if (typeof actuator.pulse === 'function') {
-          _rumbleClaim(actuator.pulse(0, 0));
+          _rumbleClaim(actuator.pulse(0, 0), slot, now);
         }
       } else {
         var weak = (packed & 0xffff) / 65535;
@@ -385,9 +456,10 @@ function _rumblePump() {
             duration: _RUMBLE_DURATION_MS,
             weakMagnitude: weak,
             strongMagnitude: strong
-          }));
+          }), slot, now);
         } else if (typeof actuator.pulse === 'function') {
-          _rumbleClaim(actuator.pulse(Math.max(weak, strong), _RUMBLE_DURATION_MS));
+          _rumbleClaim(
+            actuator.pulse(Math.max(weak, strong), _RUMBLE_DURATION_MS), slot, now);
         }
       }
     } catch (e) {}
@@ -404,14 +476,24 @@ function _rumbleStop() {
       var actuator = _gpGetActuator(_gpLogicalPads[slot]);
       if (!actuator) { continue; }
       try {
-        if (typeof actuator.reset === 'function') { _rumbleClaim(actuator.reset()); }
-        else if (typeof actuator.pulse === 'function') { _rumbleClaim(actuator.pulse(0, 0)); }
+        _rumbleInvalidateInflight(slot);
+        if (typeof actuator.reset === 'function') {
+          _rumbleClaim(actuator.reset(), slot, _rumbleNow());
+        } else if (typeof actuator.pulse === 'function') {
+          _rumbleClaim(actuator.pulse(0, 0), slot, _rumbleNow());
+        }
       } catch (e) {}
     }
   }
   _rumbleLastApplied.fill(0);
   _rumbleRenewedAt.fill(0);
   _rumbleNextAllowed.fill(0);
+  _rumbleInFlight.fill(0);
+  _rumbleInFlightSince.fill(0);
+  for (var generationSlot = 0;
+       generationSlot < _RUMBLE_MAX_PADS; generationSlot++) {
+    _rumbleGeneration[generationSlot]++;
+  }
   try {
     if (Module._resetRumbleState) { Module._resetRumbleState(); }
   } catch (e) {}

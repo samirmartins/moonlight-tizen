@@ -49,9 +49,9 @@ which removes its saved settings. A persistent release-signing certificate is st
 - **Rumble feedback** defaults off for broad controller compatibility. Off also disables
   haptics at the protocol boundary. When enabled, updates are coalesced and applied after
   frame delivery.
-- **Audio jitter buffer** defaults to 50 ms, but this is an adaptive ceiling rather than
+- **Audio jitter buffer** defaults to 100 ms, but this is an adaptive ceiling rather than
   fixed latency. Playback starts near two Opus frames and raises protection after a real
-  underrun, never beyond the selected value. Raise it only if audio still breaks up.
+  underrun, never beyond the selected value.
 
 ---
 
