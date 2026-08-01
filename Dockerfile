@@ -31,7 +31,7 @@ ENV PATH=/home/moonlight/tizen-studio/tools/ide/bin:/home/moonlight/tizen-studio
 
 # Prepare the Tizen certificate and security profiles for signing the application package
 ARG SIGNING_CERT_SHA256=""
-RUN --mount=type=secret,id=tizen_author \
+RUN --mount=type=secret,id=tizen_author,uid=1000,gid=1000,mode=0400 \
 	if [ -f /run/secrets/tizen_author ]; then \
 		mkdir -p /home/moonlight/tizen-studio-data/keystore/author && \
 		cp /run/secrets/tizen_author /home/moonlight/tizen-studio-data/keystore/author/Moonlight.p12 && \
