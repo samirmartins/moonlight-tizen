@@ -30,10 +30,17 @@ RUN ./web-cli_Tizen_Studio_6.1_ubuntu-64.bin --accept-license /home/moonlight/ti
 ENV PATH=/home/moonlight/tizen-studio/tools/ide/bin:/home/moonlight/tizen-studio/tools:${PATH}
 
 # Prepare the Tizen certificate and security profiles for signing the application package
-RUN tizen certificate \
-	-a Moonlight \
-	-f Moonlight \
-	-p 123456
+ARG SIGNING_CERT_SHA256=""
+RUN --mount=type=secret,id=tizen_author \
+	if [ -f /run/secrets/tizen_author ]; then \
+		mkdir -p /home/moonlight/tizen-studio-data/keystore/author && \
+		cp /run/secrets/tizen_author /home/moonlight/tizen-studio-data/keystore/author/Moonlight.p12 && \
+		test -n "$SIGNING_CERT_SHA256" && \
+		echo "$SIGNING_CERT_SHA256  /home/moonlight/tizen-studio-data/keystore/author/Moonlight.p12" | sha256sum -c -; \
+	else \
+		test -z "$SIGNING_CERT_SHA256" && \
+		tizen certificate -a Moonlight -f Moonlight -p 123456; \
+	fi
 RUN tizen security-profiles add \
 	-n Moonlight \
 	-a /home/moonlight/tizen-studio-data/keystore/author/Moonlight.p12 \
