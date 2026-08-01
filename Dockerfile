@@ -31,26 +31,26 @@ ENV PATH=/home/moonlight/tizen-studio/tools/ide/bin:/home/moonlight/tizen-studio
 
 # Prepare the Tizen certificate and security profiles for signing the application package
 ARG SIGNING_CERT_SHA256=""
-RUN --mount=type=secret,id=tizen_author,uid=1000,gid=1000,mode=0400 \
-	if [ -f /run/secrets/tizen_author ]; then \
-		mkdir -p /home/moonlight/tizen-studio-data/keystore/author && \
-		cp /run/secrets/tizen_author /home/moonlight/tizen-studio-data/keystore/author/Moonlight.p12 && \
+RUN --mount=type=secret,id=tizen_author,target=/run/secrets/Moonlight.p12,uid=1000,gid=1000,mode=0400 \
+	if [ -f /run/secrets/Moonlight.p12 ]; then \
 		test -n "$SIGNING_CERT_SHA256" && \
-		echo "$SIGNING_CERT_SHA256  /home/moonlight/tizen-studio-data/keystore/author/Moonlight.p12" | sha256sum -c -; \
+		echo "$SIGNING_CERT_SHA256  /run/secrets/Moonlight.p12" | sha256sum -c -; \
 	else \
 		test -z "$SIGNING_CERT_SHA256" && \
-		tizen certificate -a Moonlight -f Moonlight -p 123456; \
+		tizen certificate -a Moonlight -f Moonlight -p 123456 && \
+		tizen security-profiles add \
+			-n Moonlight \
+			-a /home/moonlight/tizen-studio-data/keystore/author/Moonlight.p12 \
+			-p 123456; \
 	fi
-RUN tizen security-profiles add \
-	-n Moonlight \
-	-a /home/moonlight/tizen-studio-data/keystore/author/Moonlight.p12 \
-	-p 123456
 
 # Workaround to package applications without gnome-keyring
 # These steps must be repeated each time before packaging an application
 # See: <https://developer.tizen.org/forums/sdk-ide/pwd-fle-format-profile.xml-certificates> for more details
-RUN sed -i 's|/home/moonlight/tizen-studio-data/keystore/author/Moonlight.pwd||' /home/moonlight/tizen-studio-data/profile/profiles.xml
-RUN sed -i 's|/home/moonlight/tizen-studio-data/tools/certificate-generator/certificates/distributor/tizen-distributor-signer.pwd|tizenpkcs12passfordsigner|' /home/moonlight/tizen-studio-data/profile/profiles.xml
+RUN if [ -z "$SIGNING_CERT_SHA256" ]; then \
+		sed -i 's|/home/moonlight/tizen-studio-data/keystore/author/Moonlight.pwd||' /home/moonlight/tizen-studio-data/profile/profiles.xml && \
+		sed -i 's|/home/moonlight/tizen-studio-data/tools/certificate-generator/certificates/distributor/tizen-distributor-signer.pwd|tizenpkcs12passfordsigner|' /home/moonlight/tizen-studio-data/profile/profiles.xml; \
+	fi
 
 # Install Samsung Emscripten SDK and configure Java path for closure compiler
 RUN aria2c -x 5 -s 5 -o emscripten-1.39.4.7-linux64.zip 'https://developer.samsung.com/smarttv/file/a5013a65-af11-4b59-844f-2d34f14d19a9'
@@ -117,16 +117,27 @@ RUN if [ "$FORCE_GAME_MODE" = "1" ]; then \
 		echo "config.xml: stock, no Game Mode metadata"; \
 	fi
 
-# Sign and package the application into a WGT file using Expect to automate the interactive password prompts
-RUN echo \
-	'set timeout -1\n' \
-	'spawn tizen package -t wgt -- build/widget\n' \
-	'expect "Author password:"\n' \
-	'send -- "123456\\r"\n' \
-	'expect "Yes: (Y), No: (N) ?"\n' \
-	'send -- "N\\r"\n' \
-	'expect eof\n' \
-| expect
+# Sign and package the application into a WGT file using Expect to automate the interactive password prompts.
+# A supplied signing key exists only in this BuildKit secret mount and never in an image layer.
+RUN --mount=type=secret,id=tizen_author,target=/run/secrets/Moonlight.p12,uid=1000,gid=1000,mode=0400 \
+	if [ -f /run/secrets/Moonlight.p12 ]; then \
+		test -n "$SIGNING_CERT_SHA256" && \
+		echo "$SIGNING_CERT_SHA256  /run/secrets/Moonlight.p12" | sha256sum -c - && \
+		tizen security-profiles add -n Moonlight -a /run/secrets/Moonlight.p12 -p 123456 && \
+		sed -i 's|/run/secrets/Moonlight.pwd||' /home/moonlight/tizen-studio-data/profile/profiles.xml && \
+		sed -i 's|/home/moonlight/tizen-studio-data/tools/certificate-generator/certificates/distributor/tizen-distributor-signer.pwd|tizenpkcs12passfordsigner|' /home/moonlight/tizen-studio-data/profile/profiles.xml; \
+	else \
+		test -z "$SIGNING_CERT_SHA256"; \
+	fi && \
+	printf '%b' \
+		'set timeout -1\n' \
+		'spawn tizen package -t wgt -- build/widget\n' \
+		'expect "Author password:"\n' \
+		'send -- "123456\\r"\n' \
+		'expect "Yes: (Y), No: (N) ?"\n' \
+		'send -- "N\\r"\n' \
+		'expect eof\n' \
+	| expect
 # Name the artifact after the version it declares and the variant it is, so the
 # file still identifies itself once it is sitting on a USB stick next to others
 RUN VERSION=$(grep -oP 'version="\K[0-9]+\.[0-9]+\.[0-9]+' build/widget/config.xml); \
