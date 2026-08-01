@@ -166,10 +166,12 @@ class MoonlightInstance {
   static void FormatVideoStats(VIDEO_STATS& stats, char* output, int length);
   // Cadence instrumentation, fed from the frame submission path.
   static void RecordAppendCadence(VIDEO_STATS& stats);
-  static void RecordPipelineLead(VIDEO_STATS& stats, samsung::wasm::Seconds framePts);
+  static void RecordPipelineLead(VIDEO_STATS& stats, samsung::wasm::Seconds framePts,
+    bool collectStats, int64_t positionUs, uint64_t reportedAtMs, uint32_t nowMs);
   // Watches for the pipeline accepting packets while presentation is frozen, and
   // asks the recovery worker to flush when it is.
-  static void NotePresentationProgress(samsung::wasm::Seconds framePts);
+  static void NotePresentationProgress(bool collectStats, int64_t positionUs,
+    uint32_t nowMs);
   // Entry point for the recovery worker, which is a free function and so cannot
   // reach the media source directly.
   static void PerformPresentationRecovery();

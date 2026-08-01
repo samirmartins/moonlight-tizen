@@ -222,6 +222,9 @@ static void StopRecoveryThread();
 
 static VIDEO_STATS m_ActiveWndVideoStats;
 static VIDEO_STATS m_LastWndVideoStats;
+// Owned by the decoder thread. This makes enabling the overlay start a clean
+// measurement window without keeping dormant counters hot during normal play.
+static bool s_collectingStats = false;
 
 MoonlightInstance::SourceListener::SourceListener(
   MoonlightInstance* instance
@@ -529,6 +532,7 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
 
   // Clear last window video statistics from previous session
   memset(&m_LastWndVideoStats, 0, sizeof(m_LastWndVideoStats));
+  s_collectingStats = false;
 
   // The recovery worker has to exist before the first frame can be appended,
   // because the detector runs on the append path.
@@ -846,17 +850,16 @@ void MoonlightInstance::RecordAppendCadence(VIDEO_STATS& stats) {
 // some depth, the pipeline is buffering and scheduling by PTS, which means
 // pacing the submission cannot control presentation at all, and the effort
 // belongs somewhere else entirely.
-void MoonlightInstance::RecordPipelineLead(VIDEO_STATS& stats, TimeStamp framePts) {
-  int64_t positionUs = g_Instance->m_PipelinePositionUs.load(std::memory_order_acquire);
+void MoonlightInstance::RecordPipelineLead(
+  VIDEO_STATS& stats, TimeStamp framePts, bool collectStats,
+  int64_t positionUs, uint64_t reportedAtMs, uint32_t nowMs
+) {
   if (positionUs == kNoPipelinePosition) {
     // The platform never reported. Leaving the counters at zero makes that
     // visible in the overlay rather than silently reporting a lead of zero,
     // which would look like a measurement.
     return;
   }
-
-  uint64_t reportedAtMs = g_Instance->m_PipelinePositionAtMs.load(std::memory_order_relaxed);
-  uint64_t nowMs = LiGetMillis();
 
   // Extrapolate the reported position to now at real time. Playback rate is
   // never altered here, so 1:1 is exact between updates.
@@ -884,13 +887,15 @@ void MoonlightInstance::RecordPipelineLead(VIDEO_STATS& stats, TimeStamp framePt
     }
   }
 
-  stats.pipelineClockSamples++;
-  stats.pipelineClockLeadSumMs += leadMs;
-  stats.pipelineClockLeadSumSqMs += leadMs * leadMs;
+  if (collectStats) {
+    stats.pipelineClockSamples++;
+    stats.pipelineClockLeadSumMs += leadMs;
+    stats.pipelineClockLeadSumSqMs += leadMs * leadMs;
 
-  float absLeadMs = (float)std::abs(leadMs);
-  if (absLeadMs > stats.pipelineClockLeadMaxMs) {
-    stats.pipelineClockLeadMaxMs = absLeadMs;
+    float absLeadMs = (float)std::abs(leadMs);
+    if (absLeadMs > stats.pipelineClockLeadMaxMs) {
+      stats.pipelineClockLeadMaxMs = absLeadMs;
+    }
   }
 }
 
@@ -964,15 +969,11 @@ void MoonlightInstance::PerformPresentationRecovery() {
   LiRequestIdrFrame();
 }
 
-// Called after every accepted append. Cheap by construction: two atomic loads
-// and some integer arithmetic on the thread that is already here.
-void MoonlightInstance::NotePresentationProgress(TimeStamp framePts) {
-  (void)framePts;
-
-  const int64_t positionUs =
-    g_Instance->m_PipelinePositionUs.load(std::memory_order_acquire);
-  const uint32_t nowMs = LiGetMillis();
-
+// Called after every accepted append. The position and clock sample are shared
+// with RecordPipelineLead(), so the hot path reads each only once per frame.
+void MoonlightInstance::NotePresentationProgress(
+  bool collectStats, int64_t positionUs, uint32_t nowMs
+) {
   if (positionUs == kNoPipelinePosition) {
     // The platform does not report position on this model, so a stall is not
     // observable and the detector stays disarmed for the whole session.
@@ -1024,7 +1025,9 @@ void MoonlightInstance::NotePresentationProgress(TimeStamp framePts) {
 
   s_lastRecoveryMs = nowMs;
   s_appendsSinceProgress = 0;
-  m_ActiveWndVideoStats.presentationRecoveries++;
+  if (collectStats) {
+    m_ActiveWndVideoStats.presentationRecoveries++;
+  }
 
   s_recoveryRequested.store(true, std::memory_order_release);
   s_recoveryCv.notify_one();
@@ -1074,25 +1077,34 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     g_Instance->m_PerformanceStatsEnabled.load(std::memory_order_relaxed);
 
   if (collectStats) {
-    total_bytes += decodeUnit->fullLength;
-  }
+    const uint32_t statsNowMs = LiGetMillis();
 
-  // Start performance stats collection if this is the first frame
-  if (!m_LastFrameNumber) {
-    // Record the timestamp when measurement started
-    m_ActiveWndVideoStats.measurementStartTimestamp = LiGetMillis();
-    m_LastFrameNumber = decodeUnit->frameNumber;
-  } else {
-    // Any frame number greater than the last frame number + 1 represents a dropped frame
-    m_ActiveWndVideoStats.networkDroppedFrames += decodeUnit->frameNumber - (m_LastFrameNumber + 1);
-    m_ActiveWndVideoStats.totalFrames += decodeUnit->frameNumber - (m_LastFrameNumber + 1);
-    m_LastFrameNumber = decodeUnit->frameNumber;
-  }
+    if (!s_collectingStats) {
+      memset(&m_ActiveWndVideoStats, 0, sizeof(m_ActiveWndVideoStats));
+      memset(&m_LastWndVideoStats, 0, sizeof(m_LastWndVideoStats));
+      m_ActiveWndVideoStats.measurementStartTimestamp = statsNowMs;
+      m_LastFrameNumber = decodeUnit->frameNumber;
+      total_bytes = 0;
+      s_hasLastAppendTime = false;
+      s_collectingStats = true;
+    } else if (decodeUnit->frameNumber > m_LastFrameNumber) {
+      // Frame numbers can restart after an IDR or recovery. Count only forward
+      // gaps; unsigned subtraction across a restart would manufacture billions
+      // of dropped frames in the overlay.
+      if (decodeUnit->frameNumber > m_LastFrameNumber + 1) {
+        const uint32_t dropped =
+          decodeUnit->frameNumber - (m_LastFrameNumber + 1);
+        m_ActiveWndVideoStats.networkDroppedFrames += dropped;
+        m_ActiveWndVideoStats.totalFrames += dropped;
+      }
+      m_LastFrameNumber = decodeUnit->frameNumber;
+    } else {
+      m_LastFrameNumber = decodeUnit->frameNumber;
+    }
 
-  // Flip performance stats window roughly every second
-  if (m_ActiveWndVideoStats.measurementStartTimestamp + 1000 < LiGetMillis()) {
-    // Update performance stats overlay if it's enabled
-    if (g_Instance->m_PerformanceStatsEnabled == true) {
+    // Flip performance stats window roughly every second. None of this runs
+    // while the overlay is hidden.
+    if (m_ActiveWndVideoStats.measurementStartTimestamp + 1000 < statsNowMs) {
       // Create a container to hold aggregated stats for display
       VIDEO_STATS lastTwoWndStats = {};
       // Set the bitrate field in the temporary stats for display purposes
@@ -1111,35 +1123,40 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
       PostToJsAsync(s_PendingStatMsg);
       // Clear the stats string buffer for the next use
       std::fill(s_StatString.begin(), s_StatString.end(), 0);
+      total_bytes = 0;
+      memcpy(&m_LastWndVideoStats, &m_ActiveWndVideoStats,
+             sizeof(m_ActiveWndVideoStats));
+      memset(&m_ActiveWndVideoStats, 0, sizeof(m_ActiveWndVideoStats));
+      m_ActiveWndVideoStats.measurementStartTimestamp = statsNowMs;
     }
-    // Always reset the byte window. Previously this only happened while the
-    // overlay was visible, so the counter wrapped during ordinary sessions.
+
+    total_bytes += decodeUnit->fullLength;
+
+    if (decodeUnit->frameHostProcessingLatency != 0) {
+      if (m_ActiveWndVideoStats.minHostProcessingLatency != 0) {
+        m_ActiveWndVideoStats.minHostProcessingLatency = MIN(
+          m_ActiveWndVideoStats.minHostProcessingLatency,
+          decodeUnit->frameHostProcessingLatency);
+      } else {
+        m_ActiveWndVideoStats.minHostProcessingLatency =
+          decodeUnit->frameHostProcessingLatency;
+      }
+      m_ActiveWndVideoStats.framesWithHostProcessingLatency++;
+    }
+
+    m_ActiveWndVideoStats.maxHostProcessingLatency = MAX(
+      m_ActiveWndVideoStats.maxHostProcessingLatency,
+      decodeUnit->frameHostProcessingLatency);
+    m_ActiveWndVideoStats.totalHostProcessingLatency +=
+      decodeUnit->frameHostProcessingLatency;
+    m_ActiveWndVideoStats.receivedFrames++;
+    m_ActiveWndVideoStats.totalFrames++;
+  } else if (s_collectingStats) {
+    // One transition write, then no overlay state is touched again until it is
+    // explicitly enabled.
+    s_collectingStats = false;
     total_bytes = 0;
-    // Move current active stats to last window stats and reset active window stats for new interval
-    memcpy(&m_LastWndVideoStats, &m_ActiveWndVideoStats, sizeof(m_ActiveWndVideoStats));
-    memset(&m_ActiveWndVideoStats, 0, sizeof(m_ActiveWndVideoStats));
-    m_ActiveWndVideoStats.measurementStartTimestamp = LiGetMillis();
   }
-
-  // Update min host processing latency if a valid value was provided
-  if (decodeUnit->frameHostProcessingLatency != 0) {
-    // Take the minimum of current min latency and new latency
-    if (m_ActiveWndVideoStats.minHostProcessingLatency != 0) {
-      m_ActiveWndVideoStats.minHostProcessingLatency = MIN(m_ActiveWndVideoStats.minHostProcessingLatency, decodeUnit->frameHostProcessingLatency);
-    } else {
-      m_ActiveWndVideoStats.minHostProcessingLatency = decodeUnit->frameHostProcessingLatency;
-    }
-    // Count how many frames included host processing latency data
-    m_ActiveWndVideoStats.framesWithHostProcessingLatency += 1;
-  }
-
-  // Update max and total host processing latency
-  m_ActiveWndVideoStats.maxHostProcessingLatency = MAX(m_ActiveWndVideoStats.maxHostProcessingLatency, decodeUnit->frameHostProcessingLatency);
-  m_ActiveWndVideoStats.totalHostProcessingLatency += decodeUnit->frameHostProcessingLatency;
-
-  // Count the received frame and increment total frames
-  m_ActiveWndVideoStats.receivedFrames++;
-  m_ActiveWndVideoStats.totalFrames++;
 
   // Derive this frame's timestamp from the host presentation clock and commit
   // it immediately. The timeline has to advance with the host regardless of
@@ -1274,7 +1291,9 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     m_ActiveWndVideoStats.totalDecodeTime +=
       LiGetMillis() - decodeUnit->enqueueTimeMs;
   }
-  m_ActiveWndVideoStats.decodedFrames++;
+  if (collectStats) {
+    m_ActiveWndVideoStats.decodedFrames++;
+  }
 
   uint32_t beforeRender = collectStats ? LiGetMillis() : 0;
 
@@ -1286,16 +1305,20 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   const bool appended = (bool)g_Instance->m_VideoTrack.AppendPacket(pkt);
 
   if (appended) {
+    const uint32_t appendNowMs = LiGetMillis();
     if (collectStats) {
-      m_ActiveWndVideoStats.totalRenderTime += LiGetMillis() - beforeRender;
-    }
-    m_ActiveWndVideoStats.renderedFrames++;
-
-    if (collectStats) {
+      m_ActiveWndVideoStats.totalRenderTime += appendNowMs - beforeRender;
+      m_ActiveWndVideoStats.renderedFrames++;
       RecordAppendCadence(m_ActiveWndVideoStats);
     }
-    RecordPipelineLead(m_ActiveWndVideoStats, framePts);
-    NotePresentationProgress(framePts);
+
+    const int64_t positionUs =
+      g_Instance->m_PipelinePositionUs.load(std::memory_order_acquire);
+    const uint64_t reportedAtMs =
+      g_Instance->m_PipelinePositionAtMs.load(std::memory_order_relaxed);
+    RecordPipelineLead(m_ActiveWndVideoStats, framePts, collectStats,
+                       positionUs, reportedAtMs, appendNowMs);
+    NotePresentationProgress(collectStats, positionUs, appendNowMs);
   } else {
     // Throttle IDR requests. A keyframe costs several times a P-frame, so
     // asking for one on every rejected packet congests the link further and
@@ -1307,7 +1330,9 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
       return DR_NEED_IDR;
     }
     // A refresh is already on its way, so drop this frame quietly
-    m_ActiveWndVideoStats.pacerDroppedFrames++;
+    if (collectStats) {
+      m_ActiveWndVideoStats.pacerDroppedFrames++;
+    }
   }
 
   return DR_OK;

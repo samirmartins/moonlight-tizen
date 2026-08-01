@@ -2213,6 +2213,7 @@ function startGame(host, appID) {
       var rikeyid = generateRemoteInputKeyId();
       var gamepadMask = getConnectedGamepadMask();
       var clientRefreshRateX100 = getDisplayRefreshRateX100(frameRate);
+      setDisplayStreamReference(frameRate, clientRefreshRateX100);
       // Frames are handed over as soon as they are complete; there is nothing
       // left to pace. Kept in the call signature so the binding is unchanged.
       const framePacing = 0;
@@ -2976,9 +2977,10 @@ function restoreDefaultsSettingsValues() {
   document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.off();
   storeData('rumbleFeedback', defaultRumbleFeedback, null);
 
-  // Matches DEFAULT_MOUSE_EMULATION in moonlight-android.
-  const defaultMouseEmulation = true;
-  document.querySelector('#mouseEmulationBtn').MaterialSwitch.on();
+  // Conservative default: Start keeps its normal controller meaning unless the
+  // user explicitly enables the long-press mouse mode.
+  const defaultMouseEmulation = false;
+  document.querySelector('#mouseEmulationBtn').MaterialSwitch.off();
   storeData('mouseEmulation', defaultMouseEmulation, null);
 
   const defaultFlipABfaceButtons = false;
@@ -3214,7 +3216,7 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored mouseEmulation preferences.');
   getData('mouseEmulation', function(previousValue) {
     if (previousValue.mouseEmulation == null) {
-      document.querySelector('#mouseEmulationBtn').MaterialSwitch.on(); // Set the default state
+      document.querySelector('#mouseEmulationBtn').MaterialSwitch.off(); // Set the default state
     } else if (previousValue.mouseEmulation == false) {
       document.querySelector('#mouseEmulationBtn').MaterialSwitch.off();
     } else {

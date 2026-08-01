@@ -82,6 +82,7 @@ function handleMessage(msg) {
   }
   // If it's a recognized event, notify the appropriate function
   if (msg.indexOf('streamTerminated: ') === 0) {
+    stopVideoPresentationObserver();
     // Reset the Web Audio scheduler so the next stream starts from a clean clock
     stopAudioScheduler(true);
     // Remove the on-screen overlays
@@ -131,6 +132,9 @@ function handleMessage(msg) {
     $('body').css('backgroundColor', 'transparent');
     $('#wasm_module').css('display', '');
     $('#wasm_module').focus();
+    if ($('#performanceStatsSwitch').prop('checked')) {
+      startVideoPresentationObserver(document.getElementById('wasm_module'));
+    }
   } else if (msg.indexOf('ProgressMsg: ') === 0) {
     // Show progress message under loading spinner
     $('#loadingSpinnerMessage').text(msg.replace('ProgressMsg: ', ''));
@@ -152,6 +156,7 @@ function handleMessage(msg) {
     $('#connection-warnings').css('background', 'rgba(0, 0, 0, 0.5)');
     $('#connection-warnings').text(msg.replace('WarningMsg: ', ''));
   } else if (msg.indexOf('NoStatMsg: ') === 0) {
+    stopVideoPresentationObserver();
     // Toggle the performance stats switch and save the state
     if ($('#performanceStatsSwitch').prop('checked')) {
       $('#performanceStatsBtn')[0].MaterialSwitch.off();
@@ -167,10 +172,15 @@ function handleMessage(msg) {
       $('#performanceStatsBtn')[0].MaterialSwitch.on();
       savePerformanceStats();
       $('#performance-stats').css('display', 'inline-block');
+      startVideoPresentationObserver(document.getElementById('wasm_module'));
     }
     // Show the performance statistics overlay
     $('#performance-stats').css('background', 'rgba(0, 0, 0, 0.5)');
-    $('#performance-stats').text(msg.replace('StatMsg: ', ''));
+    var displayTelemetry = getDisplayTelemetryLines();
+    $('#performance-stats').text(
+      msg.replace('StatMsg: ', '') + '\n' +
+      displayTelemetry[0] + '\n' + displayTelemetry[1]
+    );
   } else if (msg.indexOf('mouseEmulationOn') === 0) {
     // Show mouse emulation enable status as a notification
     snackbarLogLong('Mouse emulation is activated');

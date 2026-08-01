@@ -7,6 +7,25 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.3.6
+
+This version targets the remaining display-cadence uncertainty while
+preserving the v3.3.5 decoder, timestamps, direct submission, latency and picture quality.
+
+### Changed
+- Reports the raw measured panel cadence alongside the fractional rate sent to the host
+- Adds an optional presentation-cadence measurement, using the browser capability when
+  available; its per-frame callback runs only while performance statistics are visible
+- Stops updating dormant video-statistics counters and removes redundant clock reads from
+  normal gameplay
+- Mouse emulation by holding Start now defaults to off on fresh installs and after reset;
+  an explicitly saved user choice is preserved
+
+### Fixed
+- Prevents a restarted or backwards frame number from producing a false dropped-frame total
+- Keeps presentation telemetry isolated between streams and degrades safely on TVs whose
+  browser does not expose presentation callbacks
+
 ## v3.3.5
 
 This release includes the cumulative 3.3.4 improvements and keeps its streaming
