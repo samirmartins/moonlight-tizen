@@ -1,4 +1,6 @@
 #include "moonlight_wasm.hpp"
+
+#include <opus_multistream.h>
 #include "audio_ring.hpp"
 
 #include <atomic>
@@ -230,8 +232,6 @@ int MoonlightInstance::AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONF
     ClLogMessage("Audio: opus_multistream_decoder_create failed rc=%d\n", rc);
     return -1;
   }
-  g_Instance->m_OpusDecoder = s_OpusDecoder;
-
   // Configure the pull renderer. The AudioWorklet receives the WASM shared
   // memory object once per stream, then consumes PCM without proxying any audio
   // frames through the main thread.
@@ -284,7 +284,6 @@ void MoonlightInstance::AudDecCleanup(void) {
     opus_multistream_decoder_destroy(s_OpusDecoder);
     s_OpusDecoder = nullptr;
   }
-  g_Instance->m_OpusDecoder = nullptr;
 }
 
 // Runs on the moonlight-common-c audio receive thread for every packet. It only

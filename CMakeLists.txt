@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 
-project(MoonlightWasm VERSION 1.0)
+project(MoonlightWasm VERSION 3.3.5)
 
 # Optimize for speed, not size. The hot paths here are frame memcpy, Opus
 # decoding at 100-200 frames per second and Reed-Solomon FEC recovery, all of
@@ -22,14 +22,12 @@ add_library(moonlight-enet STATIC
     moonlight-common-c/enet/peer.c
     moonlight-common-c/enet/protocol.c
     moonlight-common-c/enet/unix.c
-    moonlight-common-c/enet/win32.c
 )
 target_compile_definitions(moonlight-enet PUBLIC
     LC_CHROME
     HAS_SOCKLEN_T=1
     HAS_FCNTL=1
-    NO_MSGAPI=1
-    HAS_SOCKLEN_T=1)
+    NO_MSGAPI=1)
 target_include_directories(moonlight-enet PUBLIC
     moonlight-common-c/enet/include)
 
@@ -37,7 +35,6 @@ add_library(moonlight-common-c STATIC
     moonlight-common-c/src/AudioStream.c
     moonlight-common-c/src/ByteBuffer.c
     moonlight-common-c/src/Connection.c
-    moonlight-common-c/src/ConnectionTester.c
     moonlight-common-c/src/ControlStream.c
     moonlight-common-c/src/FakeCallbacks.c
     moonlight-common-c/src/InputStream.c
@@ -46,7 +43,6 @@ add_library(moonlight-common-c STATIC
     moonlight-common-c/src/Platform.c
     moonlight-common-c/src/PlatformCrypto.c
     moonlight-common-c/src/PlatformSockets.c
-    moonlight-common-c/src/RecorderCallbacks.c
     moonlight-common-c/src/RtpAudioQueue.c
     moonlight-common-c/src/RtpVideoQueue.c
     moonlight-common-c/src/RtspConnection.c
@@ -240,7 +236,6 @@ add_executable(moonlight-wasm
     wasm/http.cpp
     wasm/input.cpp
     wasm/main.cpp
-    wasm/profiling.cpp
     wasm/wasmplayer.cpp
 )
 target_include_directories(moonlight-wasm PUBLIC

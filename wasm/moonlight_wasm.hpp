@@ -1,17 +1,12 @@
 #include <atomic>
 #include <memory>
-#include <queue>
-
 #include <emscripten/bind.h>
 #include <emscripten/html5.h>
 #include <emscripten/val.h>
 #include <pthread.h>
-#include <future>
 #include <string>
 
 #include <Limelight.h>
-#include <opus_multistream.h>
-
 #include "lib.hpp"
 
 #include "samsung/wasm/elementary_media_stream_source.h"
@@ -20,20 +15,6 @@
 #include "samsung/wasm/elementary_media_track_listener.h"
 #include "samsung/html/html_media_element.h"
 #include "samsung/html/html_media_element_listener.h"
-
-// Uncomment this line to enable the profiling infrastructure
-// #define ENABLE_PROFILING 1
-
-// Use this define to choose the time threshold in milliseconds above
-// which a profiling message is printed
-#define PROFILING_MESSAGE_THRESHOLD 1
-
-#define DR_FLAG_FORCE_SW_DECODE 0x01
-
-// These will mostly be I/O bound so we'll create
-// a bunch to allow more concurrent server requests
-// since our HTTP request library is synchronous.
-#define HTTP_HANDLER_THREADS 8
 
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
@@ -66,7 +47,6 @@ typedef struct _VIDEO_STATS {
   uint32_t framesWithHostProcessingLatency;
   uint32_t totalReassemblyTime;
   uint32_t totalDecodeTime;
-  uint32_t totalPacerTime;
   uint32_t totalRenderTime;
   uint32_t lastRtt;
   uint32_t lastRttVariance;
@@ -110,8 +90,6 @@ typedef struct _VIDEO_STATS {
 
   // Frames handed to the platform where they already lay, without assembly
   uint32_t zeroCopyFrames;
-  // Extra attempts spent getting a refused packet accepted
-  uint32_t appendRetries;
   // Times the pipeline was flushed because presentation had stopped advancing
   // while packets were still being accepted
   uint32_t presentationRecoveries;
@@ -163,15 +141,6 @@ class MoonlightInstance {
   void OnConnectionStarted(uint32_t error);
   void StopConnection();
 
-  static uint32_t ProfilerGetPackedMillis();
-  static uint64_t ProfilerGetMillis();
-  static uint64_t ProfilerUnpackTime(uint32_t packedTime);
-  static void ProfilerPrintPackedDelta(const char* message, uint32_t packedTimeA, uint32_t packedTimeB);
-  static void ProfilerPrintDelta(const char* message, uint64_t timeA, uint64_t timeB);
-  static void ProfilerPrintPackedDeltaFromNow(const char* message, uint32_t packedTime);
-  static void ProfilerPrintDeltaFromNow(const char* message, uint64_t time);
-  static void ProfilerPrintWarning(const char* message);
-
   static void* ConnectionThreadFunc(void* context);
   static void* InputThreadFunc(void* context);
   static void* StopThreadFunc(void* context);
@@ -205,6 +174,9 @@ class MoonlightInstance {
   // reach the media source directly.
   static void PerformPresentationRecovery();
   void TogglePerformanceStats();
+  bool PerformanceStatsEnabled() const {
+    return m_PerformanceStatsEnabled.load(std::memory_order_relaxed);
+  }
 
   static int AudDecInit(int audioConfiguration, POPUS_MULTISTREAM_CONFIGURATION opusConfig, void* context, int arFlags);
   static void AudDecCleanup(void);
@@ -271,23 +243,10 @@ class MoonlightInstance {
   static AUDIO_RENDERER_CALLBACKS s_ArCallbacks;
 
   std::string m_Host;
-  int m_HttpPort;
   std::string m_AppVersion;
   std::string m_GfeVersion;
   std::string m_RtspUrl;
-  int m_ServerCodecModeSupport;
-
-  bool m_FramePacingEnabled;
-  bool m_OptimizeGamesEnabled;
-  bool m_MouseEmulationEnabled;
-  bool m_FlipABfaceButtonsEnabled;
-  bool m_FlipXYfaceButtonsEnabled;
-  int m_AudioConfig;
   int m_AudioJitterMs;
-  bool m_PlayHostAudioEnabled;
-  bool m_HdrModeEnabled;
-  bool m_FullRangeEnabled;
-  bool m_GameModeEnabled;
   bool m_DisableWarningsEnabled;
   std::atomic<bool> m_PerformanceStatsEnabled;
 
@@ -297,19 +256,12 @@ class MoonlightInstance {
   pthread_t m_ConnectionThread;
   pthread_t m_InputThread;
 
-  OpusMSDecoder* m_OpusDecoder;
-
-#ifndef SAMSUNG_TIZEN_TV
-  double m_LastPadTimestamps[4];
-#endif
   bool m_MouseLocked;
   long m_MouseLastPosX;
   long m_MouseLastPosY;
   bool m_WaitingForAllModifiersUp;
   std::atomic<int32_t> m_AccumulatedTicks;
   std::atomic<int32_t> m_MouseDeltaX, m_MouseDeltaY;
-  uint32_t m_HttpThreadPoolSequence;
-
   Dispatcher m_Dispatcher;
 
   std::mutex m_Mutex;

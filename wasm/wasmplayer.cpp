@@ -33,38 +33,6 @@ using EmssAsyncResult = samsung::wasm::OperationResult;
 using HTMLAsyncResult = samsung::wasm::OperationResult;
 using TimeStamp = samsung::wasm::Seconds;
 
-static constexpr TimeStamp kFrameTimeMargin = 0.5ms;
-static constexpr TimeStamp kTimeWindow = 1s;
-
-// Pacing sleeps until this close to the deadline, then finishes with a short
-// bounded wait. Sleeping the whole way overshoots on a coarse scheduler;
-// spinning the whole way pegs a core, which is what the previous
-// implementation did.
-static constexpr TimeStamp kPacingSleepFloor = 1ms;
-
-// Hard ceiling on how long a single frame may be held back by the pacer,
-// expressed as a multiple of the frame duration. Without it, a bad pacing
-// reference could stall the decoder thread indefinitely.
-static constexpr int kPacingMaxWaitFrames = 2;
-
-// How far ahead of its presentation time a frame is handed over, in frame
-// durations.
-//
-// Releasing a frame exactly when it is due leaves the pipeline with nothing in
-// hand, so any hesitation upstream lands directly on the screen. The other
-// clients keep a shallow buffer past the decoder for precisely this reason:
-// moonlight-android holds its output queue at two frames and presents one per
-// display refresh. One frame of lead is the same idea expressed where this
-// pipeline allows it, and it costs one frame of latency.
-static constexpr int kPacingLeadFrames = 1;
-
-// Per-second correction applied to the pacing reference. It is a small
-// proportional step rather than an instant jump: assigning the whole measured
-// drift at once releases every frame being held in a single burst, which is
-// visible as a hitch roughly once per second.
-static constexpr double kPacingDriftGain = 0.1;
-static constexpr TimeStamp kPacingMaxDriftStep = 1ms;
-
 // Largest jump in frame number still treated as ordinary packet loss. Beyond
 // this the timeline is re-anchored instead of extrapolated: a gap that long is
 // a restart or a renumbering, and stepping through it would push the timeline
@@ -194,8 +162,6 @@ static std::vector<unsigned char> s_DecodeBuffer;
 static TimeStamp s_frameDuration;
 static TimeStamp s_pktPts;
 
-static TimeStamp s_lastSec;
-
 // Generated timeline state, see NextPacketPts()
 static uint32_t s_lastHostPtsMs = 0;
 static bool s_hasHostPtsRef = false;
@@ -240,8 +206,6 @@ static bool s_hasLastAppendTime = false;
 // stops being invisible.
 static constexpr double kAppendJitterToleranceMs = 4.0;
 
-static bool s_hasFirstFrame = false;
-
 static uint32_t s_lastIdrRequestMs = 0;
 
 // Reused formatting buffer for the once-per-second optional stats update.
@@ -258,7 +222,6 @@ static void StopRecoveryThread();
 
 static VIDEO_STATS m_ActiveWndVideoStats;
 static VIDEO_STATS m_LastWndVideoStats;
-static VIDEO_STATS m_GlobalVideoStats;
 
 MoonlightInstance::SourceListener::SourceListener(
   MoonlightInstance* instance
@@ -522,15 +485,6 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
   // Initialize packet timestamp to zero
   s_pktPts = 0s;
 
-  // Flag indicating whether this is the first frame of video to be decoded
-  s_hasFirstFrame = false;
-
-  // Initialize the last second timestamp to zero
-  s_lastSec = 0s;
-
-  // Initialize the timestamp difference to zero
-
-
   // Reset the generated timeline for the new stream
   s_hasHostPtsRef = false;
   s_lastHostPtsMs = 0;
@@ -575,9 +529,6 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
 
   // Clear last window video statistics from previous session
   memset(&m_LastWndVideoStats, 0, sizeof(m_LastWndVideoStats));
-
-  // Reset global video statistics for new decoding session
-  memset(&m_GlobalVideoStats, 0, sizeof(m_GlobalVideoStats));
 
   // The recovery worker has to exist before the first frame can be appended,
   // because the detector runs on the append path.
@@ -798,7 +749,7 @@ static TimeStamp NextPacketPts(PDECODE_UNIT decodeUnit, TimeStamp previousPts) {
   // window arithmetic consumes it. This is the host's own spacing, independent
   // of anything that happens to the frame afterwards, and it is the only way to
   // tell an unevenly delivered stream from one this client made uneven.
-  {
+  if (g_Instance->PerformanceStatsEnabled()) {
     double hostDeltaMs =
       (double)((int64_t)hostMs - (int64_t)s_lastHostPtsMs) / framesElapsed;
     double frameMs = std::chrono::duration<double, std::milli>(s_frameDuration).count();
@@ -1119,16 +1070,12 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     return DR_OK;
   }
 
-  // Get the current time
-  auto now = std::chrono::steady_clock::now();
+  const bool collectStats =
+    g_Instance->m_PerformanceStatsEnabled.load(std::memory_order_relaxed);
 
-  // Check if this is the first video frame
-  if (!s_hasFirstFrame) {
-    s_hasFirstFrame = true;
+  if (collectStats) {
+    total_bytes += decodeUnit->fullLength;
   }
-
-  // Track the total number of bytes received by the decoding unit
-  total_bytes += decodeUnit->fullLength;
 
   // Start performance stats collection if this is the first frame
   if (!m_LastFrameNumber) {
@@ -1142,9 +1089,6 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     m_LastFrameNumber = decodeUnit->frameNumber;
   }
 
-  // Calculate the current bitrate in bits per second and then convert the bitrate to megabits per second
-  float bitrateMbps = (total_bytes * 8.0) / 1000000.0f;
-
   // Flip performance stats window roughly every second
   if (m_ActiveWndVideoStats.measurementStartTimestamp + 1000 < LiGetMillis()) {
     // Update performance stats overlay if it's enabled
@@ -1152,7 +1096,7 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
       // Create a container to hold aggregated stats for display
       VIDEO_STATS lastTwoWndStats = {};
       // Set the bitrate field in the temporary stats for display purposes
-      lastTwoWndStats.receivedBitrate = bitrateMbps;
+      lastTwoWndStats.receivedBitrate = (total_bytes * 8.0) / 1000000.0f;
       // Add last window and current window to the aggregated stats
       AddVideoStats(m_LastWndVideoStats, lastTwoWndStats);
       AddVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
@@ -1167,11 +1111,10 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
       PostToJsAsync(s_PendingStatMsg);
       // Clear the stats string buffer for the next use
       std::fill(s_StatString.begin(), s_StatString.end(), 0);
-      // Reset byte count for the next measurement interval
-      total_bytes = 0;
     }
-    // Accumulate active window stats into global stats for overall tracking
-    AddVideoStats(m_ActiveWndVideoStats, m_GlobalVideoStats);
+    // Always reset the byte window. Previously this only happened while the
+    // overlay was visible, so the counter wrapped during ordinary sessions.
+    total_bytes = 0;
     // Move current active stats to last window stats and reset active window stats for new interval
     memcpy(&m_LastWndVideoStats, &m_ActiveWndVideoStats, sizeof(m_ActiveWndVideoStats));
     memset(&m_ActiveWndVideoStats, 0, sizeof(m_ActiveWndVideoStats));
@@ -1247,7 +1190,9 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
       entry->length == decodeUnit->fullLength) {
     packetData = reinterpret_cast<const unsigned char*>(entry->data);
     offset = (unsigned int)decodeUnit->fullLength;
-    m_ActiveWndVideoStats.zeroCopyFrames++;
+    if (collectStats) {
+      m_ActiveWndVideoStats.zeroCopyFrames++;
+    }
   } else {
     unsigned int totalLength = decodeUnit->fullLength;
 
@@ -1321,13 +1266,17 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     packetSessionId // session identifier
   };
 
-  // Track total time spent reassembling and decoding this frame
-  m_ActiveWndVideoStats.totalReassemblyTime += decodeUnit->enqueueTimeMs - decodeUnit->receiveTimeMs;
-  m_ActiveWndVideoStats.totalDecodeTime += LiGetMillis() - decodeUnit->enqueueTimeMs;
+  // Timing measurements are overlay-only. Avoid three extra clock reads per
+  // frame when the overlay is hidden.
+  if (collectStats) {
+    m_ActiveWndVideoStats.totalReassemblyTime +=
+      decodeUnit->enqueueTimeMs - decodeUnit->receiveTimeMs;
+    m_ActiveWndVideoStats.totalDecodeTime +=
+      LiGetMillis() - decodeUnit->enqueueTimeMs;
+  }
   m_ActiveWndVideoStats.decodedFrames++;
 
-  // Calculate time before rendering
-  uint32_t beforeRender = LiGetMillis();
+  uint32_t beforeRender = collectStats ? LiGetMillis() : 0;
 
   // Hand the packet over.
   //
@@ -1337,13 +1286,14 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   const bool appended = (bool)g_Instance->m_VideoTrack.AppendPacket(pkt);
 
   if (appended) {
-    // Calculate time after rendering
-    uint32_t afterRender = LiGetMillis();
-    // Track total render time and count rendered frames
-    m_ActiveWndVideoStats.totalRenderTime += afterRender - beforeRender;
+    if (collectStats) {
+      m_ActiveWndVideoStats.totalRenderTime += LiGetMillis() - beforeRender;
+    }
     m_ActiveWndVideoStats.renderedFrames++;
 
-    RecordAppendCadence(m_ActiveWndVideoStats);
+    if (collectStats) {
+      RecordAppendCadence(m_ActiveWndVideoStats);
+    }
     RecordPipelineLead(m_ActiveWndVideoStats, framePts);
     NotePresentationProgress(framePts);
   } else {
@@ -1373,7 +1323,6 @@ void MoonlightInstance::AddVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst) {
   dst.pacerDroppedFrames += src.pacerDroppedFrames;
   dst.totalReassemblyTime += src.totalReassemblyTime;
   dst.totalDecodeTime += src.totalDecodeTime;
-  dst.totalPacerTime += src.totalPacerTime;
   dst.totalRenderTime += src.totalRenderTime;
 
   // Cadence instrumentation. Sums merge by addition; the max does not.
@@ -1389,7 +1338,6 @@ void MoonlightInstance::AddVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst) {
   dst.pipelineClockLeadSumSqMs += src.pipelineClockLeadSumSqMs;
   dst.pipelineClockLeadMaxMs = MAX(dst.pipelineClockLeadMaxMs, src.pipelineClockLeadMaxMs);
   dst.zeroCopyFrames += src.zeroCopyFrames;
-  dst.appendRetries += src.appendRetries;
   dst.presentationRecoveries += src.presentationRecoveries;
 
   // Update minimum host processing latency if it's not set or if the source has a valid smaller value
@@ -1546,13 +1494,11 @@ void MoonlightInstance::FormatVideoStats(VIDEO_STATS& stats, char* output, int l
       "Frames dropped due to network jitter: %.2f%%\n"
       "Average network latency: %s\n"
       "Average decoding time: %.2f ms\n"
-      "Average frame queue delay: %.2f ms\n"
       "Average rendering time: %.2f ms\n",
       (float)stats.networkDroppedFrames / stats.totalFrames * 100,
       (float)stats.pacerDroppedFrames / stats.decodedFrames * 100,
       rttString,
       (float)stats.totalDecodeTime / stats.decodedFrames,
-      (float)stats.totalPacerTime / stats.renderedFrames,
       (float)stats.totalRenderTime / stats.renderedFrames
     );
     // Abort if string formatting failed or buffer overflowed
@@ -1614,15 +1560,14 @@ void MoonlightInstance::FormatVideoStats(VIDEO_STATS& stats, char* output, int l
     offset += ret;
   }
 
-  // Assembly and hand-over behaviour. Each of these three is zero in the healthy
-  // case except the first, which should be nearly every frame.
+  // Assembly and recovery behaviour.
   if (stats.decodedFrames != 0) {
     ret = snprintf(
       &output[offset], length - offset,
       "Frames submitted without assembly: %.1f%%\n"
-      "Hand-over retries: %u, pipeline recoveries: %u\n",
+      "Pipeline recoveries: %u\n",
       (float)stats.zeroCopyFrames / (float)stats.decodedFrames * 100,
-      stats.appendRetries, stats.presentationRecoveries
+      stats.presentationRecoveries
     );
     if (ret < 0 || ret >= length - offset) {
       assert(false);

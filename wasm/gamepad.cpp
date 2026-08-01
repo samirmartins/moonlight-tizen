@@ -1,12 +1,7 @@
 #include "moonlight_wasm.hpp"
 
-#include <iostream>
-#include <array>
 #include <atomic>
-#include <utility>
-#include <sstream>
 #include <chrono>
-#include <thread>
 #include <cmath>
 #include <cstring>
 #include <condition_variable>

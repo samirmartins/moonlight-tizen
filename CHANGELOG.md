@@ -7,6 +7,26 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.3.5
+
+This release keeps the 3.3.4 streaming behaviour while removing unused code,
+assets and background work.
+
+### Changed
+- Removed legacy mDNS/update UI code, unused fonts, icons, headers and profiling
+  infrastructure from the application and build
+- Simplified the HTTP dispatcher and made shutdown idempotent
+- Canceled subnet discovery before streaming and cleared successful HTTP timeout
+  timers instead of leaving callbacks queued on the UI thread
+- Skipped overlay-only clocks and cadence calculations while statistics are hidden;
+  video timing, decoding, quality and latency settings are unchanged
+- Removed two performance lines whose counters were never populated
+
+### Fixed
+- Fixed the app-quit refresh running before the cancel request completed
+- Reset the bitrate measurement window even while statistics are hidden, preventing
+  its counter from wrapping during long sessions
+
 ## v3.3.4
 
 This release targets cumulative scheduler, haptics and logging pressure in long sessions.

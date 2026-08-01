@@ -52,8 +52,6 @@ const REPEAT_DELAY = 350; // Repeat delay set to 350ms (milliseconds)
 const REPEAT_INTERVAL = 100; // Repeat interval set to 100ms (milliseconds)
 const ACTION_THRESHOLD = 0.5; // Threshold for initial navigation set to 0.5
 const NAVIGATION_DELAY = 150; // Navigation delay set to 150ms (milliseconds)
-const UPDATE_TIMESTAMP = 'lastUpdateCheck'; // Use the update check timestamp key to determine the last update check
-const UPDATE_INTERVAL = 24 * 60 * 60 * 1000; // Automatic check for updates interval is set to 24 hours
 const DEFAULT_AUDIO_JITTER_MS = '100';
 const AUDIO_JITTER_DEFAULT_REVISION = 2;
 
@@ -1567,124 +1565,6 @@ function navigationGuideDialog() {
 }
 
 
-// Compare the current version with the latest version to determine if an update is available
-function checkVersionUpdate(currentVersion, latestVersion) {
-  const currentVerParts = currentVersion.split('.').map(Number);
-  const latestVerParts = latestVersion.split('.').map(Number);
-
-  // Compare each part of the version numbers
-  for (let i = 0; i < latestVerParts.length; i++) {
-    if (latestVerParts[i] > currentVerParts[i]) {
-      // If latest version has a higher number in any part, an update is available
-      return true;
-    } else if (latestVerParts[i] < currentVerParts[i]) {
-      // If the current version has a higher number, no update is needed
-      return false;
-    }
-  }
-  // If all parts are equal, no update is available
-  return false;
-}
-
-// Extract only the release notes section from the released update
-function extractReleaseNotes(releaseNotes) {
-  // Extract the "What's Changed" section and exclude everything after "Full Changelog"
-  const match = releaseNotes.match(/## What's Changed:\r?\n\r?\n([\s\S]+?)(?:\r?\n\r?\n\*\*Full Changelog\*\*|$)/);
-  // Return null if release notes section is not found or does not match expected format
-  if (!match) {
-    return null;
-  }
-  // Clean and format each release note line into a user-friendly bullet list
-  return match[1].split('\n').map(line => {
-	  let cleaned = line.trim();
-	  // Remove contributor attribution and PR references
-	  cleaned = cleaned.replace(/\s+by\s+@[^]+$/i, '');
-	  // Convert list item to bullet point
-	  cleaned = cleaned.replace(/^-\s*/, '• ');
-	  // Add trailing period if missing
-	  if (cleaned && !cleaned.endsWith('.')) {
-	    cleaned += '.';
-	  }
-	  return cleaned;
-  }).filter(line => line !== '').join('<br>');
-}
-
-
-
-// Show the Update Moonlight dialog
-function updateAppDialog(latestVersion, releaseNotes) {
-  // Create an overlay for the dialog and append it to the body
-  var updateAppDialogOverlay = $('<div>', {
-    id: 'updateAppDialogOverlay',
-    class: 'dialog-overlay'
-  }).appendTo(document.body);
-
-  // Create the dialog element and append it to the overlay
-  var updateAppDialog = $('<dialog>', {
-    id: 'updateAppDialog',
-    class: 'mdl-dialog'
-  }).appendTo(updateAppDialogOverlay);
-
-  // Add a dialog title named Update Moonlight
-  $('<h3>', {
-    id: 'updateAppDialogTitle',
-    class: 'mdl-dialog__title',
-    text: 'Update Moonlight'
-  }).appendTo(updateAppDialog);
-
-  // Create a content section inside the dialog
-  var updateAppDialogContent = $('<div>', {
-    class: 'mdl-dialog__content'
-  }).appendTo(updateAppDialog);
-
-  // Add a paragraph with multiple lines of text
-  $('<p>', {
-    id: 'updateAppDialogText',
-    class: 'update-app-text',
-    html: `Version ${latestVersion} is now available! Update manually to enjoy new features and improvements.<br><br>` +
-          `<strong>What's Changed:</strong><br>` + releaseNotes
-  }).appendTo(updateAppDialogContent);
-
-  // Create the actions section inside the dialog
-  var updateAppDialogActions = $('<div>', {
-    class: 'mdl-dialog__actions'
-  }).appendTo(updateAppDialog);
-
-  // Create and set up the Close button
-  var closeUpdateAppDialog = $('<button>', {
-    type: 'button',
-    id: 'closeUpdateApp',
-    class: 'mdl-button mdl-js-button mdl-button--raised mdl-button--colored mdl-js-ripple-effect',
-    text: 'Close'
-  });
-
-  // Close the dialog if the Close button is pressed
-  closeUpdateAppDialog.off('click');
-  closeUpdateAppDialog.click(function() {
-    console.log('%c[index.js, updateAppDialog]', 'color: green;', 'Closing app dialog and returning.');
-    $(updateAppDialogOverlay).css('display', 'none');
-    updateAppDialog[0].close();
-    updateAppDialogOverlay.remove();
-    isDialogOpen = false;
-    Navigation.pop();
-    Navigation.switch();
-  }).appendTo(updateAppDialogActions);
-
-  // If the dialog element doesn't support the showModal method, register it with dialogPolyfill
-  if (!updateAppDialog[0].showModal) {
-    dialogPolyfill.registerDialog(updateAppDialog[0]);
-  }
-
-  // Show the dialog and push the view
-  $(updateAppDialogOverlay).css('display', 'flex');
-  updateAppDialog[0].showModal();
-  isDialogOpen = true;
-  Navigation.push(Views.UpdateMoonlightDialog);
-  setTimeout(() => Navigation.switch(), 5);
-}
-
-
-
 // Show a confirmation with the Restore Defaults dialog before restoring the default settings
 function restoreDefaultsDialog() {
   // Find the existing overlay and dialog elements
@@ -2185,6 +2065,7 @@ function quitAppDialog() {
 // Handle layout elements when displaying the Stream view
 function showStreamMode() {
   console.log('%c[index.js, showStreamMode]', 'color: green;', 'Entering "Show Stream" mode.');
+  stopSubnetScanner();
   $('#main-header').hide();
   $('#main-content').children().not('#listener, #loadingSpinner').hide();
   $('#main-content').addClass('fullscreen');

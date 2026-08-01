@@ -754,37 +754,6 @@ const Views = {
       setTimeout(() => blurElement(this.view.current()), 100);
     },
   },
-  MoonlightSupportDialog: {
-    view: new ListView(() => [
-      'closeAppSupport'
-    ]),
-    up: function() {
-      blurElement('closeAppSupport');
-    },
-    down: function() {
-      focusElement('closeAppSupport');
-    },
-    left: function() {},
-    right: function() {},
-    accept: function() {
-      clickElement(this.view.current());
-    },
-    back: function() {
-      resolveElement('closeAppSupport').click();
-    },
-    press: function() {},
-    switch: function() {
-      focusElement(this.view.current());
-    },
-    enter: function() {
-      mark(this.view.current());
-      setTimeout(() => focusElement(this.view.current()), 100);
-    },
-    leave: function() {
-      unmark(this.view.current());
-      setTimeout(() => blurElement(this.view.current()), 100);
-    },
-  },
   Settings: {
     view: new ListView(() => document.querySelector('.settings-categories').children),
     up: function() {
@@ -880,8 +849,7 @@ const Views = {
     view: new ListView(() => [
       'selectResolution',
       'selectFramerate',
-      'selectBitrate',
-      'framePacingBtn'
+      'selectBitrate'
     ]),
     up: function() {
       this.view.prevOption();
@@ -1372,37 +1340,6 @@ const Views = {
     },
     back: function() {
       resolveElement('closeNavGuide').click();
-    },
-    press: function() {},
-    switch: function() {
-      focusElement(this.view.current());
-    },
-    enter: function() {
-      mark(this.view.current());
-      setTimeout(() => focusElement(this.view.current()), 100);
-    },
-    leave: function() {
-      unmark(this.view.current());
-      setTimeout(() => blurElement(this.view.current()), 100);
-    },
-  },
-  UpdateMoonlightDialog: {
-    view: new ListView(() => [
-      'closeUpdateApp'
-    ]),
-    up: function() {
-      blurElement('closeUpdateApp');
-    },
-    down: function() {
-      focusElement('closeUpdateApp');
-    },
-    left: function() {},
-    right: function() {},
-    accept: function() {
-      clickElement(this.view.current());
-    },
-    back: function() {
-      resolveElement('closeUpdateApp').click();
     },
     press: function() {},
     switch: function() {

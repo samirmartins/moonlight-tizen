@@ -37,18 +37,6 @@ function generateRemoteInputKeyId() {
   return array[0];
 }
 
-// Based on OpenBSD arc4random_uniform()
-function cryptoRand(upper_bound) {
-  var min = (Math.pow(2, 32) - upper_bound) % upper_bound;
-  var array = new Uint32Array(1);
-
-  do {
-    window.crypto.getRandomValues(array);
-  } while (array[0] < min);
-
-  return array[0] % upper_bound;
-}
-
 var _realGamepads = new Set();
 function getConnectedGamepadMask() {
   if (typeof getStreamingGamepadMask === 'function') {
@@ -92,14 +80,6 @@ function getConnectedGamepadMask() {
   return mask;
 }
 
-String.prototype.toHex = function() {
-  var hex = '';
-  for (var i = 0; i < this.length; i++) {
-    hex += '' + this.charCodeAt(i).toString(16);
-  }
-  return hex;
-}
-
 function NvHTTP(address, clientUid, userEnteredAddress = '', macAddress) {
   // Constructor start
   this.hostname = address;
@@ -129,32 +109,44 @@ function NvHTTP(address, clientUid, userEnteredAddress = '', macAddress) {
   this.gputype = '';
   this.supportedDisplayModes = {}; // key: y-resolution:x-resolution, value: array of supported frame rates
 
-  _self = this;
   console.log('%c[utils.js, NvHTTP]', 'color: gray;', 'NvHTTP Object: \n' + this);
 };
 
-function _arrayBufferToBase64(buffer) {
-  var binary = '';
-  var bytes = new Uint8Array(buffer);
-  var len = bytes.byteLength;
+// Unlike Promise.race(), this clears the losing timer as soon as the request
+// settles. Host polling otherwise leaves a steady trail of timeout callbacks on
+// the UI thread even when every request succeeds immediately.
+function withTimeout(promise, timeoutMs, message, onTimeout) {
+  return new Promise(function(resolve, reject) {
+    var settled = false;
+    var timeoutId = setTimeout(function() {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (onTimeout) {
+        onTimeout();
+      }
+      reject(new Error(message));
+    }, timeoutMs);
 
-  for (var i = 0; i < len; i++) {
-    binary += String.fromCharCode(bytes[i]);
-  }
-
-  return window.btoa(binary);
+    promise.then(function(value) {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeoutId);
+        resolve(value);
+      }
+    }, function(error) {
+      if (!settled) {
+        settled = true;
+        clearTimeout(timeoutId);
+        reject(error);
+      }
+    });
+  });
 }
 
-function _base64ToArrayBuffer(base64) {
-  var binary_string = window.atob(base64);
-  var len = binary_string.length;
-  var bytes = new Uint8Array(len);
-
-  for (var i = 0; i < len; i++) {
-    bytes[i] = binary_string.charCodeAt(i);
-  }
-
-  return bytes.buffer;
+if (typeof module !== 'undefined' && module.exports) {
+  module.exports.withTimeout = withTimeout;
 }
 
 NvHTTP.prototype = {
@@ -163,12 +155,13 @@ NvHTTP.prototype = {
   },
 
   _openUrlWithTimeout: function(url, ppkstr) {
-    return Promise.race([
+    return withTimeout(
       sendMessage('openUrl', [url, ppkstr, false]),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout retrieving server info')), 5000))
-    ]).catch(error => {
+      5000,
+      'Timeout retrieving server info',
+      function() { sendMessage('cancelRequest', []); }
+    ).catch(error => {
       if (error && error.message === 'Timeout retrieving server info') {
-        sendMessage('cancelRequest', []);
         throw -1;
       }
       throw error;
@@ -495,18 +488,14 @@ NvHTTP.prototype = {
   },
 
   getAppListWithCacheFlush: function() {
-    return Promise.race([
+    return withTimeout(
       sendMessage('openUrl', [
         this._baseUrlHttps + '/applist?' + this._buildUidStr(), this.ppkstr, false
       ]),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout retrieving app list')), 10000))
-    ]).catch(error => {
-      // If it's our timeout error, instruct the C++ layer to abort the hung network request
-      if (error.message === 'Timeout retrieving app list') {
-        sendMessage('cancelRequest', []);
-      }
-      throw error;
-    }).then(function(ret) {
+      10000,
+      'Timeout retrieving app list',
+      function() { sendMessage('cancelRequest', []); }
+    ).then(function(ret) {
       $xml = this._parseXML(ret);
       $root = $xml.find('root');
 
@@ -638,7 +627,9 @@ NvHTTP.prototype = {
     // Refresh server info after quitting because it may silently fail if the session belongs to a different client
     return sendMessage('openUrl', [
       this._baseUrlHttps + '/cancel?' + this._buildUidStr(), this.ppkstr, false
-    ]).then(this.refreshServerInfo());
+    ]).then(function() {
+      return this.refreshServerInfo();
+    }.bind(this));
     // TODO: We should probably bubble this up to our caller.
   },
 
@@ -663,18 +654,18 @@ NvHTTP.prototype = {
         this.serverMajorVersion.toString(), this.address, this.httpPort, randomNumber, this.getUid()
       ]).then(function(ppkstr) {
         this.ppkstr = ppkstr;
-        return Promise.race([
+        return withTimeout(
           sendMessage('openUrl', [
             this._baseUrlHttps + '/pair?uniqueid=' + this.getUid() + '&devicename=roth&updateState=1&phrase=pairchallenge', this.ppkstr, false
           ]),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout during pairchallenge')), 5000))
-        ]).catch(function(error) {
-          if (error.message === 'Timeout during pairchallenge') {
-            console.warn('%c[utils.js, pair]', 'color: gray;', 'Warning: HTTPS request timed out, canceling C++ HTTP request');
+          5000,
+          'Timeout during pairchallenge',
+          function() {
+            console.warn('%c[utils.js, pair]', 'color: gray;',
+              'Warning: HTTPS request timed out, canceling C++ HTTP request');
             sendMessage('cancelRequest', []);
           }
-          throw error;
-        }.bind(this)).then(function(ret) {
+        ).then(function(ret) {
           $xml = this._parseXML(ret);
           this.paired = $xml.find('paired').html() == '1';
           return this.paired;

@@ -29,19 +29,18 @@ extern char* g_UniqueId;
 // Sent by the Wasm module when streaming has stopped, whether requested by the user or not
 #define MSG_STREAM_TERMINATED "streamTerminated: "
 // Requests the Wasm module to open the specified URL
-#define MSG_OPENURL "openUrl"
-
 using EmssLatencyMode = samsung::wasm::ElementaryMediaStreamSource::LatencyMode;
 using EmssRenderingMode = samsung::wasm::ElementaryMediaStreamSource::RenderingMode;
 
 MoonlightInstance* g_Instance;
 
 MoonlightInstance::MoonlightInstance()
-  : m_PerformanceStatsEnabled(false),
+  : m_PipelinePositionUs(kNoPipelinePosition),
+    m_PipelinePositionAtMs(0),
+    m_PerformanceStatsEnabled(false),
     m_Running(false),
     m_ConnectionThread(0),
     m_InputThread(0),
-    m_OpusDecoder(NULL),
     m_MouseLocked(false),
     m_MouseLastPosX(-1),
     m_MouseLastPosY(-1),
@@ -49,24 +48,21 @@ MoonlightInstance::MoonlightInstance()
     m_AccumulatedTicks(0),
     m_MouseDeltaX(0),
     m_MouseDeltaY(0),
-    m_HttpThreadPoolSequence(0),
-    m_Dispatcher("Curl"),
+    m_Dispatcher(),
     m_Mutex(),
     m_EmssStateChanged(),
     m_EmssVideoStateChanged(),
     m_EmssReadyState(EmssReadyState::kDetached),
     m_VideoStarted(false),
+    m_ConnectionCancelled(false),
+    m_StopThread(0),
+    m_StopNeedsLiStop(false),
     m_VideoSessionId(0),
-    m_PipelinePositionUs(kNoPipelinePosition),
-    m_PipelinePositionAtMs(0),
     m_MediaElement("wasm_module"),
     m_Source(nullptr),
     m_SourceListener(this),
     m_VideoTrackListener(this),
     m_VideoTrack(),
-    m_ConnectionCancelled(false),
-    m_StopThread(0),
-    m_StopNeedsLiStop(false),
     m_SourceClosed(false) {
       m_Dispatcher.start();
     }
@@ -383,9 +379,6 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
     m_StreamConfig.audioConfiguration = AUDIO_CONFIGURATION_STEREO;
     PostToJs("Selecting the fallback audio config to: AUDIO_CONFIGURATION_STEREO");
   }
-  // Store the audio configuration value from the stream configurations
-  m_AudioConfig = m_StreamConfig.audioConfiguration;
-
   // Initialize the supported video format with default value
   m_StreamConfig.supportedVideoFormats = 0;
   // Handle setting of supported video format values ​​based on the selected codec
@@ -461,21 +454,10 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
 
   // Store the parameters from the start message
   m_Host = host;
-  m_HttpPort = httpPort;
   m_AppVersion = appversion;
   m_GfeVersion = gfeversion;
   m_RtspUrl = rtspurl;
-  m_ServerCodecModeSupport = serverCodecModeSupport;
-  m_FramePacingEnabled = framePacing;
-  m_OptimizeGamesEnabled = optimizeGames;
-  m_MouseEmulationEnabled = mouseEmulation;
-  m_FlipABfaceButtonsEnabled = flipABfaceButtons;
-  m_FlipXYfaceButtonsEnabled = flipXYfaceButtons;
   m_AudioJitterMs = audioJitterMs;
-  m_PlayHostAudioEnabled = playHostAudio;
-  m_HdrModeEnabled = hdrMode;
-  m_FullRangeEnabled = fullRange;
-  m_GameModeEnabled = gameMode;
   m_DisableWarningsEnabled = disableWarnings;
   m_PerformanceStatsEnabled = performanceStats;
 
