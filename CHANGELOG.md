@@ -7,6 +7,21 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.3.7
+
+This is a diagnostic-only release for future smoothness improvements. It keeps
+v3.3.6 streaming behaviour unchanged and only updates the optional performance
+overlay. Users already on v3.3.6 may skip this release unless they want the new
+telemetry.
+
+### Changed
+- Replaces the performance overlay with a compact permanent layout limited to nine lines
+- Adds frame-load, assembly, submission, cadence, hitch-period, pipeline, presentation and
+  audio-buffer diagnostics needed to isolate periodic microstutter
+- Corrects presentation telemetry so coalesced browser callbacks are not reported as
+  dropped frames without confirmation from the video element
+- Keeps all new collection and rendering work inactive while the overlay is hidden
+
 ## v3.3.6
 
 This version targets the remaining display-cadence uncertainty while

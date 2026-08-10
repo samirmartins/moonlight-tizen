@@ -62,6 +62,7 @@ const vm = require('vm');
   await new Promise(function(resolve) { setImmediate(resolve); });
   assert(scriptNode && scriptNode.onaudioprocess);
   assert.strictEqual(Atomics.load(control, 3), 2);
+  assert.match(context.getAudioTelemetryLine(), /^Aud: SP q\d+\/\d+ms U0 O0$/);
 
   const channelData = [new Float32Array(1024), new Float32Array(1024)];
   const outputBuffer = {

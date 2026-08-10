@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.10)
 
-project(MoonlightWasm VERSION 3.3.5)
+project(MoonlightWasm VERSION 3.3.7)
 
 # Optimize for speed, not size. The hot paths here are frame memcpy, Opus
 # decoding at 100-200 frames per second and Reed-Solomon FEC recovery, all of

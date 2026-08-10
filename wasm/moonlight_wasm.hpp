@@ -8,6 +8,7 @@
 
 #include <Limelight.h>
 #include "lib.hpp"
+#include "video_telemetry.hpp"
 
 #include "samsung/wasm/elementary_media_stream_source.h"
 #include "samsung/wasm/elementary_media_stream_source_listener.h"
@@ -93,6 +94,19 @@ typedef struct _VIDEO_STATS {
   // Times the pipeline was flushed because presentation had stopped advancing
   // while packets were still being accepted
   uint32_t presentationRecoveries;
+
+  // Fixed diagnostic samples. They are populated only while the overlay is
+  // enabled and are merged without allocation for the compact p95/max view.
+  mltelemetry::Series appendIntervalsUs;
+  mltelemetry::Series hostIntervalsUs;
+  mltelemetry::Series frameBytes;
+  mltelemetry::Series framePackets;
+  mltelemetry::Series assemblyUs;
+  mltelemetry::Series appendUs;
+  mltelemetry::Series pipelineLeadUs;
+  uint32_t appendLateIntervals;
+  uint32_t appendEarlyIntervals;
+  uint32_t hostLateIntervals;
 } VIDEO_STATS, *PVIDEO_STATS;
 
 enum class LoadResult {
@@ -232,6 +246,9 @@ class MoonlightInstance {
   };
 
   void WaitFor(std::condition_variable* variable, std::function<bool()> condition);
+
+  template<bool CollectStats>
+  static int VidDecSubmitDecodeUnitImpl(PDECODE_UNIT decodeUnit);
 
   void OpenUrl_private(int callbackId, std::string url, std::string ppk, bool binaryResponse);
   void STUN_private(int callbackId);

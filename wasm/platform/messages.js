@@ -66,6 +66,22 @@ var handlePromiseMessage = function(callbackId, type, msg) {
   delete callbacks[callbackId];
 }
 
+function formatPerformanceOverlay(nativeText) {
+  var display = typeof getDisplayTelemetryCompact === 'function'
+    ? getDisplayTelemetryCompact() : { fps: '--', text: 'D --' };
+  var text = (nativeText || '')
+    .replace('@PFPS@', display.fps)
+    .replace('@DISP@', display.text)
+    .replace(/\n+$/, '');
+  var lines = text ? text.split('\n') : ['Stats: wait'];
+  if (lines.length > 8) {
+    lines = lines.slice(0, 8);
+  }
+  lines.push(typeof getAudioTelemetryLine === 'function'
+    ? getAudioTelemetryLine() : 'Aud: --');
+  return lines.join('\n');
+}
+
 /**
  * handleMessage - Handles messages from the Wasm module
  *
@@ -176,11 +192,8 @@ function handleMessage(msg) {
     }
     // Show the performance statistics overlay
     $('#performance-stats').css('background', 'rgba(0, 0, 0, 0.5)');
-    var displayTelemetry = getDisplayTelemetryLines();
-    $('#performance-stats').text(
-      msg.replace('StatMsg: ', '') + '\n' +
-      displayTelemetry[0] + '\n' + displayTelemetry[1]
-    );
+    $('#performance-stats').text(formatPerformanceOverlay(
+      msg.replace('StatMsg: ', '')));
   } else if (msg.indexOf('mouseEmulationOn') === 0) {
     // Show mouse emulation enable status as a notification
     snackbarLogLong('Mouse emulation is activated');

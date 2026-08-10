@@ -24,7 +24,6 @@ var _presentationSupported = null;
 var _presentationGeneration = 0;
 var _presentationLastTime = 0;
 var _presentationLastFrame = 0;
-var _presentationFrameGaps = 0;
 var _presentationIntervals = new Array(120);
 var _presentationIntervalCount = 0;
 var _presentationIntervalIndex = 0;
@@ -127,7 +126,6 @@ function setDisplayStreamReference(streamFps, hostRefreshX100) {
 function _resetPresentationStats() {
   _presentationLastTime = 0;
   _presentationLastFrame = 0;
-  _presentationFrameGaps = 0;
   _presentationIntervalCount = 0;
   _presentationIntervalIndex = 0;
 }
@@ -169,18 +167,22 @@ function startVideoPresentationObserver(videoElement) {
     if (!isFinite(presentationTime)) {
       presentationTime = Number(now);
     }
-    if (_presentationLastTime > 0 && presentationTime > _presentationLastTime) {
-      _recordPresentationInterval(presentationTime - _presentationLastTime);
-    }
-    _presentationLastTime = presentationTime;
-
     var presentedFrames = Number(metadata.presentedFrames);
+    var frameDelta = 1;
     if (isFinite(presentedFrames) && presentedFrames > 0) {
-      if (_presentationLastFrame > 0 && presentedFrames > _presentationLastFrame + 1) {
-        _presentationFrameGaps += presentedFrames - _presentationLastFrame - 1;
+      if (_presentationLastFrame > 0 && presentedFrames > _presentationLastFrame) {
+        frameDelta = presentedFrames - _presentationLastFrame;
       }
       _presentationLastFrame = presentedFrames;
     }
+    if (_presentationLastTime > 0 && presentationTime > _presentationLastTime) {
+      // A browser may coalesce callbacks while still presenting every frame.
+      // Normalize by presentedFrames instead of calling skipped callbacks lost
+      // frames, which was the old overlay's false-positive behaviour.
+      _recordPresentationInterval(
+        (presentationTime - _presentationLastTime) / Math.max(1, frameDelta));
+    }
+    _presentationLastTime = presentationTime;
     try {
       _presentationRequest = _presentationVideo.requestVideoFrameCallback(observe);
     } catch (error) {
@@ -212,24 +214,40 @@ function stopVideoPresentationObserver() {
   _presentationVideo = null;
 }
 
-function getDisplayTelemetryLines() {
+function _getPresentedFrameDrops() {
+  if (!_presentationVideo) {
+    return null;
+  }
+  try {
+    if (typeof _presentationVideo.getVideoPlaybackQuality === 'function') {
+      var quality = _presentationVideo.getVideoPlaybackQuality();
+      var dropped = Number(quality && quality.droppedVideoFrames);
+      return isFinite(dropped) && dropped >= 0 ? dropped : null;
+    }
+    var webkitDropped = Number(_presentationVideo.webkitDroppedFrameCount);
+    return isFinite(webkitDropped) && webkitDropped >= 0 ? webkitDropped : null;
+  } catch (error) {
+    return null;
+  }
+}
+
+function getDisplayTelemetryCompact() {
   var rawHz = _displayRefreshRawHz > 0
     ? _displayRefreshRawHz.toFixed(3) : 'unknown';
   var reportedHz = _displayHostRefreshX100 > 0
     ? (_displayHostRefreshX100 / 100).toFixed(2) : 'unknown';
-  var streamFps = _displayStreamFps > 0
-    ? _displayStreamFps.toFixed(2) : 'unknown';
-  var measurementDeviation = _displayRefreshRawHz > 0
-    ? _displayRefreshDeviationMs.toFixed(2) : 'unknown';
-  var panelLine = 'Panel refresh: ' + rawHz + ' Hz measured (' +
-    measurementDeviation + ' ms deviation), ' + reportedHz +
-    ' Hz sent, ' + streamFps + ' FPS requested';
-
-  var syncLine;
+  var presentedFps = '--';
+  var deviation = '--';
   if (_presentationSupported === false) {
-    syncLine = 'Display sync: presentation callback unavailable';
+    return {
+      fps: '--',
+      text: 'D p/s/o ' + rawHz + '/' + reportedHz + '/--Hz d-- drop--'
+    };
   } else if (_presentationIntervalCount < 2) {
-    syncLine = 'Display sync: measuring presentation cadence';
+    return {
+      fps: '--',
+      text: 'D p/s/o ' + rawHz + '/' + reportedHz + '/wait'
+    };
   } else {
     var sum = 0;
     var sumSq = 0;
@@ -240,10 +258,20 @@ function getDisplayTelemetryLines() {
     }
     var meanMs = sum / _presentationIntervalCount;
     var variance = (sumSq / _presentationIntervalCount) - (meanMs * meanMs);
-    var presentedHz = meanMs > 0 ? 1000 / meanMs : 0;
-    syncLine = 'Display sync: ' + presentedHz.toFixed(3) + ' Hz presented, ' +
-      Math.sqrt(Math.max(0, variance)).toFixed(2) + ' ms deviation, ' +
-      _presentationFrameGaps + ' frame gaps';
+    presentedFps = meanMs > 0 ? (1000 / meanMs).toFixed(2) : '--';
+    deviation = Math.sqrt(Math.max(0, variance)).toFixed(2);
   }
-  return [panelLine, syncLine];
+  var dropped = _getPresentedFrameDrops();
+  return {
+    fps: presentedFps,
+    text: 'D p/s/o ' + rawHz + '/' + reportedHz + '/' + presentedFps +
+      'Hz d' + deviation + ' drop' + (dropped === null ? '--' : dropped)
+  };
+}
+
+// Kept for console/tests that used the old public helper. The overlay itself
+// uses the compact object above and remains one display line.
+function getDisplayTelemetryLines() {
+  var compact = getDisplayTelemetryCompact();
+  return [compact.text, 'Out: ' + compact.fps + ' FPS'];
 }

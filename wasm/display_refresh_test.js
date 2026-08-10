@@ -40,24 +40,31 @@ const video = {
   },
   cancelVideoFrameCallback: function() {
     videoCallback = null;
+  },
+  getVideoPlaybackQuality: function() {
+    return { droppedVideoFrames: 0 };
   }
 };
 context.startVideoPresentationObserver(video);
 let presentedFrames = 0;
+let presentationTime = 500;
 for (let i = 0; i < 125; i++) {
   const current = videoCallback;
-  presentedFrames += (i === 60 ? 2 : 1);
-  current(i * (1000 / 59.94), {
-    expectedDisplayTime: 500 + i * (1000 / 59.94),
+  const frameDelta = i === 60 ? 2 : 1;
+  presentedFrames += frameDelta;
+  presentationTime += frameDelta * (1000 / 59.94);
+  current(presentationTime, {
+    expectedDisplayTime: presentationTime,
     presentedFrames
   });
 }
-let telemetry = context.getDisplayTelemetryLines();
-assert.match(telemetry[0], /59\.9\d\d Hz measured \(0\.\d\d ms deviation\), 59\.94 Hz sent, 60\.00 FPS requested/);
-assert.match(telemetry[1], /59\.940 Hz presented, 0\.00 ms deviation, 1 frame gaps/);
+let telemetry = context.getDisplayTelemetryCompact();
+assert.match(telemetry.text, /D p\/s\/o 59\.9\d\d\/59\.94\/59\.94Hz d0\.00 drop0/);
+assert.strictEqual(telemetry.fps, '59.94');
 context.stopVideoPresentationObserver();
 
 context.startVideoPresentationObserver({});
-telemetry = context.getDisplayTelemetryLines();
-assert.strictEqual(telemetry[1], 'Display sync: presentation callback unavailable');
+telemetry = context.getDisplayTelemetryCompact();
+assert.match(telemetry.text, /\/--Hz d-- drop--$/);
+assert.strictEqual(telemetry.fps, '--');
 console.log('display_refresh_test: ok');

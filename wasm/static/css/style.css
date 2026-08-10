@@ -661,10 +661,11 @@ body {
     z-index: 3;
     padding: 8px;
     border-radius: 8px;
-    font-size: 1.65rem;
+    font-family: monospace;
+    font-size: 1.35rem;
     font-weight: 500;
     line-height: 1.2;
-    white-space: pre-wrap;
+    white-space: pre;
 }
 /* =============================
    Settings Section

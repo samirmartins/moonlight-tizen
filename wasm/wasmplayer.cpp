@@ -201,10 +201,12 @@ static bool s_loggedSpsFixup = false;
 static std::chrono::time_point<std::chrono::steady_clock> s_lastAppendTime;
 static bool s_hasLastAppendTime = false;
 
-// An interval this far from one frame duration counts as an outlier. A quarter
-// of a frame at 60 Hz is about 4 ms, which is roughly where a cadence error
-// stops being invisible.
-static constexpr double kAppendJitterToleranceMs = 4.0;
+// Diagnostic cadence thresholds scale with the requested rate so the overlay
+// remains meaningful on 30, 50, 60 and 120 Hz streams. A quarter-frame miss is
+// the point where a delivery error becomes visible without treating ordinary
+// timer noise as a hitch.
+static constexpr double kCadenceToleranceFrames = 0.25;
+static constexpr uint32_t kStatsUpdateMs = 2000;
 
 static uint32_t s_lastIdrRequestMs = 0;
 
@@ -222,9 +224,26 @@ static void StopRecoveryThread();
 
 static VIDEO_STATS m_ActiveWndVideoStats;
 static VIDEO_STATS m_LastWndVideoStats;
+static mltelemetry::HitchTracker s_HitchTracker;
 // Owned by the decoder thread. This makes enabling the overlay start a clean
 // measurement window without keeping dormant counters hot during normal play.
 static bool s_collectingStats = false;
+
+static uint64_t SteadyUs(
+  std::chrono::time_point<std::chrono::steady_clock> time
+) {
+  return static_cast<uint64_t>(
+    std::chrono::duration_cast<std::chrono::microseconds>(
+      time.time_since_epoch()).count());
+}
+
+static uint32_t ToMicroseconds(double milliseconds) {
+  if (milliseconds <= 0.0) {
+    return 0;
+  }
+  const double microseconds = milliseconds * 1000.0;
+  return static_cast<uint32_t>(std::min<double>(microseconds, UINT32_MAX));
+}
 
 MoonlightInstance::SourceListener::SourceListener(
   MoonlightInstance* instance
@@ -761,6 +780,11 @@ static TimeStamp NextPacketPts(PDECODE_UNIT decodeUnit, TimeStamp previousPts) {
       m_ActiveWndVideoStats.hostIntervalCount++;
       m_ActiveWndVideoStats.hostIntervalSumMs += hostDeltaMs;
       m_ActiveWndVideoStats.hostIntervalSumSqMs += hostDeltaMs * hostDeltaMs;
+      mltelemetry::Add(m_ActiveWndVideoStats.hostIntervalsUs,
+                       ToMicroseconds(hostDeltaMs));
+      if (hostDeltaMs > frameMs * (1.0 + kCadenceToleranceFrames)) {
+        m_ActiveWndVideoStats.hostLateIntervals++;
+      }
     }
   }
   s_lastHostPtsMs = hostMs;
@@ -821,19 +845,31 @@ void MoonlightInstance::RecordAppendCadence(VIDEO_STATS& stats) {
   if (s_hasLastAppendTime) {
     double intervalMs =
       std::chrono::duration<double, std::milli>(now - s_lastAppendTime).count();
-
-    // A gap spanning several frames is a stall or a stream restart, not a
-    // cadence error. Folding it in would swamp the standard deviation with one
-    // sample and hide the small deviations this exists to expose.
     double frameMs = std::chrono::duration<double, std::milli>(s_frameDuration).count();
-    if (intervalMs < frameMs * 4) {
+    const double toleranceMs = frameMs * kCadenceToleranceFrames;
+
+    // Keep ordinary microstutter and short stalls in the distribution. A gap
+    // beyond a second is a stream transition, debugger stop or suspension and
+    // has no useful cadence percentile.
+    if (intervalMs > 0.0 && intervalMs < 1000.0) {
       stats.appendIntervalCount++;
       stats.appendIntervalSumMs += intervalMs;
       stats.appendIntervalSumSqMs += intervalMs * intervalMs;
+      mltelemetry::Add(stats.appendIntervalsUs, ToMicroseconds(intervalMs));
 
-      if (std::abs(intervalMs - frameMs) > kAppendJitterToleranceMs) {
+      const bool late = intervalMs > frameMs + toleranceMs;
+      const bool early = intervalMs < frameMs - toleranceMs;
+      if (late || early) {
         stats.appendJitterOutliers++;
       }
+      if (late) {
+        stats.appendLateIntervals++;
+      } else if (early) {
+        stats.appendEarlyIntervals++;
+      }
+      mltelemetry::Observe(s_HitchTracker, late, SteadyUs(now));
+    } else {
+      mltelemetry::Observe(s_HitchTracker, false, SteadyUs(now));
     }
   }
 
@@ -891,6 +927,8 @@ void MoonlightInstance::RecordPipelineLead(
     stats.pipelineClockSamples++;
     stats.pipelineClockLeadSumMs += leadMs;
     stats.pipelineClockLeadSumSqMs += leadMs * leadMs;
+    mltelemetry::Add(stats.pipelineLeadUs,
+                     ToMicroseconds(std::max(0.0, leadMs)));
 
     float absLeadMs = (float)std::abs(leadMs);
     if (absLeadMs > stats.pipelineClockLeadMaxMs) {
@@ -1067,16 +1105,9 @@ void MoonlightInstance::VidDecCleanup(void) {
   s_DecodeBuffer.shrink_to_fit();
 }
 
-int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
-  // Check if video playback has not started
-  if (!g_Instance->m_VideoStarted) {
-    return DR_OK;
-  }
-
-  const bool collectStats =
-    g_Instance->m_PerformanceStatsEnabled.load(std::memory_order_relaxed);
-
-  if (collectStats) {
+template<bool CollectStats>
+int MoonlightInstance::VidDecSubmitDecodeUnitImpl(PDECODE_UNIT decodeUnit) {
+  if constexpr (CollectStats) {
     const uint32_t statsNowMs = LiGetMillis();
 
     if (!s_collectingStats) {
@@ -1086,6 +1117,8 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
       m_LastFrameNumber = decodeUnit->frameNumber;
       total_bytes = 0;
       s_hasLastAppendTime = false;
+      mltelemetry::Reset(s_HitchTracker,
+                         SteadyUs(std::chrono::steady_clock::now()));
       s_collectingStats = true;
     } else if (decodeUnit->frameNumber > m_LastFrameNumber) {
       // Frame numbers can restart after an IDR or recovery. Count only forward
@@ -1102,13 +1135,18 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
       m_LastFrameNumber = decodeUnit->frameNumber;
     }
 
-    // Flip performance stats window roughly every second. None of this runs
+    // Flip performance stats window every two seconds. None of this runs
     // while the overlay is hidden.
-    if (m_ActiveWndVideoStats.measurementStartTimestamp + 1000 < statsNowMs) {
+    if (m_ActiveWndVideoStats.measurementStartTimestamp + kStatsUpdateMs < statsNowMs) {
       // Create a container to hold aggregated stats for display
       VIDEO_STATS lastTwoWndStats = {};
-      // Set the bitrate field in the temporary stats for display purposes
-      lastTwoWndStats.receivedBitrate = (total_bytes * 8.0) / 1000000.0f;
+      // Bitrate uses the current window rather than assuming it is exactly one
+      // second long.
+      const uint32_t windowMs =
+        statsNowMs - m_ActiveWndVideoStats.measurementStartTimestamp;
+      lastTwoWndStats.receivedBitrate = windowMs != 0
+        ? static_cast<float>((total_bytes * 8.0) / 1000.0 / windowMs)
+        : 0.0f;
       // Add last window and current window to the aggregated stats
       AddVideoStats(m_LastWndVideoStats, lastTwoWndStats);
       AddVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
@@ -1131,6 +1169,8 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     }
 
     total_bytes += decodeUnit->fullLength;
+    mltelemetry::Add(m_ActiveWndVideoStats.frameBytes,
+                     static_cast<uint32_t>(decodeUnit->fullLength));
 
     if (decodeUnit->frameHostProcessingLatency != 0) {
       if (m_ActiveWndVideoStats.minHostProcessingLatency != 0) {
@@ -1188,14 +1228,18 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
   // overload is strictly better than silently corrupting the reference chain.
   // Anything below that genuinely cannot proceed must return DR_NEED_IDR.
 
+  std::chrono::time_point<std::chrono::steady_clock> assemblyStart;
+  if constexpr (CollectStats) {
+    assemblyStart = std::chrono::steady_clock::now();
+  }
+
   // Assemble the packet.
   //
   // A decode unit that arrived as a single contiguous entry needs no assembly at
   // all: the buffer belongs to the decoder thread until AppendPacket returns, so
-  // the platform can read it where it lies. That is every P-frame, which is all
-  // but one frame in sixty. Only an IDR arrives split into parameter sets and
-  // picture data, and only that path pays for a copy, which it needs anyway
-  // because the H.264 SPS is rewritten in transit.
+  // the platform can read it where it lies. Multi-packet frames arrive as a list
+  // of entries and must be made contiguous for the Samsung packet API. IDRs may
+  // additionally need the H.264 SPS rewritten in transit.
   PLENTRY entry = decodeUnit->bufferList;
   unsigned int offset;
   const unsigned char* packetData;
@@ -1207,7 +1251,7 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
       entry->length == decodeUnit->fullLength) {
     packetData = reinterpret_cast<const unsigned char*>(entry->data);
     offset = (unsigned int)decodeUnit->fullLength;
-    if (collectStats) {
+    if constexpr (CollectStats) {
       m_ActiveWndVideoStats.zeroCopyFrames++;
     }
   } else {
@@ -1266,6 +1310,23 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
     packetData = s_DecodeBuffer.data();
   }
 
+  if constexpr (CollectStats) {
+    const auto assemblyEnd = std::chrono::steady_clock::now();
+    const auto assemblyUs = static_cast<uint32_t>(
+      std::chrono::duration_cast<std::chrono::microseconds>(
+        assemblyEnd - assemblyStart).count());
+    mltelemetry::Add(m_ActiveWndVideoStats.assemblyUs, assemblyUs);
+
+    // Count fragments in a diagnostic-only pass. The normal path retains the
+    // exact v3.3.6 loop and pays no extra branch per packet while stats are off.
+    uint32_t packetCount = 0;
+    for (PLENTRY packetEntry = decodeUnit->bufferList;
+         packetEntry != NULL; packetEntry = packetEntry->next) {
+      packetCount++;
+    }
+    mltelemetry::Add(m_ActiveWndVideoStats.framePackets, packetCount);
+  }
+
   const auto packetSessionId = g_Instance->m_VideoSessionId.load();
 
   // Create an ElementaryMediaPacket and start decoding with the decoded video data
@@ -1285,17 +1346,20 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
 
   // Timing measurements are overlay-only. Avoid three extra clock reads per
   // frame when the overlay is hidden.
-  if (collectStats) {
+  if constexpr (CollectStats) {
     m_ActiveWndVideoStats.totalReassemblyTime +=
       decodeUnit->enqueueTimeMs - decodeUnit->receiveTimeMs;
     m_ActiveWndVideoStats.totalDecodeTime +=
       LiGetMillis() - decodeUnit->enqueueTimeMs;
   }
-  if (collectStats) {
+  if constexpr (CollectStats) {
     m_ActiveWndVideoStats.decodedFrames++;
   }
 
-  uint32_t beforeRender = collectStats ? LiGetMillis() : 0;
+  std::chrono::time_point<std::chrono::steady_clock> appendStart;
+  if constexpr (CollectStats) {
+    appendStart = std::chrono::steady_clock::now();
+  }
 
   // Hand the packet over.
   //
@@ -1306,8 +1370,13 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
 
   if (appended) {
     const uint32_t appendNowMs = LiGetMillis();
-    if (collectStats) {
-      m_ActiveWndVideoStats.totalRenderTime += appendNowMs - beforeRender;
+    if constexpr (CollectStats) {
+      const auto appendEnd = std::chrono::steady_clock::now();
+      const auto appendUs = static_cast<uint32_t>(
+        std::chrono::duration_cast<std::chrono::microseconds>(
+          appendEnd - appendStart).count());
+      mltelemetry::Add(m_ActiveWndVideoStats.appendUs, appendUs);
+      m_ActiveWndVideoStats.totalRenderTime += appendUs / 1000;
       m_ActiveWndVideoStats.renderedFrames++;
       RecordAppendCadence(m_ActiveWndVideoStats);
     }
@@ -1316,9 +1385,9 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
       g_Instance->m_PipelinePositionUs.load(std::memory_order_acquire);
     const uint64_t reportedAtMs =
       g_Instance->m_PipelinePositionAtMs.load(std::memory_order_relaxed);
-    RecordPipelineLead(m_ActiveWndVideoStats, framePts, collectStats,
+    RecordPipelineLead(m_ActiveWndVideoStats, framePts, CollectStats,
                        positionUs, reportedAtMs, appendNowMs);
-    NotePresentationProgress(collectStats, positionUs, appendNowMs);
+    NotePresentationProgress(CollectStats, positionUs, appendNowMs);
   } else {
     // Throttle IDR requests. A keyframe costs several times a P-frame, so
     // asking for one on every rejected packet congests the link further and
@@ -1330,12 +1399,22 @@ int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
       return DR_NEED_IDR;
     }
     // A refresh is already on its way, so drop this frame quietly
-    if (collectStats) {
+    if constexpr (CollectStats) {
       m_ActiveWndVideoStats.pacerDroppedFrames++;
     }
   }
 
   return DR_OK;
+}
+
+int MoonlightInstance::VidDecSubmitDecodeUnit(PDECODE_UNIT decodeUnit) {
+  if (!g_Instance->m_VideoStarted) {
+    return DR_OK;
+  }
+  if (g_Instance->m_PerformanceStatsEnabled.load(std::memory_order_relaxed)) {
+    return VidDecSubmitDecodeUnitImpl<true>(decodeUnit);
+  }
+  return VidDecSubmitDecodeUnitImpl<false>(decodeUnit);
 }
 
 void MoonlightInstance::AddVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst) {
@@ -1364,6 +1443,16 @@ void MoonlightInstance::AddVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst) {
   dst.pipelineClockLeadMaxMs = MAX(dst.pipelineClockLeadMaxMs, src.pipelineClockLeadMaxMs);
   dst.zeroCopyFrames += src.zeroCopyFrames;
   dst.presentationRecoveries += src.presentationRecoveries;
+  mltelemetry::Merge(src.appendIntervalsUs, dst.appendIntervalsUs);
+  mltelemetry::Merge(src.hostIntervalsUs, dst.hostIntervalsUs);
+  mltelemetry::Merge(src.frameBytes, dst.frameBytes);
+  mltelemetry::Merge(src.framePackets, dst.framePackets);
+  mltelemetry::Merge(src.assemblyUs, dst.assemblyUs);
+  mltelemetry::Merge(src.appendUs, dst.appendUs);
+  mltelemetry::Merge(src.pipelineLeadUs, dst.pipelineLeadUs);
+  dst.appendLateIntervals += src.appendLateIntervals;
+  dst.appendEarlyIntervals += src.appendEarlyIntervals;
+  dst.hostLateIntervals += src.hostLateIntervals;
 
   // Update minimum host processing latency if it's not set or if the source has a valid smaller value
   if (dst.minHostProcessingLatency == 0) {
@@ -1407,230 +1496,94 @@ void MoonlightInstance::AddVideoStats(VIDEO_STATS& src, VIDEO_STATS& dst) {
 }
 
 void MoonlightInstance::FormatVideoStats(VIDEO_STATS& stats, char* output, int length) {
-  int ret;
-  int offset = 0;
   const char* codecString;
-
-  // Start with an empty string
-  output[offset] = 0;
-
-  // Determine the video format being used and assign a readable string
   switch (s_VideoFormat) {
-    case VIDEO_FORMAT_H264: // H.264 codec
-      codecString = "H.264";
+    case VIDEO_FORMAT_H264:
+      codecString = "H264";
       break;
-    case VIDEO_FORMAT_H265: // HEVC codec
+    case VIDEO_FORMAT_H265:
       codecString = "HEVC";
       break;
-    case VIDEO_FORMAT_H265_MAIN10: // HEVC Main10 codec
-      if (LiGetCurrentHostDisplayHdrMode()) {
-        codecString = "HEVC 10-bit HDR";
-      } else {
-        codecString = "HEVC 10-bit SDR";
-      }
+    case VIDEO_FORMAT_H265_MAIN10:
+      codecString = LiGetCurrentHostDisplayHdrMode() ? "HEVC10 HDR" : "HEVC10 SDR";
       break;
-    case VIDEO_FORMAT_AV1_MAIN8: // AV1 codec
+    case VIDEO_FORMAT_AV1_MAIN8:
       codecString = "AV1";
       break;
-    case VIDEO_FORMAT_AV1_MAIN10: // AV1 Main10 codec
-      if (LiGetCurrentHostDisplayHdrMode()) {
-        codecString = "AV1 10-bit HDR";
-      } else {
-        codecString = "AV1 10-bit SDR";
-      }
+    case VIDEO_FORMAT_AV1_MAIN10:
+      codecString = LiGetCurrentHostDisplayHdrMode() ? "AV1-10 HDR" : "AV1-10 SDR";
       break;
-    default: // Unknown codec
+    default:
       assert(false);
-      codecString = "UNKNOWN";
+      codecString = "?";
       break;
   }
 
-  // If there is a meaningful received frame rate, print basic stream info
-  if (stats.receivedFps > 0) {
-    if (codecString != nullptr) {
-      // Print video resolution, frame rate, and codec name
-      ret = snprintf(
-        &output[offset], length - offset,
-        "Video stream: %dx%d %.2f FPS (Codec: %s)\n",
-        s_Width, s_Height, stats.totalFps, codecString
-      );
-      // Abort if string formatting failed or buffer overflowed
-      if (ret < 0 || ret >= length - offset) {
-        assert(false);
-        return;
-      }
-      offset += ret;
-    }
+  const auto host = mltelemetry::Summarize(stats.hostIntervalsUs, 1000.0);
+  const auto loadBytes = mltelemetry::Summarize(stats.frameBytes, 1024.0);
+  const auto loadPackets = mltelemetry::Summarize(stats.framePackets);
+  const auto assembly = mltelemetry::Summarize(stats.assemblyUs, 1000.0);
+  const auto append = mltelemetry::Summarize(stats.appendUs, 1000.0);
+  const auto cadence = mltelemetry::Summarize(stats.appendIntervalsUs, 1000.0);
+  const auto pipeline = mltelemetry::Summarize(stats.pipelineLeadUs, 1000.0);
+  const auto hitchPeriod = mltelemetry::Summarize(s_HitchTracker.periodsUs, 1000000.0);
 
-    // Print frame rates at various stages of the pipeline
-    ret = snprintf(
-      &output[offset], length - offset,
-      "Incoming frame rate from network: %.2f FPS\n"
-      "Decoding frame rate: %.2f FPS\n"
-      "Rendering frame rate: %.2f FPS\n"
-      "Incoming bitrate from network: %.2f Mbps\n",
-      stats.receivedFps, stats.decodedFps, stats.renderedFps, stats.receivedBitrate
-    );
-    // Abort if string formatting failed or buffer overflowed
-    if (ret < 0 || ret >= length - offset) {
-      assert(false);
-      return;
-    }
-    offset += ret;
-  }
+  const double hostFps = host.mean > 0.0 ? 1000.0 / host.mean : 0.0;
+  const double networkLoss = stats.totalFrames != 0
+    ? stats.networkDroppedFrames * 100.0 / stats.totalFrames : 0.0;
+  const double hostLate = stats.hostIntervalCount != 0
+    ? stats.hostLateIntervals * 100.0 / stats.hostIntervalCount : 0.0;
+  const double appendLate = stats.appendIntervalCount != 0
+    ? stats.appendLateIntervals * 100.0 / stats.appendIntervalCount : 0.0;
+  const double encodeAverage = stats.framesWithHostProcessingLatency != 0
+    ? static_cast<double>(stats.totalHostProcessingLatency) /
+      stats.framesWithHostProcessingLatency / 10.0 : 0.0;
+  const double zeroCopy = stats.decodedFrames != 0
+    ? stats.zeroCopyFrames * 100.0 / stats.decodedFrames : 0.0;
+  const uint64_t nowUs = SteadyUs(std::chrono::steady_clock::now());
+  const double hitchesPerMinute =
+    mltelemetry::EventsPerMinute(s_HitchTracker, nowUs);
 
-  // Only display host processing latency if latency data exists
-  if (stats.framesWithHostProcessingLatency > 0) {
-    // Print min, max, and average host processing latency in milliseconds
-    ret = snprintf(
-      &output[offset], length - offset,
-      "Host processing latency min/max/average: %.1f/%.1f/%.1f ms\n",
-      (float)stats.minHostProcessingLatency / 10, (float)stats.maxHostProcessingLatency / 10,
-      (float)stats.totalHostProcessingLatency / 10 / stats.framesWithHostProcessingLatency
-    );
-    // Abort if string formatting failed or buffer overflowed
-    if (ret < 0 || ret >= length - offset) {
-      assert(false);
-      return;
-    }
-    offset += ret;
-  }
-
-  // Show remaining statistics only if some frames have been rendered
-  if (stats.renderedFrames != 0) {
-    char rttString[32];
-    // Format the round-trip time string
-    if (stats.lastRtt != 0) {
-      // Print the last RTT including variance in milliseconds
-      snprintf(
-        rttString, sizeof(rttString),
-        "%u ms (variance: %u ms)",
-        stats.lastRtt, stats.lastRttVariance
-      );
-    } else {
-      // Otherwise, print as "N/A" if RTT is unavailable
-      snprintf(rttString, sizeof(rttString), "N/A");
-    }
-
-    // Print detailed drop rates and timing statistics
-    ret = snprintf(
-      &output[offset], length - offset,
-      "Frames dropped by your network connection: %.2f%%\n"
-      "Frames dropped due to network jitter: %.2f%%\n"
-      "Average network latency: %s\n"
-      "Average decoding time: %.2f ms\n"
-      "Average rendering time: %.2f ms\n",
-      (float)stats.networkDroppedFrames / stats.totalFrames * 100,
-      (float)stats.pacerDroppedFrames / stats.decodedFrames * 100,
-      rttString,
-      (float)stats.totalDecodeTime / stats.decodedFrames,
-      (float)stats.totalRenderTime / stats.renderedFrames
-    );
-    // Abort if string formatting failed or buffer overflowed
-    if (ret < 0 || ret >= length - offset) {
-      assert(false);
-      return;
-    }
-    offset += ret;
-  }
-
-  // Cadence block. Everything above is a mean, and a mean cannot distinguish a
-  // steady 60 FPS from a 60 FPS that arrives in bursts. These three lines can.
-  if (stats.appendIntervalCount > 1) {
-    double n = (double)stats.appendIntervalCount;
-    double mean = stats.appendIntervalSumMs / n;
-    // Population variance from the running sums. Clamped at zero because
-    // catastrophic cancellation can drive it slightly negative when every
-    // sample is nearly identical, which is exactly the good case.
-    double variance = (stats.appendIntervalSumSqMs / n) - (mean * mean);
-    if (variance < 0.0) {
-      variance = 0.0;
-    }
-
-    ret = snprintf(
-      &output[offset], length - offset,
-      "Frame delivery interval: %.2f ms average, %.2f ms deviation\n"
-      "Frames delivered off cadence (>%.0f ms): %.2f%%\n",
-      mean, sqrt(variance), kAppendJitterToleranceMs,
-      (float)stats.appendJitterOutliers / (float)stats.appendIntervalCount * 100
-    );
-    if (ret < 0 || ret >= length - offset) {
-      assert(false);
-      return;
-    }
-    offset += ret;
-
-    // Same spread as measured by the host itself. If this matches the line
-    // above, the stream arrived as unevenly as it was sent and there is nothing
-    // left here to fix.
-    if (stats.hostIntervalCount > 1) {
-      double hn = (double)stats.hostIntervalCount;
-      double hmean = stats.hostIntervalSumMs / hn;
-      double hvar = (stats.hostIntervalSumSqMs / hn) - (hmean * hmean);
-      if (hvar < 0.0) {
-        hvar = 0.0;
-      }
-      ret = snprintf(
-        &output[offset], length - offset,
-        "Host send interval: %.2f ms average, %.2f ms deviation\n",
-        hmean, sqrt(hvar)
-      );
-    } else {
-      ret = 0;
-    }
-    if (ret < 0 || ret >= length - offset) {
-      assert(false);
-      return;
-    }
-    offset += ret;
-  }
-
-  // Assembly and recovery behaviour.
-  if (stats.decodedFrames != 0) {
-    ret = snprintf(
-      &output[offset], length - offset,
-      "Frames submitted without assembly: %.1f%%\n"
-      "Pipeline recoveries: %u\n",
-      (float)stats.zeroCopyFrames / (float)stats.decodedFrames * 100,
-      stats.presentationRecoveries
-    );
-    if (ret < 0 || ret >= length - offset) {
-      assert(false);
-      return;
-    }
-    offset += ret;
-  }
-
-  // Pipeline buffer depth. Absent means the platform never reported a position,
-  // which is itself the answer to whether we can pace against its clock.
+  char pipelineText[80];
   if (stats.pipelineClockSamples > 1) {
-    double n = (double)stats.pipelineClockSamples;
-    double mean = stats.pipelineClockLeadSumMs / n;
-    double variance = (stats.pipelineClockLeadSumSqMs / n) - (mean * mean);
-    if (variance < 0.0) {
-      variance = 0.0;
-    }
+    snprintf(pipelineText, sizeof(pipelineText),
+             "Pipe a/p/x: %.1f/%.1f/%.1fms r%u",
+             pipeline.mean, pipeline.p95, pipeline.maximum,
+             stats.presentationRecoveries);
+  } else {
+    snprintf(pipelineText, sizeof(pipelineText),
+             "Pipe: -- r%u", stats.presentationRecoveries);
+  }
 
-    ret = snprintf(
-      &output[offset], length - offset,
-      "Pipeline buffer depth: %.1f ms average, %.1f ms deviation, %.1f ms peak\n",
-      mean, sqrt(variance), stats.pipelineClockLeadMaxMs
-    );
-    if (ret < 0 || ret >= length - offset) {
-      assert(false);
-      return;
+  const int ret = snprintf(
+    output, length,
+    "Str: %ux%u %s %ufps %.1fMb\n"
+    "FPS H/R/S/O: %.2f/%.2f/%.2f/@PFPS@\n"
+    "Net: loss %.2f%% RTT %u+/-%ums apprej %u\n"
+    "Host: i%.2f p%.2f d%.2fms l%.1f%% enc %.1f/%.1fms\n"
+    "Load a/p/x: %.0f/%.0f/%.0fKB %.0f/%.0f/%.0fpkts\n"
+    "Work a/p/x: asm %.2f/%.2f/%.2f app %.2f/%.2f/%.2fms zc%.0f%%\n"
+    "Cad: d%.2f p%.2f x%.2fms l%.1f%% H%.1f/m T%.1f/%.1fs b%u\n"
+    "%s | @DISP@\n",
+    s_Width, s_Height, codecString, s_Framerate, stats.receivedBitrate,
+    hostFps, stats.receivedFps, stats.renderedFps,
+    networkLoss, stats.lastRtt, stats.lastRttVariance,
+    stats.pacerDroppedFrames,
+    host.mean, host.p95, host.deviation, hostLate, encodeAverage,
+    stats.maxHostProcessingLatency / 10.0,
+    loadBytes.mean, loadBytes.p95, loadBytes.maximum,
+    loadPackets.mean, loadPackets.p95, loadPackets.maximum,
+    assembly.mean, assembly.p95, assembly.maximum,
+    append.mean, append.p95, append.maximum, zeroCopy,
+    cadence.deviation, cadence.p95, cadence.maximum, appendLate,
+    hitchesPerMinute, hitchPeriod.mean, hitchPeriod.p95,
+    s_HitchTracker.maxBurst, pipelineText);
+
+  if (ret < 0 || ret >= length) {
+    assert(false);
+    if (length > 0) {
+      output[0] = 0;
     }
-    offset += ret;
-  } else if (stats.renderedFrames != 0) {
-    ret = snprintf(
-      &output[offset], length - offset,
-      "Pipeline buffer depth: not reported by the platform\n"
-    );
-    if (ret < 0 || ret >= length - offset) {
-      assert(false);
-      return;
-    }
-    offset += ret;
   }
 }
 

@@ -129,6 +129,23 @@ function _audRefreshStats() {
   _audStats.started = (Atomics.load(_audControl, _AUD_CTL_STARTED) | 0) !== 0;
 }
 
+// Called only while a StatMsg is being painted. With the overlay hidden there
+// are no extra Atomics reads, strings or audio telemetry work.
+function getAudioTelemetryLine() {
+  _audRefreshStats();
+  if (!_audStats) {
+    return 'Aud: --';
+  }
+  var backend = _audStats.backend === 'AudioWorklet' ? 'AW' :
+    (_audStats.backend === 'ScriptProcessor' ? 'SP' :
+      (_audStats.backend === 'waiting' ? 'wait' : 'off'));
+  var depth = isFinite(_audStats.depthMs) ? _audStats.depthMs.toFixed(0) : '--';
+  var target = isFinite(_audStats.targetMs) && _audStats.targetMs > 0
+    ? _audStats.targetMs.toFixed(0) : '--';
+  return 'Aud: ' + backend + ' q' + depth + '/' + target + 'ms U' +
+    (_audStats.underruns >>> 0) + ' O' + (_audStats.overruns >>> 0);
+}
+
 function _audClaimPromise(promise) {
   if (promise && typeof promise.then === 'function') {
     promise.then(function() {}, function() {});
