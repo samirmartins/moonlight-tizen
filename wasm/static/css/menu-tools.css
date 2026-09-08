@@ -1,0 +1,29 @@
+.host-wake-hint {
+  position: absolute; bottom: 48px; left: 8px; right: 8px;
+  padding: 3px 6px; text-align: center; font-size: 16px; line-height: 22px;
+  color: #e5ebf7; background: rgba(0, 0, 0, .55); border-radius: 4px; pointer-events: none;
+}
+.utility-dialog {
+  box-sizing: border-box; width: 760px; height: fit-content; max-width: 94vw; max-height: 94vh;
+  overflow-y: auto; color: #edf1f8; background: #282c38;
+}
+.utility-dialog .mdl-dialog__title { padding: 4px 0 12px; font-size: 28px; line-height: 34px; }
+.utility-dialog .mdl-dialog__content { padding: 4px 0; color: inherit; }
+.utility-input {
+  width: 100%; box-sizing: border-box; padding: 10px; font: 24px monospace;
+  color: white; background: #363d4e; border: 2px solid #8291aa; border-radius: 4px;
+}
+.utility-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; padding-top: 8px; }
+.utility-actions button, #diagnosticsReportBtn { color: #edf1f8; background: #414d64; margin: 6px; }
+.utility-dialog button:focus, .utility-dialog .hovered, #diagnosticsReportBtn:focus { outline: 3px solid #87cfff; }
+.utility-dialog button:disabled { opacity: .5; }
+/* Keep the report action compact; diagnosticsBtn uses the shared toggle CSS. */
+.settings-options #diagnosticsReportBtn { display: block; clear: both; margin: 20px 0 6px; }
+#wakeStatus { min-height: 64px; font-size: 20px; line-height: 28px; }
+.diagnosis-dialog { width: 1160px; padding: 20px 24px; }
+.diagnosis-dialog p { margin: 3px 0 8px; font-size: 18px; line-height: 24px; }
+.diagnosis-table { width: 100%; border-collapse: collapse; font-size: 18px; line-height: 25px; }
+.diagnosis-table th { text-align: left; width: 110px; white-space: nowrap; color: #9fd6ff; }
+.diagnosis-table th, .diagnosis-table td { padding: 5px 8px; border-bottom: 1px solid #485064; }
+#diagnosisFinding { margin-top: 10px; color: #ffdb96; }
+#diagnosisFoot, #diagnosisDevice { font-size: 16px; line-height: 21px; color: #c4cbd8; }

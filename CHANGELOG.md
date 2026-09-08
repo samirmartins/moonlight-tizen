@@ -7,6 +7,27 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.3.8
+
+This release adds opt-in session diagnosis and completes Wake-on-LAN without
+changing the approved video, audio, input or rumble paths from v3.3.7.
+
+### Added
+- Adds an optional nine-line post-session report covering stream cadence, presentation,
+  host/network timing, audio and TV resources; only the latest report is stored locally
+- Adds visible Wake-on-LAN actions for offline and online PCs, with detected or manually
+  entered MAC addresses kept in the TV's local application storage
+
+### Fixed
+- Moves Wake-on-LAN socket work off the main thread, validates the address and retries the
+  LAN broadcast without blocking the interface
+- Refreshes the PC card automatically after Wake-on-LAN confirms that Sunshine is online
+- Cancels menu polling and late callbacks before streaming, preventing dormant menu work
+  from continuing during gameplay
+- Keeps the permanent performance overlay independent from session diagnosis and leaves
+  all additional diagnostic collection inactive when diagnosis is off
+- Aligns the diagnosis toggle with the other settings controls
+
 ## v3.3.7
 
 This is a diagnostic-only release for future smoothness improvements. It keeps

@@ -190,6 +190,9 @@ class MoonlightInstance {
   // reach the media source directly.
   static void PerformPresentationRecovery();
   void TogglePerformanceStats();
+  void SetDiagnostics(uint32_t generation);
+  static void PublishDiagnostics(VIDEO_STATS& stats, uint32_t windowMs,
+    uint32_t nowMs, uint32_t generation);
   bool PerformanceStatsEnabled() const {
     return m_PerformanceStatsEnabled.load(std::memory_order_relaxed);
   }
@@ -268,6 +271,8 @@ class MoonlightInstance {
   int m_AudioJitterMs;
   bool m_DisableWarningsEnabled;
   std::atomic<bool> m_PerformanceStatsEnabled;
+  std::atomic<bool> m_OverlayStatsEnabled{false};
+  std::atomic<uint32_t> m_DiagnosticsGeneration{0};
 
   STREAM_CONFIGURATION m_StreamConfig;
   std::atomic<bool> m_Running;

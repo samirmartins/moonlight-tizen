@@ -1,4 +1,5 @@
 #include "moonlight_wasm.hpp"
+#include "wakeonlan.hpp"
 
 #include <pthread.h>
 #include <stdio.h>
@@ -459,7 +460,8 @@ MessageResult MoonlightInstance::StartStream(std::string host, int httpPort, std
   m_RtspUrl = rtspurl;
   m_AudioJitterMs = audioJitterMs;
   m_DisableWarningsEnabled = disableWarnings;
-  m_PerformanceStatsEnabled = performanceStats;
+  m_OverlayStatsEnabled = performanceStats;
+  m_PerformanceStatsEnabled = performanceStats || m_DiagnosticsGeneration.load() != 0;
 
   // Initialize the rendering surface before starting the connection
   if (InitializeRenderingSurface(m_StreamConfig.width, m_StreamConfig.height)) {
@@ -525,72 +527,16 @@ void MoonlightInstance::Pair(int callbackId, std::string serverMajorVersion, std
 }
 
 void MoonlightInstance::WakeOnLan(int callbackId, std::string macAddress) {
-  unsigned char magicPacket[102];
-  unsigned char mac[6];
-
-  // Validate and parse the MAC address
-  if (sscanf(macAddress.c_str(), "%hhx:%hhx:%hhx:%hhx:%hhx:%hhx", &mac[0], &mac[1], &mac[2], &mac[3], &mac[4], &mac[5]) != 6) {
-    ClLogMessage("Invalid MAC address format: %s\n", macAddress.c_str());
-    return;
-  }
-
-  // Fill magic packet with the MAC address
-  for (int i = 0; i < 6; i++) {
-    magicPacket[i] = 0xFF;
-  }
-  for (int i = 1; i <= 16; i++) {
-    memcpy(&magicPacket[i * 6], &mac, 6 * sizeof(unsigned char));
-  }
-
-  // Create UDP socket
-  int udpSocket = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
-  if (udpSocket == -1) {
-    ClLogMessage("Failed to create socket");
-    return;
-  }
-
-  // Enable broadcasting
-  int broadcast = 1;
-  if (setsockopt(udpSocket, SOL_SOCKET, SO_BROADCAST, &broadcast, sizeof(broadcast)) == -1) {
-    ClLogMessage("Failed to enable broadcast");
-    close(udpSocket);
-    return;
-  }
-
-  // Set up destination address for the magic packet
-  struct sockaddr_in addr;
-  memset(&addr, 0, sizeof(addr));
-  addr.sin_family = AF_INET;
-  addr.sin_addr.s_addr = INADDR_BROADCAST;
-  addr.sin_port = htons(9); // Wake-on-LAN typically uses port 9
-
-  // Send the magic packet over IPv4
-  if (sendto(udpSocket, magicPacket, sizeof(magicPacket), 0, (struct sockaddr*) &addr, sizeof(addr)) == -1) {
-    ClLogMessage("Failed to send magic packet");
-  } else {
-    ClLogMessage("Magic packet sent successfully to MAC address: %s\n", macAddress.c_str());
-  }
-
-  // Close the IPv4 socket
-  close(udpSocket);
-
-  // Send the magic packet over IPv6
-  int udp6Socket = socket(AF_INET6, SOCK_DGRAM, IPPROTO_UDP);
-  if (udp6Socket != -1) {
-    struct sockaddr_in6 addr6;
-    memset(&addr6, 0, sizeof(addr6));
-    addr6.sin6_family = AF_INET6;
-    addr6.sin6_port = htons(9); // Wake-on-LAN typically uses port 9
-    // ff02::1 is the link-local all-nodes multicast address
-    inet_pton(AF_INET6, "ff02::1", &addr6.sin6_addr);
-
-    if (sendto(udp6Socket, magicPacket, sizeof(magicPacket), 0, (struct sockaddr*) &addr6, sizeof(addr6)) == -1) {
-      ClLogMessage("Failed to send IPv6 magic packet");
-    } else {
-      ClLogMessage("IPv6 Magic packet sent successfully to MAC address: %s\n", macAddress.c_str());
+  // Tizen sockets must run on a worker, not the JS/main thread (no proxy build).
+  m_Dispatcher.post_job([this, callbackId, macAddress]() {
+    if (m_Running.load()) {
+      PostPromiseMessage(callbackId, "reject", "Wake-on-LAN is available only outside a stream.");
+      return;
     }
-    close(udp6Socket);
-  }
+    const std::string error = mlwol::Send(macAddress);
+    PostPromiseMessage(callbackId, error.empty() ? "resolve" : "reject",
+                       error.empty() ? "Wake packet sent" : error);
+  }, false);
 }
 
 bool MoonlightInstance::Init(uint32_t argc, const char* argn[], const char* argv[]) {
@@ -666,6 +612,10 @@ void wakeOnLan(int callbackId, std::string macAddress) {
   g_Instance->WakeOnLan(callbackId, macAddress);
 }
 
+void setDiagnostics(uint32_t generation) {
+  g_Instance->SetDiagnostics(generation);
+}
+
 void PostToJs(std::string msg) {
   MAIN_THREAD_EM_ASM({
     const msg = UTF8ToString($0);
@@ -716,4 +666,5 @@ EMSCRIPTEN_BINDINGS(handle_message) {
   emscripten::function("stun", &stun);
   emscripten::function("pair", &pair);
   emscripten::function("wakeOnLan", &wakeOnLan);
+  emscripten::function("setDiagnostics", &setDiagnostics);
 }

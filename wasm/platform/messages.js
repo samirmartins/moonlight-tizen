@@ -49,19 +49,37 @@ var sendMessage = function(method, params) {
       }
     });
   } else {
-    return new Promise(function(resolve, reject) {
+    var pendingId;
+    var promise = new Promise(function(resolve, reject) {
       const id = callbacks_ids++;
+      pendingId = id;
       callbacks[id] = {
         'resolve': resolve,
         'reject': reject
       };
 
-      AsyncFunctions[method](id, ...params);
+      // A missing binding/synchronous failure must not leak a pending Promise.
+      try {
+        AsyncFunctions[method](id, ...params);
+      } catch (error) {
+        delete callbacks[id];
+        reject(error);
+      }
     });
+    // Local cancellation retires the JS callback only; cancelling the shared
+    // native HTTP dispatcher here could interrupt a launch/stream request.
+    promise.cancel = function() {
+      var pending = callbacks[pendingId];
+      if (!pending) return;
+      delete callbacks[pendingId];
+      pending.reject(new Error('Menu request cancelled'));
+    };
+    return promise;
   }
 }
 
 var handlePromiseMessage = function(callbackId, type, msg) {
+  if (!callbacks[callbackId] || !callbacks[callbackId][type]) return;
   callbacks[callbackId][type](msg);
   delete callbacks[callbackId];
 }
@@ -89,6 +107,10 @@ function formatPerformanceOverlay(nativeText) {
  * @return {void}
  */
 function handleMessage(msg) {
+  if (msg.indexOf('DiagMsg: ') === 0) {
+    SessionDiagnostics.sample(msg.slice(9));
+    return;
+  }
   // The performance overlay updates once per second and can remain enabled for
   // hours. Logging every full update lets some WebKit builds retain thousands
   // of large strings and creates avoidable GC pressure. Other, infrequent
@@ -98,6 +120,7 @@ function handleMessage(msg) {
   }
   // If it's a recognized event, notify the appropriate function
   if (msg.indexOf('streamTerminated: ') === 0) {
+    SessionDiagnostics.finish(msg.replace('streamTerminated: ', 'Exit code '));
     stopVideoPresentationObserver();
     // Reset the Web Audio scheduler so the next stream starts from a clean clock
     stopAudioScheduler(true);
@@ -143,6 +166,7 @@ function handleMessage(msg) {
       }
     }, 1500);
   } else if (msg === 'Connection Established') {
+    SessionDiagnostics.connected();
     // Prepare the screen for video stream
     $('#loadingSpinner').css('display', 'none');
     $('body').css('backgroundColor', 'transparent');
@@ -158,6 +182,7 @@ function handleMessage(msg) {
     // Show transient message as notification
     snackbarLogLong(msg.replace('TransientMsg: ', ''));
   } else if (msg.indexOf('DialogMsg: ') === 0) {
+    SessionDiagnostics.note(msg.slice(11), true);
     // Show dialog message using the warning dialog
     warningDialog('Warning', msg.replace('DialogMsg: ', ''));
   } else if (msg === 'displayVideo') {
@@ -168,10 +193,17 @@ function handleMessage(msg) {
     $('#connection-warnings').css('background', 'transparent');
     $('#connection-warnings').text('');
   } else if (msg.indexOf('WarningMsg: ') === 0) {
+    SessionDiagnostics.note(msg.slice(12), false);
     // Show the connection warnings overlay
     $('#connection-warnings').css('background', 'rgba(0, 0, 0, 0.5)');
     $('#connection-warnings').text(msg.replace('WarningMsg: ', ''));
-  } else if (msg.indexOf('NoStatMsg: ') === 0) {
+  } else if (msg === 'OverlayState: 1') {
+    if (!isInGame) return;
+    $('#performanceStatsBtn')[0].MaterialSwitch.on();
+    savePerformanceStats();
+    $('#performance-stats').css('display', 'inline-block');
+    startVideoPresentationObserver(document.getElementById('wasm_module'));
+  } else if (msg === 'OverlayState: 0' || msg.indexOf('NoStatMsg: ') === 0) {
     stopVideoPresentationObserver();
     // Toggle the performance stats switch and save the state
     if ($('#performanceStatsSwitch').prop('checked')) {
@@ -183,13 +215,7 @@ function handleMessage(msg) {
     $('#performance-stats').css('background', 'transparent');
     $('#performance-stats').text('');
   } else if (msg.indexOf('StatMsg: ') === 0) {
-    // Toggle the performance stats switch and save the state
-    if (!$('#performanceStatsSwitch').prop('checked')) {
-      $('#performanceStatsBtn')[0].MaterialSwitch.on();
-      savePerformanceStats();
-      $('#performance-stats').css('display', 'inline-block');
-      startVideoPresentationObserver(document.getElementById('wasm_module'));
-    }
+    if (!isInGame || !$('#performanceStatsSwitch').prop('checked')) return;
     // Show the performance statistics overlay
     $('#performance-stats').css('background', 'rgba(0, 0, 0, 0.5)');
     $('#performance-stats').text(formatPerformanceOverlay(

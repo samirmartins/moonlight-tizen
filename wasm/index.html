@@ -11,6 +11,7 @@
   <link rel="stylesheet" href="static/css/material-icons.css">
   <link rel="stylesheet" href="static/css/material.min.css">
   <link rel="stylesheet" href="static/css/style.css">
+  <link rel="stylesheet" href="static/css/menu-tools.css">
   <script type="text/javascript" src="platform.js"></script>
 </head>
 <body data-name="moonlight-tizen" data-tools="emscripten" data-configs="Debug Release" data-path="{tc}/{config}">
@@ -337,6 +338,15 @@
                 </label>
               </div>
             </div>
+            <div class="setting-option">
+              <label>Session diagnosis</label>
+              <span class="mdl-list__item-text-body">Optional collection during the next streams. OFF: no diagnostic collection. Exit the stream for a photo-ready report; the overlay is independent.</span>
+              <label id="diagnosticsBtn" class="mdl-switch mdl-js-switch mdl-js-ripple-effect" for="diagnosticsSwitch">
+                <input type="checkbox" id="diagnosticsSwitch" class="mdl-switch__input">
+                <span class="mdl-switch__label">Collect session diagnosis (OFF at app launch)</span>
+              </label>
+              <button type="button" id="diagnosticsReportBtn" class="mdl-button mdl-js-button mdl-button--raised">Last diagnosis</button>
+            </div>
           </div>
           <div id="aboutSettings" class="settings-options">
             <div class="setting-option">
@@ -395,11 +405,43 @@
   <script type="text/javascript" src="platform/display.js"></script>
   <script type="text/javascript" src="platform/gamepad.js"></script>
   <script type="text/javascript" src="platform/audio.js"></script>
+  <script type="text/javascript" src="platform/menu-tools.js"></script>
+  <script type="text/javascript" src="platform/diagnostics.js"></script>
   <script type="text/javascript" src="platform/index.js"></script>
   <script type="text/javascript" src="platform/navigation.js"></script>
   <script type="text/javascript" src="platform/remote_controller.js"></script>
   <script type="text/javascript" src="static/js/utils.js"></script>
   <script type="text/javascript" src="static/js/mdns-browser/main.js"></script>
+  <div class="dialog-overlay" id="wakeDialogOverlay">
+    <dialog id="wakeDialog" class="mdl-dialog utility-dialog">
+      <h3 id="wakeTitle" class="mdl-dialog__title">Wake PC</h3>
+      <div class="mdl-dialog__content">
+        <p>Wake-on-LAN · physical LAN adapter MAC</p>
+        <input id="wakeMac" class="utility-input" type="text" maxlength="17" spellcheck="false" autocomplete="off" aria-label="Physical network adapter MAC" placeholder="12:34:56:78:9A:BC">
+        <p id="wakeStatus" role="status"></p>
+      </div>
+      <div class="utility-actions">
+        <button id="wakeSend" type="button" class="mdl-button mdl-js-button mdl-button--raised">Wake PC</button>
+        <button id="wakeSave" type="button" class="mdl-button mdl-js-button mdl-button--raised">Save MAC</button>
+        <button id="wakeDetected" type="button" class="mdl-button mdl-js-button mdl-button--raised">Use detected MAC</button>
+        <button id="wakeClose" type="button" class="mdl-button mdl-js-button mdl-button--raised">Close</button>
+      </div>
+    </dialog>
+  </div>
+  <div class="dialog-overlay" id="diagnosisDialogOverlay">
+    <dialog id="diagnosisDialog" class="mdl-dialog utility-dialog diagnosis-dialog">
+      <h3 id="diagnosisTitle" class="mdl-dialog__title"></h3>
+      <p id="diagnosisConfig"></p>
+      <p id="diagnosisDevice"></p>
+      <table class="diagnosis-table"><tbody id="diagnosisRows"></tbody></table>
+      <p id="diagnosisFinding"></p>
+      <p id="diagnosisPeak"></p>
+      <p id="diagnosisFoot"></p>
+      <div class="utility-actions">
+        <button id="diagnosisClose" type="button" class="mdl-button mdl-js-button mdl-button--raised">Close</button>
+      </div>
+    </dialog>
+  </div>
   <div id="addHostDialogOverlay" class="dialog-overlay">
     <dialog id="addHostDialog" class="mdl-dialog">
       <h3 id="addHostDialogTitle" class="mdl-dialog__title">Add Host</h3>

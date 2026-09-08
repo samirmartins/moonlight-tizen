@@ -52,6 +52,11 @@ which removes its saved settings. A persistent release-signing certificate is st
 - **Audio jitter buffer** defaults to 100 ms, but this is an adaptive ceiling rather than
   fixed latency. Playback starts near two Opus frames and raises protection after a real
   underrun, never beyond the selected value.
+- **Session diagnosis** is opt-in and resets to off when the app starts. It stores only the
+  latest report locally; when off, its collection work is inactive.
+- **Wake-on-LAN** is available from an offline PC card or the PC menu. Its MAC stays in the
+  TV's local app storage and is sent only in the LAN wake packet; it is not embedded in the
+  widget or transmitted as telemetry.
 
 ---
 

@@ -656,6 +656,24 @@ const Views = {
       setTimeout(() => blurElement(this.view.current()), 100);
     },
   },
+  UtilityDialog: {
+    controls: [],
+    closeId: '',
+    view: new ListView(() => Views.UtilityDialog.controls),
+    up: function() { this.view.prevOption(); focusElement(this.view.current()); },
+    down: function() { this.view.nextOption(); focusElement(this.view.current()); },
+    left: function() { if (document.activeElement.tagName !== 'INPUT') this.up(); },
+    right: function() { if (document.activeElement.tagName !== 'INPUT') this.down(); },
+    accept: function() {
+      var element = resolveElement(this.view.current());
+      if (element) { element.focus(); element.click(); }
+    },
+    back: function() { document.getElementById(this.closeId).click(); },
+    press: function() {},
+    switch: function() { focusElement(this.view.current()); },
+    enter: function() { this.view.index = 0; focusElement(this.view.current()); },
+    leave: function() { blurElement(this.view.current()); }
+  },
   HostMenuDialog: {
     view: new ListView(() => {
       const actions = ['refreshApps', 'wakeHost', 'deleteHost', 'viewDetails', 'closeHostMenu'];
@@ -1247,7 +1265,9 @@ const Views = {
   AdvancedSettings: {
     view: new ListView(() => [
       'disableWarningsBtn',
-      'performanceStatsBtn'
+      'performanceStatsBtn',
+      'diagnosticsBtn',
+      'diagnosticsReportBtn'
     ]),
     up: function() {
       this.view.prevOption();

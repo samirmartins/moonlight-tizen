@@ -87,6 +87,8 @@ function attachListeners() {
   $('#gameModeSwitch').on('click', saveGameMode);
   $('#disableWarningsSwitch').on('click', saveDisableWarnings);
   $('#performanceStatsSwitch').on('click', savePerformanceStats);
+  $('#diagnosticsSwitch').on('change', SessionDiagnostics.changed);
+  $('#diagnosticsReportBtn').on('click', SessionDiagnostics.show);
   $('#navigationGuideBtn').on('click', navigationGuideDialog);
   $('#restartAppBtn').on('click', restartAppDialog);
 
@@ -230,6 +232,9 @@ function delayedNavigation(callback) {
 
 // Updates the host status indicator based on the host's online and paired status
 function updateHostStatusIndicator(host) {
+  WakeHost.hostUpdated(host);
+  var hint = document.getElementById('host-wake-' + host.serverUid);
+  if (hint) hint.textContent = host.online ? 'PC menu · Wake-on-LAN' : 'Offline · OK: Wake PC';
   var indicator = document.querySelector('#host-status-' + host.serverUid);
   // If the indicator element is not found, exit the function early
   if (!indicator) {
@@ -250,127 +255,73 @@ function updateHostStatusIndicator(host) {
   }
 }
 
+// Each menu visit owns a cancellable scope, including requests still in flight.
+var hostPollScopes = {};
+
 function beginBackgroundPollingOfHost(host) {
-  // Clear any existing polling interval for this host before starting a new one.
-  // Without this, every call to beginBackgroundPollingOfHost (e.g. on each navigation
-  // back to the host view) would leak the old setInterval, causing multiple overlapping
-  // poll loops that corrupt the _pollCompletionCallbacks deduplication guard and
-  // prevent the host from ever recovering to the online state.
-  if (activePolls[host.serverUid]) {
-    window.clearInterval(activePolls[host.serverUid]);
-    delete activePolls[host.serverUid];
-  }
-
-  // Refresh server info before attempting to start background polling of the host
-  host.refreshServerInfo().then(function(ret) {
-    console.log('%c[index.js, beginBackgroundPollingOfHost]', 'color: green;', 'Starting background polling of host ' + host.serverUid, host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-    // Find the desired host cell using the server UUID
-    var hostCell = document.querySelector('#host-' + host.serverUid);
-    // Check if the host is currently online
-    if (host.online) {
-      // If the host is online, show it as active
-      hostCell.classList.remove('host-cell-inactive');
-      updateHostStatusIndicator(host);
-      // The host was already online, so start polling in the background now
-      activePolls[host.serverUid] = window.setInterval(function() {
-        // Every 5 seconds, poll at the address to check for any status changes
-        host.pollServer(function(returnedHost) {
-          // Check if the host is currently online
-          if (returnedHost.online) {
-            hostCell.classList.remove('host-cell-inactive');
-          } else {
-            hostCell.classList.add('host-cell-inactive');
-          }
-          updateHostStatusIndicator(returnedHost);
-        });
-      }, 5000);
-    } else {
-      // If the host is offline, show it as inactive
-      hostCell.classList.add('host-cell-inactive');
-      updateHostStatusIndicator(host);
-      // The host was offline, so poll immediately to check the host's status
-      host.pollServer(function(returnedHost) {
-        // Check if the host is currently online
-        if (returnedHost.online) {
-          hostCell.classList.remove('host-cell-inactive');
-        } else {
-          hostCell.classList.add('host-cell-inactive');
-        }
-        updateHostStatusIndicator(returnedHost);
-        // Now that the initial poll is done, start the background polling
-        activePolls[host.serverUid] = window.setInterval(function() {
-          // Every 5 seconds, poll at the address to check for any status changes
-          host.pollServer(function(returnedHost) {
-            // Check if the host is currently online
-            if (returnedHost.online) {
-              hostCell.classList.remove('host-cell-inactive');
-            } else {
-              hostCell.classList.add('host-cell-inactive');
-            }
-            updateHostStatusIndicator(returnedHost);
-          });
-        }, 5000);
-      });
-    }
-  }, function(failedRefreshInfo) {
-    console.error('%c[index.js, beginBackgroundPollingOfHost]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo + '! Failed server was: ' + '\n', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-
-    // Set host to offline and clear the app list cache
+  endBackgroundPollingOfHost(host);
+  if (isInGame) return;
+  var uid = host.serverUid;
+  var scope = createMenuRequestScope();
+  hostPollScopes[uid] = scope;
+  var current = function() {
+    return scope.active && !isInGame && hostPollScopes[uid] === scope &&
+      hosts[uid] === host;
+  };
+  var update = function() {
+    if (!current()) return;
+    var cell = document.getElementById('host-' + uid);
+    if (cell) cell.classList.toggle('host-cell-inactive', !host.online);
+    updateHostStatusIndicator(host);
+  };
+  var schedule = function() {
+    if (!current()) return;
+    activePolls[uid] = window.setTimeout(function() {
+      delete activePolls[uid];
+      if (!current()) return;
+      host.pollServer(function() { update(); schedule(); }, scope);
+    }, 5000);
+  };
+  host.refreshServerInfo(scope).then(function() {
+    if (!current()) return;
+    host.online = true;
+    host._consecutivePollFailures = 0;
+    update();
+    if (host.online) schedule();
+    else host.pollServer(function() { update(); schedule(); }, scope);
+  }, function() {
+    if (!current()) return;
     host.online = false;
     host._memCachedApplist = null;
-
-    // Reset poll state so that recovery polls from the interval below start with
-    // a clean slate. Without this, stale _pollCompletionCallbacks entries from
-    // previous (leaked) intervals can block the deduplication guard and prevent
-    // pollServer from ever starting a new poll.
-    // Note: resetting _consecutivePollFailures to 0 here is always safe. If the
-    // host was previously online, this counter was already 0 (it is reset to 0 on
-    // every successful poll). Online *recovery* (host.online = true) is set
-    // unconditionally in pollServer's success callback regardless of this counter;
-    // the counter only gates the *offline* direction (host.online = false after
-    // >= 2 consecutive failures inside pollServer), so resetting it here does not
-    // interfere with future offline detection either.
-    host._consecutivePollFailures = 0;
-    host._pollCompletionCallbacks = [];
-
-    // Update the UI to show the host as offline
-    var hostCell = document.querySelector('#host-' + host.serverUid);
-    if (hostCell) {
-      hostCell.classList.add('host-cell-inactive');
-    }
-    updateHostStatusIndicator(host);
-
-    // Start background polling to detect when the host comes back online
-    activePolls[host.serverUid] = window.setInterval(function() {
-      host.pollServer(function(returnedHost) {
-        if (returnedHost.online) {
-          if (hostCell) hostCell.classList.remove('host-cell-inactive');
-        } else {
-          if (hostCell) hostCell.classList.add('host-cell-inactive');
-        }
-        updateHostStatusIndicator(returnedHost);
-      });
-    }, 5000);
+    update();
+    schedule();
   });
 }
 
 function startPollingHosts() {
-  for (var hostUID in hosts) {
-    beginBackgroundPollingOfHost(hosts[hostUID]);
-  }
+  if (isInGame) return;
+  for (var uid in hosts) beginBackgroundPollingOfHost(hosts[uid]);
 }
 
 function endBackgroundPollingOfHost(host) {
-  console.log('%c[index.js, endBackgroundPollingOfHost]', 'color: green;', 'Stopping background polling of host ' + host.serverUid, host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-  // Clear the host's polling interval and remove it from the activePolls object
-  window.clearInterval(activePolls[host.serverUid]);
-  delete activePolls[host.serverUid];
+  var uid = host.serverUid;
+  if (hostPollScopes[uid]) {
+    hostPollScopes[uid].cancel();
+    delete hostPollScopes[uid];
+  }
+  window.clearTimeout(activePolls[uid]);
+  delete activePolls[uid];
+  host._pollCompletionCallbacks = [];
 }
 
 function stopPollingHosts() {
-  for (var hostUID in hosts) {
-    endBackgroundPollingOfHost(hosts[hostUID]);
+  for (var uid in hostPollScopes) {
+    hostPollScopes[uid].cancel();
+    delete hostPollScopes[uid];
   }
+  for (var activeUid in activePolls) window.clearTimeout(activePolls[activeUid]);
+  activePolls = {};
+  for (var hostUid in hosts) hosts[hostUid]._pollCompletionCallbacks = [];
 }
 
 function snackbarLog(givenMessage) {
@@ -507,9 +458,7 @@ function hostChosen(host) {
 
   // If the host is already offline or fails to connect, notify the user.
   if (!host.online) {
-    // Let the user know what to do to bring the host back online and until then, we'll be back to the previous view.
-    console.error('%c[index.js, hostChosen]', 'color: green;', 'Error: Connection to host failed or host is offline!');
-    snackbarLogLong('Failed to connect to the host. Ensure the host is online, Sunshine is running on your PC or GameStream is enabled in GeForce Experience SHIELD settings.');
+    WakeHost.open(host);
     return;
   }
 
@@ -1028,6 +977,10 @@ function addHostToGrid(host, ismDNSDiscovered) {
 
   // Append the host status indicator to the host container
   hostContainer.append(hostStatusIndicator);
+  hostContainer.append($('<span>', {
+    id: 'host-wake-' + host.serverUid, class: 'host-wake-hint',
+    text: host.online ? 'PC menu · Wake-on-LAN' : 'Offline · OK: Wake PC'
+  }));
 
   // Set initial status
   updateHostStatusIndicator(host);
@@ -1070,9 +1023,11 @@ function addHostToGrid(host, ismDNSDiscovered) {
 
 // Function to correctly update and store the valid MAC address of the host in IndexedDB
 function updateMacAddress(host) {
+  if (!normalizeWakeMac(host.macAddress)) return;
   getData('hosts', function(previousValue) {
+    if (isInGame || hosts[host.serverUid] !== host) return;
     var dbHosts = previousValue.hosts != null ? previousValue.hosts : {};
-    if (host.macAddress != '00:00:00:00:00:00') {
+    if (normalizeWakeMac(host.macAddress)) {
       if (dbHosts[host.serverUid] && dbHosts[host.serverUid].macAddress != host.macAddress) {
         console.log('%c[index.js, updateMacAddress]', 'color: green;', 'Updated MAC address for host ' + host.hostname + ' from ' + dbHosts[host.serverUid].macAddress + ' to ' + host.macAddress);
         if (hosts[host.serverUid]) {
@@ -1126,11 +1081,9 @@ function hostMenuDialog(host) {
     {
       id: 'wakeHost-' + host.hostname,
       class: 'host-menu-button',
-      text: 'Wake PC',
+      text: 'Wake PC (Wake-on-LAN)',
       action: function() {
-        // Send a Wake-on-LAN request to the target host
-        snackbarLogLong('Sending a Wake On LAN request to ' + host.hostname + '...');
-        host.sendWOL();
+        setTimeout(function() { WakeHost.open(host); }, 100);
       }
     },
     {
@@ -1837,6 +1790,7 @@ function showAppsMode() {
   $('#wasm_module').css('display', 'none');
 
   isInGame = false;
+  SessionDiagnostics.finish('Returned to menu');
   // A failed launch can return here without ever creating a native stream, so
   // there may be no cleanup callback to close the gesture-created context.
   stopAudioScheduler(true);
@@ -2073,6 +2027,9 @@ function showStreamMode() {
   $('#loadingSpinner').css('display', 'inline-block');
 
   isInGame = true;
+  stopPollingHosts();
+  WakeHost.cancel();
+  SessionDiagnostics.start();
   stopDisplayRefreshEstimator();
   // Stop the JavaScript gamepad polling for the duration of the stream. It runs
   // on the main thread alongside the media element, and the native input thread

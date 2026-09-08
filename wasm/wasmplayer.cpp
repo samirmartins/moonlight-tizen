@@ -1151,7 +1151,8 @@ int MoonlightInstance::VidDecSubmitDecodeUnitImpl(PDECODE_UNIT decodeUnit) {
       AddVideoStats(m_LastWndVideoStats, lastTwoWndStats);
       AddVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
       // Convert the aggregated stats to a display string
-      FormatVideoStats(lastTwoWndStats, s_StatString.data(), s_StatString.length());
+      if (g_Instance->m_OverlayStatsEnabled.load(std::memory_order_relaxed)) {
+        FormatVideoStats(lastTwoWndStats, s_StatString.data(), s_StatString.length());
       // Send the formatted stats string to the JS frontend for overlay display.
       // This must not be the synchronous variant: it would block the decoder
       // thread until the main thread has finished the DOM update, which is
@@ -1161,6 +1162,14 @@ int MoonlightInstance::VidDecSubmitDecodeUnitImpl(PDECODE_UNIT decodeUnit) {
       PostToJsAsync(s_PendingStatMsg);
       // Clear the stats string buffer for the next use
       std::fill(s_StatString.begin(), s_StatString.end(), 0);
+      }
+      const uint32_t generation =
+        g_Instance->m_DiagnosticsGeneration.load(std::memory_order_relaxed);
+      if (generation != 0) {
+        // Non-overlapping windows for session totals; never sum the overlay's
+        // overlapping windows or mistake a sampled p95 for a session p95.
+        PublishDiagnostics(m_ActiveWndVideoStats, windowMs, statsNowMs, generation);
+      }
       total_bytes = 0;
       memcpy(&m_LastWndVideoStats, &m_ActiveWndVideoStats,
              sizeof(m_ActiveWndVideoStats));
@@ -1587,16 +1596,64 @@ void MoonlightInstance::FormatVideoStats(VIDEO_STATS& stats, char* output, int l
   }
 }
 
-void MoonlightInstance::TogglePerformanceStats() {
-  // Toggle the performance stats overlay flag
-  m_PerformanceStatsEnabled = !m_PerformanceStatsEnabled;
+void MoonlightInstance::PublishDiagnostics(VIDEO_STATS& stats, uint32_t windowMs,
+                                          uint32_t nowMs, uint32_t generation) {
+  // This function is reached only inside the instrumented specialization and
+  // only for an explicitly armed session. It never changes playback state.
+  const auto host = mltelemetry::Summarize(stats.hostIntervalsUs, 1000.0);
+  const auto assembly = mltelemetry::Summarize(stats.assemblyUs, 1000.0);
+  const auto append = mltelemetry::Summarize(stats.appendUs, 1000.0);
+  const auto cadence = mltelemetry::Summarize(stats.appendIntervalsUs, 1000.0);
+  uint32_t rtt = 0, variance = 0;
+  const bool rttValid = LiGetEstimatedRttInfo(&rtt, &variance);
+  const auto position = g_Instance->m_PipelinePositionUs.load(std::memory_order_acquire);
+  const auto at = g_Instance->m_PipelinePositionAtMs.load(std::memory_order_relaxed);
+  const double age = position == kNoPipelinePosition ? -1.0 :
+    (nowMs >= at ? static_cast<double>(nowMs - at) : -1.0);
+  const double lead = stats.pipelineClockSamples
+    ? stats.pipelineClockLeadSumMs / stats.pipelineClockSamples : 0.0;
+  const double encode = stats.framesWithHostProcessingLatency
+    ? stats.totalHostProcessingLatency / 10.0 / stats.framesWithHostProcessingLatency : -1.0;
+  char message[2048];
+  const int length = snprintf(message, sizeof(message),
+    "DiagMsg: {\"gen\":%u,\"ms\":%u,\"w\":%u,\"h\":%u,\"fmt\":%u,\"fps\":%u,"
+    "\"bytes\":%.0f,\"rx\":%u,\"sub\":%u,\"total\":%u,\"lost\":%u,\"rej\":%u,\"rec\":%u,"
+    "\"rtt\":%.0f,\"rttVar\":%u,\"hostN\":%u,\"hostLate\":%u,\"hostMean\":%.3f,"
+    "\"hostP95\":%.3f,\"enc\":%.3f,\"encMax\":%.3f,"
+    "\"asm\":%.3f,\"asmP95\":%.3f,\"asmMax\":%.3f,"
+    "\"app\":%.3f,\"appP95\":%.3f,\"appMax\":%.3f,"
+    "\"cadN\":%u,\"cadLate\":%u,\"cadP95\":%.3f,\"cadMax\":%.3f,"
+    "\"leadN\":%u,\"lead\":%.3f,\"leadAbsMax\":%.3f,"
+    "\"filtered\":%.3f,\"target\":%.3f,\"servo\":%u,\"settle\":%u,"
+    "\"clockAge\":%.3f,\"step\":%.5f}",
+    generation, windowMs, s_Width, s_Height, s_VideoFormat, s_Framerate,
+    static_cast<double>(total_bytes), stats.receivedFrames, stats.renderedFrames,
+    stats.totalFrames, stats.networkDroppedFrames, stats.pacerDroppedFrames,
+    stats.presentationRecoveries, rttValid ? static_cast<double>(rtt) : -1.0, variance,
+    stats.hostIntervalCount, stats.hostLateIntervals, host.mean, host.p95,
+    encode, stats.maxHostProcessingLatency / 10.0,
+    assembly.mean, assembly.p95, assembly.maximum,
+    append.mean, append.p95, append.maximum,
+    stats.appendIntervalCount, stats.appendLateIntervals, cadence.p95, cadence.maximum,
+    stats.pipelineClockSamples, lead, static_cast<double>(stats.pipelineClockLeadMaxMs),
+    s_leadFilteredMs, s_leadTargetMs, s_leadTargetSet ? 1u : 0u,
+    static_cast<unsigned>(s_leadSamples), age,
+    std::chrono::duration<double, std::milli>(s_ptsStep).count());
+  if (length > 0 && length < sizeof(message)) PostToJsAsync(message);
+}
 
-  // Notify the JS code that performance stats overlay is enabled or disabled
-  if (m_PerformanceStatsEnabled) {
-    PostToJs(std::string("StatMsg: ") + s_StatString.data());
-  } else {
-    PostToJs(std::string("NoStatMsg: "));
-  }
+void MoonlightInstance::TogglePerformanceStats() {
+  const bool visible = !m_OverlayStatsEnabled.load();
+  m_OverlayStatsEnabled = visible;
+  m_PerformanceStatsEnabled = visible || m_DiagnosticsGeneration.load() != 0;
+  // State changes are distinct from queued samples: an old sample cannot turn
+  // collection or the presentation observer back on after the user disabled it.
+  PostToJs(visible ? "OverlayState: 1" : "OverlayState: 0");
+}
+
+void MoonlightInstance::SetDiagnostics(uint32_t generation) {
+  m_DiagnosticsGeneration = generation;
+  m_PerformanceStatsEnabled = generation != 0 || m_OverlayStatsEnabled.load();
 }
 
 void MoonlightInstance::WaitFor(std::condition_variable* variable, std::function<bool()> condition) {

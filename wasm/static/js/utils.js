@@ -150,6 +150,31 @@ if (typeof module !== 'undefined' && module.exports) {
 }
 
 NvHTTP.prototype = {
+  // Stopping a menu scope clears deadlines and suppresses XML/fallbacks.
+  // Never cancel a global HTTP job from a menu timeout during a stream.
+  refreshServerInfoScoped: function(address, scope) {
+    var self = this;
+    var base = formatAddressForUrl(address);
+    function read(secure) {
+      if (!scope.active) return Promise.reject(new Error('Menu request cancelled'));
+      var url = (secure ? 'https://' : 'http://') + base + ':' +
+        (secure ? self.httpsPort : self.httpPort) + '/serverinfo?' + self._buildUidStr();
+      return scope.request(function() {
+        return sendMessage('openUrl', [url, self.ppkstr, false]);
+      }, 5000).then(function(xml) {
+        if (!scope.active) throw new Error('Menu request cancelled');
+        if (!self._parseServerInfo(xml)) {
+          if (secure) return read(false);
+          throw new Error('Invalid server response');
+        }
+      }, function(error) {
+        if (scope.active && secure && error == -100) return read(false);
+        throw error;
+      });
+    }
+    return read(this.ppkstr != null);
+  },
+
   getUid: function() {
     return this.isNvidiaServerSoftware ? '0123456789ABCDEF' : this.clientUid;
   },
@@ -169,7 +194,8 @@ NvHTTP.prototype = {
   },
 
   // Refreshes the server info using the base URL. This is useful for testing whether we can successfully ping a host at the base URL
-  refreshServerInfo: function() {
+  refreshServerInfo: function(scope) {
+    if (scope) return this.refreshServerInfoScoped(this.address, scope);
     if (this.ppkstr == null) {
       // Use HTTP if we have no pinned cert
       return this._openUrlWithTimeout(this._baseUrlHttp + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(retHttp) {
@@ -201,7 +227,8 @@ NvHTTP.prototype = {
   },
 
   // Refreshes the server info using a given address. This is useful for testing whether we can successfully ping a host at a given address
-  refreshServerInfoAtAddress: function(givenAddress) {
+  refreshServerInfoAtAddress: function(givenAddress, scope) {
+    if (scope) return this.refreshServerInfoScoped(givenAddress, scope);
     var urlAddr = formatAddressForUrl(givenAddress);
     if (this.ppkstr == null) {
       // Use HTTP if we have no pinned cert
@@ -236,7 +263,8 @@ NvHTTP.prototype = {
   },
 
   // Called every few seconds to poll the server for updated info
-  pollServer: function(onComplete) {
+  pollServer: function(onComplete, scope) {
+    if (scope && !scope.active) return;
     // Pend this callback on completion
     this._pollCompletionCallbacks.push(onComplete);
 
@@ -245,6 +273,8 @@ NvHTTP.prototype = {
       // Don't start another, because the one in progress will alert our caller too
       return;
     }
+    // Keep ownership of this poll's callbacks across a stop/restart.
+    var completions = this._pollCompletionCallbacks;
 
     // Check if a stream session is already in progress
     if (isInGame === true) {
@@ -258,6 +288,7 @@ NvHTTP.prototype = {
     }
 
     this.selectServerAddress(function(successfulAddress) {
+      if (isInGame || (scope && !scope.active)) return;
       // Successfully determined server address. Update base URL
       var urlAddr = formatAddressForUrl(successfulAddress);
       this.address = successfulAddress;
@@ -272,7 +303,7 @@ NvHTTP.prototype = {
       // Poll for the app list every 10 successful server info polls
       // Not including the first one to avoid PCs taking a while to show as online initially
       if (this.paired && this._pollCount++ % 10 === 1) {
-        this.getAppListWithCacheFlush();
+        this.getAppListWithCacheFlush(scope).catch(function() {});
       }
 
       this._consecutivePollFailures = 0;
@@ -280,10 +311,11 @@ NvHTTP.prototype = {
 
       // Call all pending completion callbacks
       var completion;
-      while ((completion = this._pollCompletionCallbacks.pop())) {
+      while ((completion = completions.pop())) {
         completion(this);
       }
     }.bind(this), function() {
+      if (isInGame || (scope && !scope.active)) return;
       if (++this._consecutivePollFailures >= 2) {
         this.online = false;
         this._memCachedApplist = null;
@@ -291,14 +323,14 @@ NvHTTP.prototype = {
 
       // Call all pending completion callbacks
       var completion;
-      while ((completion = this._pollCompletionCallbacks.pop())) {
+      while ((completion = completions.pop())) {
         completion(this);
       }
-    }.bind(this));
+    }.bind(this), scope);
   },
 
   // Initially pings the server to try and figure out if it's routable by any means
-  selectServerAddress: function(onSuccess, onFailure) {
+  selectServerAddress: function(onSuccess, onFailure, scope) {
     // Build a deduplicated, validated list of candidate addresses to try in order.
     var seen = {};
     var candidates = [];
@@ -311,6 +343,7 @@ NvHTTP.prototype = {
     };
 
     addCandidate(this.address);
+    if (scope) addCandidate(this.localAddress);
     // Only append '.local' if the hostname doesn't already end with it
     var localSuffix = this.hostname.endsWith('.local') ? this.hostname : this.hostname + '.local';
     addCandidate(localSuffix);
@@ -318,13 +351,15 @@ NvHTTP.prototype = {
     addCandidate(this.userEnteredAddress);
 
     var tryNext = function(index) {
+      if (scope && !scope.active) return;
       if (index >= candidates.length) {
         console.error('%c[utils.js, selectServerAddress]', 'color: gray;', 'Error: Failed to contact the ' + this.hostname + '!', this);
         onFailure();
         return;
       }
       var addr = candidates[index];
-      this.refreshServerInfoAtAddress(addr).then(function() {
+      this.refreshServerInfoAtAddress(addr, scope).then(function() {
+        if (scope && !scope.active) return;
         onSuccess(addr);
       }.bind(this), function() {
         tryNext.call(this, index + 1);
@@ -393,7 +428,9 @@ NvHTTP.prototype = {
 
     // Retrieve the local IP address and MAC address of the host
     this.localAddress = $root.find('LocalIP').text().trim();
-    this.macAddress = $root.find('mac').text().trim();
+    // Missing/zero addresses must not erase the last physical NIC we learned.
+    var learnedMac = normalizeWakeMac($root.find('mac').text());
+    if (learnedMac) this.macAddress = learnedMac;
 
     // This is an extension which is not present in GFE. It is present for Sunshine to be able
     // to support dynamic HTTP WAN ports without requiring the user to manually enter the port.
@@ -487,15 +524,21 @@ NvHTTP.prototype = {
     });
   },
 
-  getAppListWithCacheFlush: function() {
-    return withTimeout(
+  getAppListWithCacheFlush: function(scope) {
+    var request = scope
+      ? scope.request(() => sendMessage('openUrl', [
+          this._baseUrlHttps + '/applist?' + this._buildUidStr(), this.ppkstr, false
+        ]), 10000)
+      : withTimeout(
       sendMessage('openUrl', [
         this._baseUrlHttps + '/applist?' + this._buildUidStr(), this.ppkstr, false
       ]),
       10000,
       'Timeout retrieving app list',
       function() { sendMessage('cancelRequest', []); }
-    ).then(function(ret) {
+    );
+    return request.then(function(ret) {
+      if (scope && !scope.active) throw new Error('Menu request cancelled');
       $xml = this._parseXML(ret);
       $root = $xml.find('root');
 
@@ -675,7 +718,9 @@ NvHTTP.prototype = {
   },
 
   sendWOL: function() {
-    return sendMessage('wakeOnLan', [this.macAddress]);
+    var mac = normalizeWakeMac(this.wakeMacOverride || this.macAddress);
+    if (!mac) return Promise.reject(new Error('Enter the physical network adapter MAC address.'));
+    return sendMessage('wakeOnLan', [mac]);
   },
 
   _buildUidStr: function() {
