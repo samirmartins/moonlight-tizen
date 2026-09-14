@@ -187,6 +187,7 @@ static double s_leadFilteredMs = 0.0;
 static int s_leadSamples = 0;
 static double s_leadTargetMs = 0.0;
 static bool s_leadTargetSet = false;
+static mlvideo::CalibrationRetry s_calibrationRetry;
 
 // One-shot log guard for the pipeline clock, so its absence is visible in the
 // log by omission rather than its presence being repeated every update.
@@ -285,13 +286,8 @@ void MoonlightInstance::SourceListener::OnPlaybackPositionChanged(
     return;
   }
 
-  // Order matters: publish the timestamp first, then the position. A reader
-  // that catches the pair mid-update then extrapolates from a slightly stale
-  // timestamp, which overstates the position by microseconds. The reverse order
-  // would pair a new timestamp with an old position and understate it by a
-  // whole reporting interval.
-  m_Instance->m_PipelinePositionAtMs.store(LiGetMillis(), std::memory_order_relaxed);
-  m_Instance->m_PipelinePositionUs.store(positionUs, std::memory_order_release);
+  // Publish a coherent pair; contention never makes this callback wait.
+  if (!m_Instance->m_PipelinePosition.Store(positionUs, LiGetMillis())) return;
 
   // The audio scheduler needs a video clock to servo against, and this is a
   // better one than the media element's currentTime: Samsung documents it as the
@@ -521,6 +517,8 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
   s_leadTargetMs = 0.0;
   s_leadTargetSet = false;
 
+  s_calibrationRetry.Reset();
+
   // Reset the IDR request throttle for the new stream
   s_lastIdrRequestMs = 0;
 
@@ -530,8 +528,9 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
   s_hasLastAppendTime = false;
   s_loggedPipelineClock = false;
   s_loggedSpsFixup = false;
-  g_Instance->m_PipelinePositionUs.store(kNoPipelinePosition, std::memory_order_release);
-  g_Instance->m_PipelinePositionAtMs.store(0, std::memory_order_relaxed);
+  // Setup is outside streaming. Wait only here if a final source callback is
+  // completing its publication; normal readers and callbacks never wait.
+  while (!g_Instance->m_PipelinePosition.Store(kNoPipelinePosition, 0)) std::this_thread::yield();
 
   // Preallocate space for the performance stats string. The cadence block added
   // several lines, and FormatVideoStats() asserts rather than truncating.
@@ -716,8 +715,8 @@ static TimeStamp NextPacketPts(PDECODE_UNIT decodeUnit, TimeStamp previousPts) {
   // of the exercise: without it the recovery discards frames and changes
   // nothing, and the next stall arrives sooner than the last.
   if (s_ptsReanchorRequested.exchange(false, std::memory_order_acq_rel)) {
-    const int64_t positionUs =
-      g_Instance->m_PipelinePositionUs.load(std::memory_order_acquire);
+    const auto clock = g_Instance->m_PipelinePosition.Read();
+    const int64_t positionUs = clock.positionUs;
 
     s_lastHostPtsMs = hostMs;
     s_ptsFrameNumberRef = frameNumber;
@@ -728,6 +727,7 @@ static TimeStamp NextPacketPts(PDECODE_UNIT decodeUnit, TimeStamp previousPts) {
     // afterwards has to be measured again rather than carried across.
     s_leadSamples = 0;
     s_leadTargetSet = false;
+    s_calibrationRetry.Reset();
 
     if (positionUs != MoonlightInstance::kNoPipelinePosition) {
       // The position is only reported about once a second, so the stored value
@@ -735,8 +735,7 @@ static TimeStamp NextPacketPts(PDECODE_UNIT decodeUnit, TimeStamp previousPts) {
       // timeline that far into the past, and frames would arrive already due -
       // which is the failure this is supposed to prevent, not cause. Advance it
       // to now at real time, exactly as the lead measurement does.
-      const uint64_t reportedAtMs =
-        g_Instance->m_PipelinePositionAtMs.load(std::memory_order_relaxed);
+      const uint64_t reportedAtMs = clock.atMs;
       const uint64_t nowMs = LiGetMillis();
       const double sinceReportMs =
         (nowMs >= reportedAtMs) ? (double)(nowMs - reportedAtMs) : 0.0;
@@ -897,8 +896,8 @@ void MoonlightInstance::RecordPipelineLead(
     return;
   }
 
-  // Extrapolate the reported position to now at real time. Playback rate is
-  // never altered here, so 1:1 is exact between updates.
+  // Extrapolate between reports. This is an estimate, not measured queue depth
+  // or input-to-photon latency: low-latency player time follows submitted PTS.
   double sinceReportMs = (nowMs >= reportedAtMs) ? (double)(nowMs - reportedAtMs) : 0.0;
   double positionMs = (positionUs / 1000.0) + sinceReportMs;
 
@@ -914,13 +913,12 @@ void MoonlightInstance::RecordPipelineLead(
   }
   if (s_leadSamples < kLeadSettleSamples) {
     s_leadSamples++;
-    if (s_leadSamples == kLeadSettleSamples && !s_leadTargetSet &&
-        s_leadFilteredMs >= kLeadTargetMinMs && s_leadFilteredMs <= kLeadTargetMaxMs) {
-      s_leadTargetMs = s_leadFilteredMs;
-      s_leadTargetSet = true;
-      MoonlightInstance::ClLogMessage(
-        "Holding the video timeline at %.1f ms of pipeline lead\n", s_leadTargetMs);
-    }
+  }
+  if (!s_leadTargetSet && s_calibrationRetry.Ready(s_leadSamples, s_leadFilteredMs, leadMs)) {
+    s_leadTargetMs = s_leadFilteredMs;
+    s_leadTargetSet = true;
+    MoonlightInstance::ClLogMessage(
+      "Holding the video timeline at %.1f ms of pipeline lead\n", s_leadTargetMs);
   }
 
   if (collectStats) {
@@ -1390,10 +1388,9 @@ int MoonlightInstance::VidDecSubmitDecodeUnitImpl(PDECODE_UNIT decodeUnit) {
       RecordAppendCadence(m_ActiveWndVideoStats);
     }
 
-    const int64_t positionUs =
-      g_Instance->m_PipelinePositionUs.load(std::memory_order_acquire);
-    const uint64_t reportedAtMs =
-      g_Instance->m_PipelinePositionAtMs.load(std::memory_order_relaxed);
+    const auto clock = g_Instance->m_PipelinePosition.Read();
+    const int64_t positionUs = clock.positionUs;
+    const uint64_t reportedAtMs = clock.atMs;
     RecordPipelineLead(m_ActiveWndVideoStats, framePts, CollectStats,
                        positionUs, reportedAtMs, appendNowMs);
     NotePresentationProgress(CollectStats, positionUs, appendNowMs);
@@ -1606,8 +1603,9 @@ void MoonlightInstance::PublishDiagnostics(VIDEO_STATS& stats, uint32_t windowMs
   const auto cadence = mltelemetry::Summarize(stats.appendIntervalsUs, 1000.0);
   uint32_t rtt = 0, variance = 0;
   const bool rttValid = LiGetEstimatedRttInfo(&rtt, &variance);
-  const auto position = g_Instance->m_PipelinePositionUs.load(std::memory_order_acquire);
-  const auto at = g_Instance->m_PipelinePositionAtMs.load(std::memory_order_relaxed);
+  const auto clock = g_Instance->m_PipelinePosition.Read();
+  const auto position = clock.positionUs;
+  const auto at = clock.atMs;
   const double age = position == kNoPipelinePosition ? -1.0 :
     (nowMs >= at ? static_cast<double>(nowMs - at) : -1.0);
   const double lead = stats.pipelineClockSamples
@@ -1665,19 +1663,7 @@ DECODER_RENDERER_CALLBACKS MoonlightInstance::s_DrCallbacks = {
   .setup = MoonlightInstance::VidDecSetup,
   .cleanup = MoonlightInstance::VidDecCleanup,
   .submitDecodeUnit = MoonlightInstance::VidDecSubmitDecodeUnit,
-  // DIRECT_SUBMIT hands each frame over on the thread that received its last
-  // packet, instead of queueing it for a decoder thread to pick up.
-  //
-  // That queue was costing more than it was worth. Measured on hardware with a
-  // still picture, where frames are two packets long and network latency varies
-  // by a millisecond, the interval between frames reaching the platform still
-  // varied by nearly ten. A handoff whose far end has to be woken by the
-  // scheduler cannot be tighter than the scheduler is, and on a TV running a
-  // dozen threads across few cores that is not tight. Submitting where the frame
-  // is completed removes the wake-up entirely.
-  //
-  // This is only safe because nothing on the submission path waits: the pacer
-  // that used to hold frames is gone, and the append is attempted once.
+  // Preserve 3.3.8 direct submission without a decoder-thread handoff or queue.
   //
   // One slice per frame. Slicing exists to let a multithreaded software decoder
   // work on a frame in parallel; this pipeline hands the bitstream to the TV's

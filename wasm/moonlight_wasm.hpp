@@ -9,6 +9,7 @@
 #include <Limelight.h>
 #include "lib.hpp"
 #include "video_telemetry.hpp"
+#include "video_timing.hpp"
 
 #include "samsung/wasm/elementary_media_stream_source.h"
 #include "samsung/wasm/elementary_media_stream_source_listener.h"
@@ -217,8 +218,7 @@ class MoonlightInstance {
   // A negative position means the pipeline has not reported yet. Everything
   // downstream must treat that as "no measurement", never as position zero.
   static constexpr int64_t kNoPipelinePosition = -1;
-  std::atomic<int64_t> m_PipelinePositionUs;
-  std::atomic<uint64_t> m_PipelinePositionAtMs;
+  mlvideo::PositionClock m_PipelinePosition;
 
   private:
     using EmssReadyState = samsung::wasm::ElementaryMediaStreamSource::ReadyState;

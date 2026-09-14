@@ -7,6 +7,26 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.3.9
+
+An incremental robustness and efficiency update. Direct video submission and the
+normal PTS rate calculation are preserved; no new frame queue is introduced.
+
+### Fixed
+- Reads playback position and its timestamp as one coherent snapshot, avoiding
+  mismatched clock samples across threads without making streaming callbacks wait
+- Retries video-clock calibration after an unsuccessful initial attempt, once
+  60 consecutive valid samples are available
+
+### Improved
+- Skips redundant RTP duplicate searches when packet ordering proves them unnecessary,
+  retaining the original search for other cases, including FEC recovery
+- Adds regression tests for concurrent clock publication, calibration retry and
+  preservation of the baseline playback paths
+
+Audio, input, rumble, image-quality settings, Wake-on-LAN and the diagnostic UI
+are unchanged. These targeted fixes do not guarantee smoother playback on every TV.
+
 ## v3.3.8
 
 This release adds opt-in session diagnosis and completes Wake-on-LAN without

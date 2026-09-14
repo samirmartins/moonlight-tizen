@@ -36,9 +36,7 @@ using EmssRenderingMode = samsung::wasm::ElementaryMediaStreamSource::RenderingM
 MoonlightInstance* g_Instance;
 
 MoonlightInstance::MoonlightInstance()
-  : m_PipelinePositionUs(kNoPipelinePosition),
-    m_PipelinePositionAtMs(0),
-    m_PerformanceStatsEnabled(false),
+  : m_PerformanceStatsEnabled(false),
     m_Running(false),
     m_ConnectionThread(0),
     m_InputThread(0),

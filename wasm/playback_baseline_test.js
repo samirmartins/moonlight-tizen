@@ -1,7 +1,7 @@
 'use strict';
 const assert = require('assert'), fs = require('fs'), cp = require('child_process');
 const current = fs.readFileSync('wasm/wasmplayer.cpp', 'utf8');
-const baseline = cp.execFileSync('git', ['show', 'v3.3.7:wasm/wasmplayer.cpp'], {encoding: 'utf8'});
+const baseline = cp.execFileSync('git', ['show', 'v3.3.8:wasm/wasmplayer.cpp'], {encoding: 'utf8'});
 function section(text, begin, end) {
   const start = text.indexOf(begin);
   assert.ok(start !== -1);
@@ -26,17 +26,20 @@ function removeInstrumentedBlocks(text) {
 }
 const template = 'template<bool CollectStats>\nint MoonlightInstance::VidDecSubmitDecodeUnitImpl';
 const wrapper = 'int MoonlightInstance::VidDecSubmitDecodeUnit(';
-assert.strictEqual(
-  removeInstrumentedBlocks(section(current, template, wrapper)),
-  removeInstrumentedBlocks(section(baseline, template, wrapper)),
-  'non-instrumented submit path must remain identical to v3.3.7');
+assert.strictEqual(section(current, '  // Assemble the packet.', '  if (appended) {'),
+                   section(baseline, '  // Assemble the packet.', '  if (appended) {'),
+                   'bitstream assembly, SPS fixup and AppendPacket parameters stay unchanged');
 assert.strictEqual(section(current, wrapper, 'void MoonlightInstance::AddVideoStats'),
                    section(baseline, wrapper, 'void MoonlightInstance::AddVideoStats'));
-// Everything before the telemetry submit template includes PTS, servo,
-// playback-position callbacks, setup and recovery: no changes permitted.
-assert.strictEqual(current.slice(0, current.indexOf(template)), baseline.slice(0, baseline.indexOf(template)));
-assert.strictEqual(cp.execFileSync('git', ['diff', 'v3.3.7', '--',
-  'moonlight-common-c', 'wasm/auddec.cpp', 'wasm/audio_ring.hpp',
+// Revised 3.3.9 changes clock snapshots/calibration only. Freeze
+// the unrelated paths, rather than claiming playback is identical to 3.3.8.
+assert.strictEqual(section(current, '  int framesElapsed =', '// Folds the interval since the previous append'),
+                   section(baseline, '  int framesElapsed =', '// Folds the interval since the previous append'),
+                   'normal PTS rate window and servo correction must match 3.3.8');
+assert.match(current, /\.capabilities = CAPABILITY_DIRECT_SUBMIT \| CAPABILITY_SLICES_PER_FRAME\(1\)/);
+assert.strictEqual(cp.execFileSync('git', ['diff', 'v3.3.8', '--',
+  'wasm/auddec.cpp', 'wasm/audio_ring.hpp',
+  'moonlight-common-c/src/VideoDepacketizer.c', 'moonlight-common-c/src/VideoStream.c',
   'wasm/platform/audio.js', 'wasm/platform/audio-worklet.js',
   'wasm/platform/gamepad.js', 'wasm/gamepad.cpp', 'wasm/platform/display.js'], {encoding: 'utf8'}), '');
-console.log('playback_baseline_test: ok (v3.3.7 non-instrumented playback preserved)');
+console.log('playback_baseline_test: ok (3.3.8 PTS window, direct submit, bitstream, audio, input and display preserved)');

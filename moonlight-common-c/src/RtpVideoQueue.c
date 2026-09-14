@@ -131,7 +131,13 @@ static bool queuePacket(PRTP_VIDEO_QUEUE queue, PRTPV_QUEUE_ENTRY newEntry, PRTP
         outOfSequence = false;
 
         // Check for duplicates
-        entry = queue->pendingFecBlockList.head;
+        // After reordering, a newly highest received sequence cannot duplicate
+        // any pending received packet. Fall back if reconstructed entries are
+        // present: they are not covered by receivedHighestSequenceNumber.
+        entry = (!isFecRecovery && queue->pendingFecBlockList.count > 0 &&
+                 queue->receivedDataPackets + queue->receivedParityPackets == queue->pendingFecBlockList.count &&
+                 isBefore16(queue->receivedHighestSequenceNumber, packet->sequenceNumber))
+              ? NULL : queue->pendingFecBlockList.head;
         while (entry != NULL) {
             if (packet->sequenceNumber == entry->packet->sequenceNumber) {
                 return false;
