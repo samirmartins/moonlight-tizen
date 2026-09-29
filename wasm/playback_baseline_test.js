@@ -41,5 +41,7 @@ assert.strictEqual(cp.execFileSync('git', ['diff', 'v3.3.8', '--',
   'wasm/auddec.cpp', 'wasm/audio_ring.hpp',
   'moonlight-common-c/src/VideoDepacketizer.c', 'moonlight-common-c/src/VideoStream.c',
   'wasm/platform/audio.js', 'wasm/platform/audio-worklet.js',
-  'wasm/platform/gamepad.js', 'wasm/gamepad.cpp', 'wasm/platform/display.js'], {encoding: 'utf8'}), '');
+  'wasm/gamepad.cpp', 'wasm/platform/display.js'], {encoding: 'utf8'}), '');
+// JS rumble changes in 3.3.10 are covered by rumble_safety_test; input sampling
+// is separately frozen against 3.3.9 by candidate_scope_test.
 console.log('playback_baseline_test: ok (3.3.8 PTS window, direct submit, bitstream, audio, input and display preserved)');

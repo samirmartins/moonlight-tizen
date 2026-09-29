@@ -3,6 +3,7 @@
 #include <http.h>
 #include <errors.h>
 #include <string.h>
+#include <memory>
 
 #include <mkcert.h>
 #include <openssl/bio.h>
@@ -17,24 +18,29 @@ char* g_CertHex;
 
 MessageResult MoonlightInstance::MakeCert() {
   CERT_KEY_PAIR certKeyPair = mkcert_generate();
+  struct CertCleanup {
+    CERT_KEY_PAIR value;
+    ~CertCleanup() { mkcert_free(value); }
+  } cleanup{certKeyPair};
 
-  BIO* bio = BIO_new(BIO_s_mem());
+  std::unique_ptr<BIO, decltype(&BIO_free)> bio(BIO_new(BIO_s_mem()), BIO_free);
+  if (!bio || !certKeyPair.x509 || !certKeyPair.pkey ||
+      PEM_write_bio_X509(bio.get(), certKeyPair.x509) != 1) {
+    return MessageResult::Reject(emscripten::val(std::string("Error serializing certificate")));
+  }
 
-  PEM_write_bio_X509(bio, certKeyPair.x509);
   BUF_MEM* mem = NULL;
-  BIO_get_mem_ptr(bio, &mem);
+  BIO_get_mem_ptr(bio.get(), &mem);
 
   std::string cert(mem->data, mem->length);
 
-  BIO_free(bio);
-
-  BIO* biokey = BIO_new(BIO_s_mem());
-  PEM_write_bio_PrivateKey(biokey, certKeyPair.pkey, NULL, NULL, 0, NULL, NULL);
-  BIO_get_mem_ptr(biokey, &mem);
+  std::unique_ptr<BIO, decltype(&BIO_free)> biokey(BIO_new(BIO_s_mem()), BIO_free);
+  if (!biokey || PEM_write_bio_PrivateKey(biokey.get(), certKeyPair.pkey, NULL, NULL, 0, NULL, NULL) != 1) {
+    return MessageResult::Reject(emscripten::val(std::string("Error serializing private key")));
+  }
+  BIO_get_mem_ptr(biokey.get(), &mem);
 
   std::string pkey(mem->data, mem->length);
-
-  BIO_free(biokey);
 
   emscripten::val ret = emscripten::val::object();
   ret.set("cert", emscripten::val(cert));
@@ -44,29 +50,37 @@ MessageResult MoonlightInstance::MakeCert() {
 }
 
 LoadResult MoonlightInstance::LoadCert(const char* certStr, const char* keyStr) {
-  char* _certStr = strdup(certStr);
-  char* _keyStr = strdup(keyStr);
-
-  BIO* bio = BIO_new_mem_buf(_certStr, -1);
-  if (!(g_Cert = PEM_read_bio_X509(bio, NULL, NULL, NULL))) {
+  // BIO_new_mem_buf borrows the input; both strings outlive these BIOs.
+  std::unique_ptr<BIO, decltype(&BIO_free)> bio(BIO_new_mem_buf(certStr, -1), BIO_free);
+  if (!bio) { return LoadResult::CertErr; }
+  std::unique_ptr<X509, decltype(&X509_free)> cert(
+    PEM_read_bio_X509(bio.get(), NULL, NULL, NULL), X509_free);
+  if (!cert) {
     return LoadResult::CertErr;
   }
-  BIO_free_all(bio);
-
-  bio = BIO_new_mem_buf(_keyStr, -1);
-  if (!(g_PrivateKey = PEM_read_bio_PrivateKey(bio, NULL, NULL, NULL))) {
+  bio.reset(BIO_new_mem_buf(keyStr, -1));
+  if (!bio) { return LoadResult::PrivateKeyErr; }
+  std::unique_ptr<EVP_PKEY, decltype(&EVP_PKEY_free)> key(
+    PEM_read_bio_PrivateKey(bio.get(), NULL, NULL, NULL), EVP_PKEY_free);
+  if (!key) {
     return LoadResult::PrivateKeyErr;
   }
-  BIO_free_all(bio);
-
   // Convert the PEM cert to hex
-  g_CertHex = reinterpret_cast<char*>(malloc((strlen(certStr) * 2) + 1));
-  for (size_t i = 0; i < strlen(certStr); i++) {
-    sprintf(&g_CertHex[i * 2], "%02x", certStr[i]);
+  const size_t certLen = strlen(certStr);
+  char* hex = reinterpret_cast<char*>(malloc((certLen * 2) + 1));
+  if (!hex) { return LoadResult::CertErr; }
+  for (size_t i = 0; i < certLen; i++) {
+    sprintf(&hex[i * 2], "%02x", static_cast<unsigned char>(certStr[i]));
   }
 
-  free(_certStr);
-  free(_keyStr);
+  // Called during HTTP initialization, before requests. Failed loads above
+  // leave the existing credentials untouched and release all temporaries.
+  X509_free(g_Cert);
+  EVP_PKEY_free(g_PrivateKey);
+  free(g_CertHex);
+  g_Cert = cert.release();
+  g_PrivateKey = key.release();
+  g_CertHex = hex;
 
   return LoadResult::Success;
 }

@@ -343,6 +343,9 @@ var _rumbleNextAllowed = new Float64Array(_RUMBLE_MAX_PADS);
 var _rumbleInFlight = new Uint8Array(_RUMBLE_MAX_PADS);
 var _rumbleInFlightSince = new Float64Array(_RUMBLE_MAX_PADS);
 var _rumbleGeneration = new Uint32Array(_RUMBLE_MAX_PADS);
+var _rumbleAttempt = new Uint32Array(_RUMBLE_MAX_PADS);
+var _rumbleRetry = new Uint8Array(_RUMBLE_MAX_PADS);
+var _rumbleUnsupported = new Uint8Array(_RUMBLE_MAX_PADS);
 
 function _rumbleInvalidateInflight(slot) {
   _rumbleGeneration[slot]++;
@@ -350,7 +353,7 @@ function _rumbleInvalidateInflight(slot) {
   _rumbleInFlightSince[slot] = 0;
 }
 
-function _rumbleClaim(result, slot, now) {
+function _rumbleClaim(result, slot, now, failed) {
   if (result && typeof result.then === 'function') {
     var generation = _rumbleGeneration[slot];
     if (_rumbleInFlight[slot] === 0) {
@@ -362,7 +365,11 @@ function _rumbleClaim(result, slot, now) {
       if (_rumbleInFlight[slot] > 0) { _rumbleInFlight[slot]--; }
       if (_rumbleInFlight[slot] === 0) { _rumbleInFlightSince[slot] = 0; }
     };
-    result.then(settled, settled);
+    result.then(settled, function(error) {
+      if (_rumbleGeneration[slot] !== generation) { return; }
+      settled();
+      if (failed) { failed(error); }
+    });
   }
 }
 
@@ -387,7 +394,34 @@ function _rumbleForgetSlot(slot) {
   _rumbleLastApplied[slot] = 0;
   _rumbleRenewedAt[slot] = 0;
   _rumbleNextAllowed[slot] = 0;
+  _rumbleRetry[slot] = 0;
+  _rumbleUnsupported[slot] = 0;
+  _rumbleAttempt[slot]++;
   _rumbleInvalidateInflight(slot);
+}
+
+function _rumbleDue(slot, packed, now) {
+  // A new stop still bypasses cooldown. Retries of the SAME failed stop do not.
+  if (packed === 0 && packed !== _rumbleLastApplied[slot]) { return true; }
+  if (now < _rumbleNextAllowed[slot]) { return false; }
+  if (packed !== 0 && _rumbleUnsupported[slot]) { return false; }
+  return !!_rumbleRetry[slot] || packed !== _rumbleLastApplied[slot] ||
+    (packed !== 0 && now - _rumbleRenewedAt[slot] >= _RUMBLE_RENEW_MS);
+}
+
+function _rumbleFailureHandler(slot, attempt, generation) {
+  return function(error) {
+    if (_rumbleAttempt[slot] !== attempt || _rumbleGeneration[slot] !== generation) { return; }
+    if (error && error.name === 'NotSupportedError') {
+      _rumbleUnsupported[slot] = 1; // Re-evaluated on controller reconnection.
+      _rumbleRetry[slot] = 0;
+    } else {
+      _rumbleRetry[slot] = 1;
+    }
+    // Do not turn a device failure into a tight retry loop. Keep the existing
+    // renewal interval as the backoff, including for rejected Promises.
+    _rumbleNextAllowed[slot] = Math.max(_rumbleNextAllowed[slot], _rumbleNow() + _RUMBLE_RENEW_MS);
+  };
 }
 
 function _rumbleNeedsPump(now) {
@@ -396,11 +430,8 @@ function _rumbleNeedsPump(now) {
   var base = _rumblePtr >> 2;
   for (var slot = 0; slot < _RUMBLE_MAX_PADS; slot++) {
     var packed = Atomics.load(heap, base + slot);
-    if (packed !== _rumbleLastApplied[slot]) {
-      if (packed === 0 || now >= _rumbleNextAllowed[slot]) { return true; }
-    } else if (packed !== 0 && now - _rumbleRenewedAt[slot] >= _RUMBLE_RENEW_MS) {
-      return true;
-    }
+    if (_rumbleDue(slot, packed, now) &&
+        _gpGetActuator(_gpLogicalPads && _gpLogicalPads[slot])) { return true; }
   }
   return false;
 }
@@ -420,13 +451,10 @@ function _rumblePump() {
   var base = _rumblePtr >> 2;
   for (var slot = 0; slot < _RUMBLE_MAX_PADS; slot++) {
     var packed = Atomics.load(heap, base + slot);
-    var renewing = packed === _rumbleLastApplied[slot] && packed !== 0 &&
-      now - _rumbleRenewedAt[slot] >= _RUMBLE_RENEW_MS;
-    var changed = packed !== _rumbleLastApplied[slot];
-    if (!changed && !renewing) { continue; }
-    if (packed !== 0 && now < _rumbleNextAllowed[slot]) { continue; }
+    if (!_rumbleDue(slot, packed, now)) { continue; }
 
     var actuator = _gpGetActuator(_gpLogicalPads && _gpLogicalPads[slot]);
+    if (!actuator) { continue; }
     if (packed !== 0 && !_rumbleCanStart(slot, now)) {
       // Keep the state pending and retry no faster than the existing 10 Hz
       // limit. Normal actuators never enter this branch.
@@ -436,16 +464,17 @@ function _rumblePump() {
     _rumbleLastApplied[slot] = packed;
     _rumbleRenewedAt[slot] = now;
     _rumbleNextAllowed[slot] = packed === 0 ? 0 : now + _RUMBLE_MIN_INTERVAL_MS;
-    if (!actuator) { continue; }
+    _rumbleRetry[slot] = 0;
+    if (packed === 0) { _rumbleInvalidateInflight(slot); }
+    var failed = _rumbleFailureHandler(slot, ++_rumbleAttempt[slot], _rumbleGeneration[slot]);
     try {
       if (packed === 0) {
         // Stop is never held behind a slow effect. Invalidate old logical
         // claims before issuing reset so their late Promises cannot affect it.
-        _rumbleInvalidateInflight(slot);
         if (typeof actuator.reset === 'function') {
-          _rumbleClaim(actuator.reset(), slot, now);
+          _rumbleClaim(actuator.reset(), slot, now, failed);
         } else if (typeof actuator.pulse === 'function') {
-          _rumbleClaim(actuator.pulse(0, 0), slot, now);
+          _rumbleClaim(actuator.pulse(0, 0), slot, now, failed);
         }
       } else {
         var weak = (packed & 0xffff) / 65535;
@@ -456,13 +485,15 @@ function _rumblePump() {
             duration: _RUMBLE_DURATION_MS,
             weakMagnitude: weak,
             strongMagnitude: strong
-          }), slot, now);
+          }), slot, now, failed);
         } else if (typeof actuator.pulse === 'function') {
           _rumbleClaim(
-            actuator.pulse(Math.max(weak, strong), _RUMBLE_DURATION_MS), slot, now);
+            actuator.pulse(Math.max(weak, strong), _RUMBLE_DURATION_MS), slot, now, failed);
+        } else {
+          _rumbleUnsupported[slot] = 1;
         }
       }
-    } catch (e) {}
+    } catch (e) { failed(e); }
   }
 }
 
@@ -488,6 +519,8 @@ function _rumbleStop() {
   _rumbleLastApplied.fill(0);
   _rumbleRenewedAt.fill(0);
   _rumbleNextAllowed.fill(0);
+  _rumbleRetry.fill(0);
+  _rumbleUnsupported.fill(0);
   _rumbleInFlight.fill(0);
   _rumbleInFlightSince.fill(0);
   for (var generationSlot = 0;

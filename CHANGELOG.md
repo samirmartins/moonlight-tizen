@@ -7,6 +7,18 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.3.10
+
+### Improved
+- Avoids unnecessary rumble tasks when no actuator is available and respects the
+  existing cooldown during effect renewal
+- Bounds retries after controller errors and ignores stale effect failures,
+  preserving vibration intensities, update limits and priority for new stop commands
+- Releases temporary certificate-generation resources and replaces loaded
+  certificate resources safely; failed loads preserve the previous credentials
+- Adds regression coverage for rumble scheduling, certificate ownership and
+  preservation of the existing playback paths
+
 ## v3.3.9
 
 An incremental robustness and efficiency update. Direct video submission and the

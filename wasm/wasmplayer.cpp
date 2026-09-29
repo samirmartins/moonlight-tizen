@@ -371,8 +371,13 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
     std::vector<std::string> mimetypes;
 
     if (videoFormat & VIDEO_FORMAT_H264) {
-      // H.264 High Profile 4.2. A TV may support higher, e.g. 5.1 (avc1.640033).
-      mimetypes.push_back("video/mp4; codecs=\"avc1.64002A\"");
+      // 1440p60 needs Level 5.1 (14400 MB/frame, 864000 MB/s), not 4.2.
+      // Scope this correction to 1440p <=60 Hz; preserve all other codec paths.
+      if (width == 2560 && height == 1440 && redrawRate <= 60) {
+        mimetypes.push_back("video/mp4; codecs=\"avc1.640033\"");
+      } else {
+        mimetypes.push_back("video/mp4; codecs=\"avc1.64002A\"");
+      }
     } else if (videoFormat & (VIDEO_FORMAT_H265 | VIDEO_FORMAT_H265_MAIN10)) {
       // The profile prefix differs between Main and Main10; the tier and level
       // that follow do not.
