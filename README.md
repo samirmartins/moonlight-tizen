@@ -2,6 +2,22 @@
 
 A fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen) — an open-source client for NVIDIA GameStream and [Sunshine](https://app.lizardbyte.dev/Sunshine/) that streams games from your PC to a Samsung Smart TV.
 
+## Interface
+
+![Game library with seven demo games, favorites and the Resume action](docs/images/game-library.png)
+
+<details>
+<summary>Basic settings</summary>
+
+![Basic settings for video resolution, frame rate and bitrate](docs/images/settings.png)
+
+</details>
+
+Actual application UI rendered locally with a fictional game library and PC.
+The seven cover illustrations are original demo artwork; no commercial game
+artwork is used. These images show the interface, including a simulated Resume
+state, rather than a gameplay session on a TV.
+
 ## Why this fork
 
 This fork focuses on smooth playback, low latency and full picture quality on Samsung TVs:
