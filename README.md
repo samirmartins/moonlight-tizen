@@ -4,7 +4,7 @@ A fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight
 
 ## Interface
 
-![Game library with seven open-source games, favorites and the Resume action](docs/images/game-library.png)
+![Game library with eight open-source games, favorites and the Resume action](docs/images/game-library.png)
 
 <details>
 <summary>Basic settings</summary>
@@ -13,7 +13,7 @@ A fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight
 
 </details>
 
-Actual application UI rendered locally with a demonstration PC and seven real
+Actual application UI rendered locally with a demonstration PC and eight real
 open-source games. Game images are reused under their published open licenses;
 see [image credits and licenses](docs/images/ATTRIBUTION.md). The Resume state is
 simulated; these captures demonstrate the interface, not gameplay on a TV.

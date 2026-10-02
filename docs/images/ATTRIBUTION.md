@@ -1,6 +1,6 @@
 # Documentation image credits
 
-The README library uses real screenshots of seven open-source games in a
+The README library uses real screenshots of eight open-source games in a
 synthetic PC library. It does not claim that these games were tested on a TV,
 and no game developer endorses this fork.
 
@@ -20,6 +20,7 @@ state. `settings.png` contains only this application's interface.
 | `open-games/xonotic.jpg` | Xonotic — screenshot by greewrfdsfsf; game credit Justin, kuniu the frogg | [Xonotic Game Play - Silent Siege.jpg](https://commons.wikimedia.org/wiki/File:Xonotic_Game_Play_-_Silent_Siege.jpg) · [GPL-2.0-or-later](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html) |
 | `open-games/supertux.png` | SuperTux — SuperTux Development Team | [SuperTux 0.5.1 screenshot (main page).png](https://commons.wikimedia.org/wiki/File:SuperTux_0.5.1_screenshot_%28main_page%29.png) · [GPL-2.0-or-later](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html) |
 | `open-games/wesnoth.jpg` | The Battle for Wesnoth — Battle for Wesnoth developers | [Battle for wesnoth version 1.12.0 screenshot.jpg](https://commons.wikimedia.org/wiki/File:Battle_for_wesnoth_version_1.12.0_screenshot.jpg) · [GPL-2.0-or-later](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html) |
+| `open-games/openttd.png` | OpenTTD with OpenGFX — OpenTTD and OpenGFX contributors; screenshot uploaded by Msaynevirta | [OpenTTD-1.3.3-en.png](https://commons.wikimedia.org/wiki/File:OpenTTD-1.3.3-en.png) · [GPL-2.0-or-later](https://www.gnu.org/licenses/old-licenses/gpl-2.0.html) |
 
 ## Composite capture
 
@@ -38,7 +39,9 @@ the application's HTML/CSS/JavaScript in `wasm/`. Original game source projects:
 [Minetest Game](https://github.com/luanti-org/minetest_game),
 [Xonotic](https://gitlab.com/xonotic/xonotic),
 [SuperTux](https://github.com/SuperTux/supertux),
-[Wesnoth](https://github.com/wesnoth/wesnoth).
+[Wesnoth](https://github.com/wesnoth/wesnoth),
+[OpenTTD](https://github.com/OpenTTD/OpenTTD),
+[OpenGFX](https://github.com/OpenTTD/OpenGFX).
 
 Licensing pages checked on 2026-10-02. These are openly licensed images,
 not a claim that the games or every element of their artwork are copyright-free.
