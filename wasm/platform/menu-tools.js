@@ -7,6 +7,24 @@ function normalizeWakeMac(value) {
   return bytes.map(function(b) { return ('0' + b.toString(16)).slice(-2); }).join(':').toUpperCase();
 }
 
+function getWakeBroadcastAddress() {
+  // Read the TV's active LAN, never guess /24 from the PC address.
+  try {
+    var network = webapis.network;
+    var parse = function(value) {
+      var bytes = String(value).split('.');
+      if (bytes.length !== 4 || !bytes.every(function(b) { return /^\d{1,3}$/.test(b) && Number(b) <= 255; })) return null;
+      return bytes.reduce(function(n,b) { return ((n << 8) | Number(b)) >>> 0; },0);
+    };
+    var ip = parse(network.getIp()), mask = parse(network.getSubnetMask());
+    if (ip === null || mask === null || !mask || !ip || mask === 0xffffffff) return '';
+    var inverse = (~mask) >>> 0;
+    if ((inverse & (inverse + 1)) !== 0 || inverse < 3) return '';
+    var broadcast = (ip | inverse) >>> 0;
+    return [24,16,8,0].map(function(shift) { return (broadcast >>> shift) & 255; }).join('.');
+  } catch (e) { return ''; } // Global broadcast remains available on older TVs.
+}
+
 function createMenuRequestScope() {
   var pending = [];
   var scope = {
@@ -110,16 +128,12 @@ var WakeHost = (function() {
     }, 60000);
     var check = function() {
       if (!valid()) return;
-      new Promise(function(resolve, reject) {
-        host.selectServerAddress(resolve, reject, current);
-      }).then(function(address) {
+      host.connect(current).then(function() {
         if (!valid()) return;
-        host.address = address;
-        var urlAddress = formatAddressForUrl(address);
-        host._baseUrlHttp = 'http://' + urlAddress + ':' + host.httpPort;
-        host._baseUrlHttps = 'https://' + urlAddress + ':' + host.httpsPort;
-        host.online = true;
-        host._consecutivePollFailures = 0;
+        if (host.paired && host.ppkstr && host._authenticatedOnline === false) {
+          status('PC awake · waiting for authenticated Sunshine connection…');
+          retry = setTimeout(check,3000); return;
+        }
         updateHostStatusIndicator(host);
         var cell = document.getElementById('host-' + host.serverUid);
         if (cell) cell.classList.remove('host-cell-inactive');
@@ -159,8 +173,13 @@ var WakeHost = (function() {
       document.getElementById('wakeSave').onclick = save;
       document.getElementById('wakeDetected').onclick = function() {
         cancel();
+        var detected = normalizeWakeMac(host.macAddress);
+        if (!detected) {
+          status('No valid detected MAC. Connect to Sunshine first, or keep your saved MAC.');
+          return;
+        }
         delete host.wakeMacOverride;
-        document.getElementById('wakeMac').value = normalizeWakeMac(host.macAddress);
+        document.getElementById('wakeMac').value = detected;
         saveHosts();
         status('Using detected MAC. If empty/wrong, enter the physical LAN adapter MAC.');
       };

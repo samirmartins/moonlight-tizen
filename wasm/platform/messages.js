@@ -20,6 +20,7 @@ const SyncFunctions = {
 const AsyncFunctions = {
   // url, ppk, binaryResponse
   'openUrl': (...args) => Module.openUrl(...args),
+  'openUrlScoped': (...args) => Module.openUrlScoped(...args),
   // no parameters
   'STUN': (...args) => Module.stun(...args),
   // serverMajorVersion, address, httpPort, randomNumber
@@ -66,11 +67,13 @@ var sendMessage = function(method, params) {
         reject(error);
       }
     });
-    // Local cancellation retires the JS callback only; cancelling the shared
-    // native HTTP dispatcher here could interrupt a launch/stream request.
+    // Retire this menu request only, never the shared launch/pair cancellation.
     promise.cancel = function() {
       var pending = callbacks[pendingId];
       if (!pending) return;
+      if (method === 'openUrlScoped' && typeof Module.cancelMenuRequest === 'function') {
+        Module.cancelMenuRequest(pendingId);
+      }
       delete callbacks[pendingId];
       pending.reject(new Error('Menu request cancelled'));
     };
@@ -107,6 +110,10 @@ function formatPerformanceOverlay(nativeText) {
  * @return {void}
  */
 function handleMessage(msg) {
+  if (msg.indexOf('DecoderError: ') === 0) {
+    snackbarLogLong(msg.slice(14));
+    return;
+  }
   if (msg.indexOf('DiagMsg: ') === 0) {
     SessionDiagnostics.sample(msg.slice(9));
     return;

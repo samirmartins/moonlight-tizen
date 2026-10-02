@@ -89,7 +89,7 @@ function clickElement(target) {
   }
   // Click the resolved element itself if it supports click event
   if (typeof element.click === 'function') {
-    isGamepadActive ? element.click() : target.click();
+    element.click();
   }
 }
 
@@ -501,7 +501,7 @@ const Views = {
     },
   },
   HostsNav: {
-    view: new ListView(() => ['settingsBtn']),
+    view: new ListView(() => document.getElementById('libraryHomeBtn').style.display === 'none' ? ['settingsBtn'] : ['libraryHomeBtn','settingsBtn']),
     up: function() {},
     down: function() {
       // Navigate to the Hosts view
@@ -798,9 +798,6 @@ const Views = {
     },
     back: function() {
       resolveElement('goBackBtn').click();
-      // Navigate to the HostsNav view
-      Navigation.change(Views.HostsNav);
-      focusElement('settingsBtn');
     },
     press: function() {},
     switch: function() {
@@ -837,20 +834,12 @@ const Views = {
       const currentItem = resolveElement(this.view.current());
       if (currentItem && currentItem.id === 'goBackBtn') {
         clickElement(currentItem);
-        // Navigate to the HostsNav view
-        Navigation.change(Views.HostsNav);
-        // Set focus to the "Settings" button after navigating to the HostsNav view
-        focusElement('settingsBtn');
       } else {
         clickElement(this.view.current());
       }
     },
     back: function() {
       resolveElement('goBackBtn').click();
-      // Navigate to the HostsNav view
-      Navigation.change(Views.HostsNav);
-      // Set focus to the "Settings" button after navigating to the HostsNav view
-      focusElement('settingsBtn');
     },
     press: function() {},
     switch: function() {
@@ -1410,83 +1399,29 @@ const Views = {
   },
   Apps: {
     view: new ListView(() => document.getElementById('game-grid').children),
-    up: function() {
-      // If there are more rows behind, then go to the previous row
-      if (this.view.prevCardRow(6)) {
-        focusElement(this.view.current());
-      } else {
-        // If there are no more rows, navigate to the AppsNav view
-        Navigation.change(Views.AppsNav);
-        // Set focus on the first navigation item in AppsNav view when transitioning from Apps view
-        focusElement(Views.AppsNav.view.current());
-      }
-    },
-    down: function() {
-      // If there are more rows after, then go to the next row
-      if (this.view.nextCardRow(6)) {
-        focusElement(this.view.current());
-      }
-    },
-    left: function() {
-      this.view.prevCard(6);
-      focusElement(this.view.current());
-    },
-    right: function() {
-      this.view.nextCard(6);
-      focusElement(this.view.current());
-    },
-    accept: function() {
-      clickElement(this.view.current());
-    },
-    back: function() {
-      resolveElement('goBackBtn').click();
-    },
-    press: function() {},
-    switch: function() {
-      this.view.currentCardRow(6);
-    },
-    enter: function() {
-      mark(this.view.current());
-    },
-    leave: function() {
-      unmark(this.view.current());
-    },
+    up: function() { ConsoleLibrary.move(0,-1); },
+    down: function() { ConsoleLibrary.move(0,1); },
+    left: function() { ConsoleLibrary.move(-1,0); },
+    right: function() { ConsoleLibrary.move(1,0); },
+    accept: function() { ConsoleLibrary.accept(); },
+    back: function() { ConsoleLibrary.backAction(); },
+    press: function() { ConsoleLibrary.favorite(); },
+    switch: function() { ConsoleLibrary.focusCards(); },
+    enter: function() { ConsoleLibrary.focusCards(); },
+    leave: function() {},
   },
   AppsNav: {
-    view: new ListView(() => [
-      'goBackBtn',
-      'quitRunningAppBtn'
-    ]),
-    up: function() {},
-    down: function() {
-      // Navigate to the Apps view
-      Navigation.change(Views.Apps);
-      // Set focus on the first navigation item in Apps view when transitioning from AppsNav view
-      focusElement(Views.Apps.view.current());
-    },
-    left: function() {
-      this.view.prev();
-      focusElement(this.view.current());
-    },
-    right: function() {
-      this.view.next();
-      focusElement(this.view.current());
-    },
-    accept: function() {
-      clickElement(this.view.current());
-    },
-    back: function() {
-      resolveElement('goBackBtn').click();
-    },
-    press: function() {},
-    switch: function() {
-      focusElement(this.view.current());
-    },
-    enter: function() {
-      mark(this.view.current());
-    },
+    up: function() { ConsoleLibrary.focusNav(-1); },
+    down: function() { Navigation.change(Views.Apps); },
+    left: function() { ConsoleLibrary.focusNav(-1); },
+    right: function() { ConsoleLibrary.focusNav(1); },
+    accept: function() { ConsoleLibrary.acceptNav(); },
+    back: function() { ConsoleLibrary.backAction(); },
+    press: function() { ConsoleLibrary.favorite(); },
+    switch: function() { ConsoleLibrary.focusNav(0); },
+    enter: function() { ConsoleLibrary.focusNav(0); },
     leave: function() {
-      unmark(this.view.current());
+      document.querySelectorAll('#console-panel .hovered, #main-header .hovered').forEach(function(node) { node.classList.remove('hovered'); });
     },
   },
   QuitAppDialog: {
@@ -1649,7 +1584,6 @@ const Navigation = (function() {
 
       if (!hasFocus) {
         focus();
-        return;
       }
 
       const view = Stack.get();

@@ -38,6 +38,7 @@ var isPairingInProgress = false; // Flag indicating whether a pairing process is
 var wasPairingCanceled = false; // Flag indicating whether the current pairing process was canceled by the user, initial value is false
 var isGamepadActive = false; // Flag indicating whether the gamepad input is active, initial value is false
 var isClickPrevented = false; // Flag indicating whether the click event should be prevented, initial value is false
+var hostOpenRequest = null; // Deduplicate asynchronous PC opening, not just clicks.
 var resFpsWarning = false; // Flag indicating whether the video resolution and frame rate warning message has shown, initial value is false
 var bitrateWarning = false; // Flag indicating whether the video bitrate warning message has shown, initial value is false
 var audioWarning = false; // Flag indicating whether the audio configuration warning message has shown, initial value is false
@@ -46,6 +47,7 @@ var repeatAction = null; // Flag indicating whether the repeat action is set, in
 var lastInvokeTime = 0; // Flag indicating the last invoke time, initial value is 0
 var repeatTimeout = null; // Flag indicating whether the repeat timeout is set, initial value is null
 var navigationTimeout = null; // Flag indicating whether the navigation timeout is set, initial value is null
+var startupScanTimer = 0;
 const BUILD_TYPE = '__BUILD_TYPE__'; // Placeholder for build type, which should be replaced during the build process
 const BUILD_COMMIT = '__BUILD_COMMIT__'; // Placeholder for build commit, which should be replaced during the build process
 const REPEAT_DELAY = 350; // Repeat delay set to 350ms (milliseconds)
@@ -63,7 +65,7 @@ function attachListeners() {
 
   $('#addHostContainer').on('click', addHostDialog);
   $('#settingsBtn').on('click', showSettings);
-  $('#goBackBtn').on('click', showHosts);
+  $('#goBackBtn').on('click', function() { if (!ConsoleLibrary.back()) showHosts(); });
   $('#restoreDefaultsBtn').on('click', restoreDefaultsDialog);
   $('#quitRunningAppBtn').on('click', quitAppDialog);
   $('.videoResolutionMenu li:not(.unsupported-resolution)').on('click', saveResolution);
@@ -130,7 +132,8 @@ function attachListeners() {
         const buttonMapping = {
           0: () => delayedNavigation(() => Navigation.accept()),
           1: () => delayedNavigation(() => Navigation.back()),
-          8: () => delayedNavigation(() => Navigation.move()),
+          8: () => delayedNavigation(() => Navigation.press()),
+          3: () => delayedNavigation(() => Navigation.press()),
         };
         // Handle D-Pad mapping
         const dPadMapping = {
@@ -361,8 +364,11 @@ function showHostsMode() {
   $('#main-content').removeClass('fullscreen');
   $('#listener').removeClass('fullscreen');
 
+  ConsoleLibrary.hide();
+  ConsoleLibrary.showHomeButton();
   Navigation.start();
   Navigation.pop();
+  Navigation.change(Views.Hosts);
   // Stop any existing polls before starting new ones to prevent setInterval leaks.
   // Without this, navigating back to the host view multiple times accumulates
   // duplicate polling intervals for each host, which causes race conditions in
@@ -373,84 +379,25 @@ function showHostsMode() {
 
 // Show the Hosts grid
 function showHosts() {
-  // Stop navigation before showing the loading screen
-  Navigation.stop();
-
-  // Hide the main header and content before showing a loading screen
-  $('#main-header').children().hide();
-  $('#main-header').css({'backgroundColor': 'transparent', 'boxShadow': 'none'});
-  $('#settings-list, #game-grid').hide();
-
-  // Show a spinner while the host list loads
-  $('#wasmSpinner').css('display', 'inline-block');
-  $('#wasmSpinnerLogo').hide();
-  $('#wasmSpinnerMessage').text('Loading Hosts...');
-
-  setTimeout(() => {
-    // Hide the spinner after successfully retrieving the host list
-    $('#wasmSpinner').hide();
-
-    // Show the main header after the loading screen is complete
-    $('#main-header').children().show();
-    $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': '0 0 4px 0 rgba(0, 0, 0, 1)'});
-
-    // Navigate to the Hosts view
-    showHostsMode();
-  }, 500);
-
-  // Set focus to current item and/or scroll to the current host row
-  setTimeout(() => Navigation.switch(), 500);
+  hostOpenRequest = null;
+  ConsoleLibrary.hide();
+  $('#wasmSpinner, #loadingSpinner').hide();
+  $('#main-header').children().show();
+  $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': 'none'});
+  showHostsMode();
+  Navigation.switch();
 }
 
 function restoreUiAfterWasmLoad() {
-  // Stop navigation before showing the loading screen
-  Navigation.stop();
-
-  $('#main-header').children().not('#goBackBtn, #restoreDefaultsBtn, #quitRunningAppBtn').show();
-  $('#main-content').children().not('#listener, #wasmSpinner, #settings-list, #game-grid').show();
-  $('#wasmSpinner').hide();
-  $('#loadingSpinner').css('display', 'none');
-
-  // Navigate to the Hosts view
+  $('#wasmSpinner, #loadingSpinner').hide();
+  $('#main-header').children().show();
   Navigation.push(Views.Hosts);
   showHostsMode();
-  // Set focus to current item and/or scroll to the current host row
-  setTimeout(() => Navigation.switch(), 100);
-
-  // Find mDNS host discovered using ServiceFinder (network service discovery)
-  // findNvService(function(finder, opt_error) {
-  //   if (finder.byService_['_nvstream._tcp']) {
-  //     var ips = Object.keys(finder.byService_['_nvstream._tcp']);
-  //     for (var i in ips) {
-  //       var ip = ips[i];
-  //       if (finder.byService_['_nvstream._tcp'][ip]) {
-  //         var mDnsDiscoveredHost = new NvHTTP(ip, myUniqueid);
-  //         mDnsDiscoveredHost.pollServer(function(returnedDiscoveredHost) {
-  //           // Just drop this if the host doesn't respond
-  //           if (!returnedDiscoveredHost.online) {
-  //             return;
-  //           }
-  //           if (hosts[returnedDiscoveredHost.serverUid] != null) {
-  //             // If we're seeing a host we've already seen before, update it for the current local IP
-  //             hosts[returnedDiscoveredHost.serverUid].address = returnedDiscoveredHost.address;
-  //             hosts[returnedDiscoveredHost.serverUid].updateExternalAddressIP4();
-  //           } else {
-  //             // Host must be in the grid before starting background polling
-  //             addHostToGrid(returnedDiscoveredHost, true);
-  //             beginBackgroundPollingOfHost(returnedDiscoveredHost);
-  //           }
-  //           saveHosts();
-  //         });
-  //       }
-  //     }
-  //   }
-  // });
-
-
-  // Automatically check for a new update after 10 seconds delay at application startup once every 24 hours
+  ConsoleLibrary.ready('runtime');
 }
 
 function hostChosen(host) {
+  if (hostOpenRequest || isInGame || isDialogOpen) return;
   if (isPairingInProgress) {
     snackbarLogLong('A pairing request is currently in progress. Please wait for it to timeout or finish before trying again.');
     return;
@@ -462,6 +409,21 @@ function hostChosen(host) {
     return;
   }
 
+  var request = { host: host };
+  hostOpenRequest = request;
+  var current = function() { return hostOpenRequest === request && hosts[host.serverUid] === host && !isInGame; };
+  var finish = function() { if (hostOpenRequest === request) hostOpenRequest = null; };
+  var openLibrary = function() {
+    if (!current()) { finish(); return; }
+    Navigation.push(Views.Apps);
+    var opened;
+    try { opened = showApps(host); } catch (error) { finish(); console.error(error); return; }
+    opened.then(function() {
+      if (!current() || !ConsoleLibrary.visible() || api !== host || isDialogOpen) return;
+      Navigation.switch(); Navigation.change(Views.Apps);
+    }).catch(console.error).then(finish, finish);
+  };
+
   // Avoid delay from other polling during pairing
   stopPollingHosts();
 
@@ -470,28 +432,19 @@ function hostChosen(host) {
   if (!host.paired) {
     // Continue with the pairing flow
     pairingDialog(host, function() {
+      if (!current()) { finish(); return; }
       // After pairing the host, save the host object, show the apps, and navigate to the Apps view
       saveHosts();
-      Navigation.push(Views.Apps);
-      showApps(host).then(() => {
-        // Scroll to the current game row
-        Navigation.switch();
-        // Switch to Apps view
-        Navigation.change(Views.Apps);
-      }).catch(console.error);
+      openLibrary();
     }, function() {
+      if (!current()) { finish(); return; }
+      finish();
       // Start polling the host after pairing flow
       startPollingHosts();
     });
   } else {
     // But if the host is already paired and online, then we show the apps and navigate to the Apps view as usual.
-    Navigation.push(Views.Apps);
-    showApps(host).then(() => {
-      // Scroll to the current game row
-      Navigation.switch();
-      // Switch to Apps view
-      Navigation.change(Views.Apps);
-    }).catch(console.error);
+    openLibrary();
   }
 }
 
@@ -874,11 +827,13 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
       pairingDialog.close();
       isDialogOpen = false;
       Navigation.pop();
+      onFailure(); // Release the PC-opening guard even if native cancel is late.
     });
 
     console.log('%c[index.js, pairingDialog]', 'color: green;', 'Sending pairing request to ' + nvhttpHost.hostname + ' with PIN ' + randomNumber);
     nvhttpHost.pair(randomNumber).then(function() {
       isPairingInProgress = false;
+      if (wasPairingCanceled) return;
       snackbarLog('Successfully paired with ' + nvhttpHost.hostname);
       // Close the dialog if the pairing was successful
       console.log('%c[index.js, pairingDialog]', 'color: green;', 'Closing app dialog and returning.');
@@ -902,9 +857,9 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
       // If the host is already in a streaming session or failed during pairing,
       // change the dialog text element to include the hostname and display the returned error message
       if (nvhttpHost.currentGame != 0) {
-        $('#pairingDialogText').html('Error: ' + nvhttpHost.hostname + ' is currently busy!<br><br>You must stop the running app in order to pair with the host.');
+        $('#pairingDialogText').html('Error: ' + escapeHTML(nvhttpHost.hostname) + ' is currently busy!<br><br>You must stop the running app in order to pair with the host.');
       } else {
-        $('#pairingDialogText').html('Error: Failed to pair with ' + nvhttpHost.hostname + '.<br><br>Please, try pairing with the host again.');
+        $('#pairingDialogText').html('Error: Failed to pair with ' + escapeHTML(nvhttpHost.hostname) + '.<br><br>Please, try pairing with the host again.');
       }
       onFailure();
     });
@@ -936,7 +891,7 @@ function addHostToGrid(host, ismDNSDiscovered) {
   // Create the host text placeholder that will contain the host name
   var hostText = $('<span>', {
     class: 'host-text',
-    html: host.hostname
+    text: host.hostname
   });
 
   // Create the host menu button with the appropriate attributes for the host menu
@@ -1023,20 +978,11 @@ function addHostToGrid(host, ismDNSDiscovered) {
 
 // Function to correctly update and store the valid MAC address of the host in IndexedDB
 function updateMacAddress(host) {
-  if (!normalizeWakeMac(host.macAddress)) return;
-  getData('hosts', function(previousValue) {
-    if (isInGame || hosts[host.serverUid] !== host) return;
-    var dbHosts = previousValue.hosts != null ? previousValue.hosts : {};
-    if (normalizeWakeMac(host.macAddress)) {
-      if (dbHosts[host.serverUid] && dbHosts[host.serverUid].macAddress != host.macAddress) {
-        console.log('%c[index.js, updateMacAddress]', 'color: green;', 'Updated MAC address for host ' + host.hostname + ' from ' + dbHosts[host.serverUid].macAddress + ' to ' + host.macAddress);
-        if (hosts[host.serverUid]) {
-          hosts[host.serverUid].macAddress = host.macAddress;
-        }
-        saveHosts();
-      }
-    }
-  });
+  var mac = normalizeWakeMac(host.macAddress);
+  if (!mac || isInGame || hosts[host.serverUid] !== host) return;
+  host.macAddress = mac;
+  // Preserve the separately stored user override; never log either address.
+  saveHosts();
 }
 
 // Show the Host Menu dialog with host button options
@@ -1173,7 +1119,7 @@ function deleteHostDialog(host) {
 
   // Change the dialog title and text elements to include the hostname
   document.getElementById('deleteHostDialogTitle').innerHTML = 'Delete Host';
-  document.getElementById('deleteHostDialogText').innerHTML = 'Are you sure you want to delete ' + host.hostname + '?';
+  document.getElementById('deleteHostDialogText').textContent = 'Are you sure you want to delete ' + host.hostname + '?';
 
   // Show the dialog and push the view
   deleteHostOverlay.style.display = 'flex';
@@ -1311,15 +1257,16 @@ function hostDetailsDialog(host) {
   $('<p>', {
     id: 'hostDetailsDialogText-' + host.serverUid,
     class: 'host-details-text',
-    html: 'Name: ' + host.hostname + '<br>' +
-          'State: ' + (host.online ? 'ONLINE' : 'OFFLINE') + '<br>' +
-          'Active Address: ' + (host.address && host.externalPort ? host.address + ':' + host.externalPort : 'NULL') + '<br>' +
-          'UUID: ' + (host.serverUid ? host.serverUid : 'NULL') + '<br>' +
-          'Local Address: ' + (host.localAddress && host.externalPort ? host.localAddress + ':' + host.externalPort : 'NULL') + '<br>' +
-          'MAC Address: ' + (host.macAddress ? host.macAddress : 'NULL') + '<br>' +
-          'Pair State: ' + (host.paired ? 'PAIRED' : 'UNPAIRED') + '<br>' +
-          'Running Game ID: ' + host.currentGame + '<br>' +
-          'HTTP Port: ' + (host.httpPort ? host.httpPort : 'NULL') + '<br>' +
+    css: { 'white-space': 'pre-line' },
+    text: 'Name: ' + host.hostname + '\n' +
+          'State: ' + (host.online ? 'ONLINE' : 'OFFLINE') + '\n' +
+          'Active Address: ' + (host.address && host.externalPort ? host.address + ':' + host.externalPort : 'NULL') + '\n' +
+          'UUID: ' + (host.serverUid ? host.serverUid : 'NULL') + '\n' +
+          'Local Address: ' + (host.localAddress && host.externalPort ? host.localAddress + ':' + host.externalPort : 'NULL') + '\n' +
+          'MAC Address: ' + (host.macAddress ? host.macAddress : 'NULL') + '\n' +
+          'Pair State: ' + (host.paired ? 'PAIRED' : 'UNPAIRED') + '\n' +
+          'Running Game ID: ' + host.currentGame + '\n' +
+          'HTTP Port: ' + (host.httpPort ? host.httpPort : 'NULL') + '\n' +
           'HTTPS Port: ' + (host.httpsPort ? host.httpsPort : 'NULL')
   }).appendTo(hostDetailsDialogContent);
 
@@ -1386,36 +1333,14 @@ function showSettingsMode() {
 
 // Show the Settings list
 function showSettings() {
-  // Stop navigation before showing the loading screen
-  Navigation.stop();
-
-  // Hide the main header and content before showing a loading screen
-  $('#main-header').children().hide();
-  $('#main-header').css({'backgroundColor': 'transparent', 'boxShadow': 'none'});
-  $('#host-grid, #game-grid').hide();
-
-  // Show a spinner while the setting list loads
-  $('#wasmSpinner').css('display', 'inline-block');
-  $('#wasmSpinnerLogo').hide();
-  $('#wasmSpinnerMessage').text('Loading Settings...');
-
-  setTimeout(() => {
-    // Hide the spinner after successfully retrieving the setting list
-    $('#wasmSpinner').hide();
-
-    // Show the main header after the loading screen is complete
-    $('#main-header').children().show();
-    $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': '0 0 4px 0 rgba(0, 0, 0, 1)'});
-
-    // Show the settings list section
-    $('#settings-list').removeClass('hide-container');
-    $('#settings-list').css('display', 'flex');
-    $('#settings-list').show();
-
-    // Navigate to the Settings view
-    Navigation.push(Views.Settings);
-    showSettingsMode();
-  }, 500);
+  ConsoleLibrary.settings();
+  $('#wasmSpinner, #loadingSpinner').hide();
+  $('#main-header').children().show();
+  $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': 'none'});
+  $('#settings-list').removeClass('hide-container').css('display', 'flex');
+  Navigation.push(Views.Settings);
+  showSettingsMode();
+  ConsoleLibrary.hide();
 }
 
 // Reset the current settings view by clearing the selection and hiding the right pane
@@ -1696,7 +1621,7 @@ function exitAppDialog() {
     exitAppDialog.close();
     isDialogOpen = false;
     Navigation.pop();
-    Navigation.change(Views.Hosts);
+    Navigation.change(ConsoleLibrary.visible() ? Views.Apps : Views.Hosts);
   });
 
   // Exit the application if the Exit button is pressed
@@ -1711,61 +1636,6 @@ function exitAppDialog() {
   });
 }
 
-// Puts the CSS style for current app on the app that's currently running
-// and puts the CSS style for non-current app on the apps that aren't running
-// this requires a hot-off-the-host `api`, and the appId we're going to stylize
-// the function was made like this so that we can remove duplicated code, but
-// not do N*N stylization of the box art, or make the code not flow very well
-function stylizeBoxArt(freshApi, appIdToStylize) {
-  // Refresh server info and apply the CSS style to the current running game
-  freshApi.refreshServerInfo().then(function(ret) {
-    var appBox = document.querySelector('#game-container-' + appIdToStylize);
-    if (!appBox) {
-      console.warn('%c[index.js, stylizeBoxArt]', 'color: green;', 'Warning: No box art found for appId: ' + appIdToStylize);
-      return;
-    }
-    // If the game is currently running, then apply CSS stylization
-    if (freshApi.currentGame === appIdToStylize) {
-      appBox.classList.add('current-game-active');
-      appBox.title += ' (Running)';
-    } else {
-      appBox.classList.remove('current-game-active');
-      appBox.title = appBox.title.replace(' (Running)', ''); // TODO: Replace with localized string so make it e.title = game_title
-    }
-  }, function(failedRefreshInfo) {
-    console.error('%c[index.js, stylizeBoxArt]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo + '!');
-  });
-}
-
-// Sort the app titles
-function sortTitles(list, sortOrder) {
-  return list.sort((a, b) => {
-    const titleA = a.title.toLowerCase();
-    const titleB = b.title.toLowerCase();
-
-    // Ascending order (A - Z)
-    if (sortOrder === 'ASC') {
-      if (titleA < titleB) {
-        return -1;
-      }
-      if (titleA > titleB) {
-        return 1;
-      }
-      return 0;
-    }
-
-    // Descending order (Z - A)
-    if (sortOrder === 'DESC') {
-      if (titleA < titleB) {
-        return 1;
-      }
-      if (titleA > titleB) {
-        return -1;
-      }
-      return 0;
-    }
-  });
-}
 
 // Handle layout elements when displaying the Apps view
 function showAppsMode() {
@@ -1806,165 +1676,7 @@ function showAppsMode() {
 
 // Show the Apps grid
 function showApps(host) {
-  return new Promise((resolve, reject) => {
-    // Safety checking should happen before attempting to show the app list
-    if (!host || !host.paired) {
-      console.error('%c[index.js, showApps]', 'color: green;', 'Error: Unable to initialize the host properly! Host object: ', host);
-      reject('Unable to initialize the host properly');
-      return;
-    } else {
-      console.log('%c[index.js, showApps]', 'color: green;', 'Current host object: \n', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-    }
-
-    // Stop navigation before showing the loading screen
-    Navigation.stop();
-
-    // Hide the main header before showing a loading screen
-    $('#main-header').children().hide();
-    $('#main-header').css({'backgroundColor': 'transparent', 'boxShadow': 'none'});
-    $('#host-grid, #settings-list').hide();
-
-    // Show a spinner while the app list loads
-    $('#wasmSpinner').css('display', 'inline-block');
-    $('#wasmSpinnerLogo').hide();
-    $('#wasmSpinnerMessage').text('Loading Apps...');
-
-    // Remove all game container elements from the game grid and from any other div elements
-    $('#game-grid').empty();
-    $('div.game-container').remove();
-
-    setTimeout(() => {
-      host.getAppList().then(function(appList) {
-        // Hide the spinner after the host has successfully retrieved the app list
-        $('#wasmSpinner').hide();
-
-        // Show the main header after the loading screen is complete
-        $('#main-header').children().show();
-        $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': '0 0 4px 0 rgba(0, 0, 0, 1)'});
-
-        // Show the game grid section
-        $('#game-grid').show();
-
-        if (appList.length == 0) {
-          console.warn('%c[index.js, showApps]', 'Warning: Your app list is empty. Please add some apps to your list!');
-          var emptyAppListImg = new Image();
-          emptyAppListImg.src = 'static/res/applist_empty.svg';
-          $('#game-grid').html(emptyAppListImg);
-          snackbarLogLong('Your list is currently empty. Please add your favorite apps to the list.');
-          return;
-        }
-
-        // Find the existing switch element
-        const sortAppsListSwitch = document.getElementById('sortAppsListSwitch');
-        // Defines the sort order based on the state of the switch
-        const sortOrder = sortAppsListSwitch.checked ? 'DESC' : 'ASC';
-        // If game grid is populated, sort the app list
-        const sortedAppList = sortTitles(appList, sortOrder);
-
-        sortedAppList.forEach(function(app) {
-          // Double clicking the button will cause multiple box arts to appear.
-          // To mitigate this, we ensure that we don't add a duplicate box art.
-          // This isn't perfect: there's lots of RTTs before the logic prevents anything.
-          if ($('#game-container-' + app.id).length === 0) {
-            // Create the game container with the appropriate attributes for the game card
-            var gameContainer = $('<div>', {
-              id: 'game-container-' + app.id,
-              class: 'game-container mdl-card mdl-shadow--4dp',
-              role: 'link',
-              tabindex: 0,
-              'aria-label': app.title
-            });
-
-            // Create the game cell to serve as a holder for the game box
-            var gameCell = $('<div>', {
-              id: 'game-' + app.id,
-              class: 'mdl-card__title mdl-card--expand'
-            });
-
-            // Create the game title wrapper to hold the game title text
-            var gameTitle = $('<div>', {
-              class: 'game-title mdl-card__title-text'
-            });
-
-            // Create the game text placeholder that will contain the game name
-            var gameText = $('<span>', {
-              class: 'game-text',
-              html: app.title
-            });
-
-            // Append the game text to the game title wrapper
-            gameTitle.append(gameText);
-
-            // Handle animation state based on game title text length
-            if (app.title.length <= 20) {
-              // For game title text of 20 characters or less, disable scrolling text animation
-              gameText.addClass('disable-animation');
-            } else {
-              // For game title text longer than 20 characters, enable scrolling text animation
-              gameText.removeClass('disable-animation');
-            }
-
-            // Append the game title to the game cell
-            gameCell.append(gameTitle);
-
-            // Append the game cell to the game container
-            gameContainer.append(gameCell);
-
-            // Attach the click event listener to the game container
-            gameContainer.off('click');
-            gameContainer.on('click', function() {
-              // Prevent further clicks
-              if (isClickPrevented) {
-                return;
-              }
-              // Block subsequent clicks immediately
-              isClickPrevented = true;
-              // Start the game when the Click key is pressed
-              startGame(host, app.id);
-              // Reset the click flag after 2 second delay
-              setTimeout(() => isClickPrevented = false, 2000);
-            });
-
-            // Append the game container to the game grid
-            $('#game-grid').append(gameContainer);
-
-            // Apply style to the game container to indicate whether the game is active or not
-            setTimeout(() => stylizeBoxArt(host, app.id), 100);
-          }
-          // Load box art
-          var boxArtPlaceholderImg = new Image();
-          host.getBoxArt(app.id).then(function(resolvedPromise) {
-            boxArtPlaceholderImg.src = resolvedPromise;
-          }, function(failedPromise) {
-            console.error('%c[index.js, showApps]', 'color: green;', 'Error: Failed to retrieve box art for app ID: ' + app.id + '. Returned value was: ' + failedPromise + '. Host object: ', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-            boxArtPlaceholderImg.src = 'static/res/placeholder_error.svg';
-          });
-          boxArtPlaceholderImg.onload = e => boxArtPlaceholderImg.classList.add('fade-in');
-          $(gameContainer).append(boxArtPlaceholderImg);
-        });
-        // Navigate to the Apps view
-        showAppsMode();
-        resolve();
-      }, function(failedAppList) {
-        // Hide the spinner if the host has failed to retrieve the app list
-        $('#wasmSpinner').hide();
-
-        // Show the main header after the loading screen is complete
-        $('#main-header').children().show();
-        $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': '0 0 4px 0 rgba(0, 0, 0, 1)'});
-
-        console.error('%c[index.js, showApps]', 'color: green;', 'Error: Failed to get app list from ' + host.hostname + '. Host object: ', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
-        var errorAppListImg = new Image();
-        errorAppListImg.src = 'static/res/applist_error.svg';
-        $('#game-grid').html(errorAppListImg);
-        snackbarLogLong('Unable to retrieve your list of apps at this time. Please refresh the list of apps or try again later!');
-
-        // Navigate to the Apps view
-        showAppsMode();
-        reject(failedAppList);
-      });
-    }, 500);
-  });
+  return ConsoleLibrary.open(host);
 }
 
 // Show a confirmation with the Quit App dialog before stopping the running app
@@ -1980,7 +1692,7 @@ function quitAppDialog() {
       var quitAppDialog = document.querySelector('#quitAppDialog');
 
       // Change the dialog text element to include the game title
-      document.getElementById('quitAppDialogText').innerHTML = 'Are you sure you want to quit ' + currentGame.title + '? All unsaved data will be lost.';
+      document.getElementById('quitAppDialogText').textContent = 'Are you sure you want to quit ' + currentGame.title + '? All unsaved data will be lost.';
       
       // Show the dialog and push the view
       quitAppOverlay.style.display = 'flex';
@@ -2020,6 +1732,11 @@ function quitAppDialog() {
 function showStreamMode() {
   console.log('%c[index.js, showStreamMode]', 'color: green;', 'Entering "Show Stream" mode.');
   stopSubnetScanner();
+  ConsoleLibrary.suspend();
+  clearTimeout(startupScanTimer);
+  repeatAction = null;
+  clearTimeout(repeatTimeout);
+  clearTimeout(navigationTimeout);
   $('#main-header').hide();
   $('#main-content').children().not('#listener, #loadingSpinner').hide();
   $('#main-content').addClass('fullscreen');
@@ -2072,12 +1789,7 @@ function handleOnScreenOverlays() {
 }
 
 // Start the given appID. If another app is running, offer to quit it. Otherwise, if the given app is already running, just resume it.
-function startGame(host, appID) {
-  if (!host || !host.paired) {
-    console.error('%c[index.js, startGame]', 'color: green;', 'Error: Attempted to start a game, but the host was not initialized properly! Host object: ', host);
-    return;
-  }
-
+function prepareStreamAudio() {
   // Create the AudioContext here, while still running synchronously inside the
   // user gesture handler. Creating it later, from a Promise callback or a WASM
   // proxied call, puts it outside the gesture and Tizen's autoplay policy makes
@@ -2102,6 +1814,15 @@ function startGame(host, appID) {
     window._mlAudioCtx = null;
   }
 
+}
+
+function startGame(host, appID, audioPrepared) {
+  if (!host || !host.paired) {
+    console.error('%c[index.js, startGame]', 'color: green;', 'Error: Attempted to start a game, but the host was not initialized properly! Host object: ', host);
+    return;
+  }
+  if (!audioPrepared) prepareStreamAudio();
+
   // Reset the scheduler for the new stream, also inside the gesture handler
   startAudioScheduler();
 
@@ -2115,7 +1836,7 @@ function startGame(host, appID) {
           var quitAppDialog = document.querySelector('#quitAppDialog');
 
           // Change the dialog text element to include the game title
-          document.getElementById('quitAppDialogText').innerHTML = currentApp.title + ' is already running. Would you like to quit it and start ' + appToStart.title + '?';
+          document.getElementById('quitAppDialogText').textContent = currentApp.title + ' is already running. Would you like to quit it and start ' + appToStart.title + '?';
 
           // Show the dialog and push the view
           quitAppOverlay.style.display = 'flex';
@@ -3069,7 +2790,7 @@ function loadSystemInfo() {
     console.log('%c[index.js, loadSystemInfo]', 'color: green;', 'HDR Capable: ' + (isHdrCapable ? 'Yes' : 'No'));
     // Insert the system information into the placeholder
     systemInfoPlaceholder.innerText =
-      'App Version: ' + appInfo.name + ' v' + buildVer + '\n' +
+      'App Version: ' + appInfo.name + ' v' + buildVer + ' · ' + getAppVariant() + '\n' +
       'Platform Version: Tizen ' + (platformVer ? platformVer : 'Unknown') + '\n' +
       'TV Model Series: ' + (modelSeries ? modelSeries : 'Unknown') + '\n' +
       'TV Model Name: ' + (modelName ? modelName : 'Unknown') + '\n' +
@@ -3078,6 +2799,15 @@ function loadSystemInfo() {
     console.error('%c[index.js, loadSystemInfo]', 'color: green;', 'Error: Failed to load system information!');
     systemInfoPlaceholder.innerText = 'Failed to load system information!';
   }
+}
+
+function getAppVariant() {
+  try {
+    var metadata = tizen.application.getAppMetaData(appInfo.id);
+    return metadata.some(function(m) {
+      return m.key === 'http://samsung.com/tv/metadata/use.game.mode' && m.value === 'true';
+    }) ? 'ForceGM' : 'Normal';
+  } catch (e) { return 'variant unavailable'; }
 }
 
 function loadUserData() {
@@ -3344,7 +3074,6 @@ function loadHTTPCertsCb() {
         sendMessage('makeCert', []).then(function(cert) {
           storeData('cert', cert, null);
           pairingCert = cert;
-          console.info('%c[index.js, loadHTTPCertsCb]', 'color: green;', 'Generated new certificate: ', cert);
         }, function(failedCert) {
           console.error('%c[index.js, loadHTTPCertsCb]', 'color: green;', 'Error: Failed to generate a new certificate! Returned error was: \n', failedCert + '!');
         }).then(function(ret) {
@@ -3380,8 +3109,10 @@ function loadHTTPCertsCb() {
         }
         startPollingHosts();
         console.log('%c[index.js, loadHTTPCertsCb]', 'color: green;', 'Loading previously connected hosts...');
-        // Start subnet scanning silently in the background after hosts are fully loaded
-        setTimeout(() => {
+        ConsoleLibrary.ready('hosts');
+        // Known PCs need no subnet-wide scan on every startup.
+        startupScanTimer = setTimeout(() => {
+          if (isInGame || Object.keys(hosts).length) return;
           snackbarLog('Scanning the local network to discover new hosts...');
           startSubnetScanner();
         }, 1000);

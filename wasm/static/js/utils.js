@@ -7,6 +7,21 @@ function formatAddressForUrl(address) {
   return address;
 }
 
+// For the few legacy dialogs that intentionally retain static <br> markup.
+function escapeHTML(value) {
+  return String(value == null ? '' : value).replace(/[&<>"']/g, function(c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+// Loopback metadata refers to the PC itself, not an address reachable by the TV.
+function isLoopbackHost(address) {
+  var value = String(address || '').trim().toLowerCase().replace(/^\[|\]$/g, '').replace(/\.$/, '');
+  return value === 'localhost' || value.endsWith('.localhost') ||
+    /^127\./.test(value) || value === '::1' || value === '0:0:0:0:0:0:0:1' ||
+    /^::ffff:127\./.test(value);
+}
+
 function guuid() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     var r = Math.random() * 16 | 0,
@@ -160,19 +175,35 @@ NvHTTP.prototype = {
       var url = (secure ? 'https://' : 'http://') + base + ':' +
         (secure ? self.httpsPort : self.httpPort) + '/serverinfo?' + self._buildUidStr();
       return scope.request(function() {
-        return sendMessage('openUrl', [url, self.ppkstr, false]);
+        return sendMessage('openUrlScoped', [url, self.ppkstr, false, 4500]);
       }, 5000).then(function(xml) {
         if (!scope.active) throw new Error('Menu request cancelled');
-        if (!self._parseServerInfo(xml)) {
-          if (secure) return read(false);
+        if (!self._parseServerInfo(xml, secure)) {
           throw new Error('Invalid server response');
         }
       }, function(error) {
-        if (scope.active && secure && error == -100) return read(false);
+        // A stored pin must never be downgraded to HTTP, including during boot.
+        if (scope.active && secure && error == -100) self.paired = false;
         throw error;
       });
     }
+    this._authenticatedOnline = false;
     return read(this.ppkstr != null);
+  },
+
+  connect: function(scope) {
+    var self = this;
+    return new Promise(function(resolve, reject) {
+      self.selectServerAddress(resolve, reject, scope);
+    }).then(function(address) {
+      if (scope && !scope.active) throw new Error('Menu request cancelled');
+      self.address = address;
+      self._baseUrlHttp = 'http://' + formatAddressForUrl(address) + ':' + self.httpPort;
+      self._baseUrlHttps = 'https://' + formatAddressForUrl(address) + ':' + self.httpsPort;
+      self.online = true; self._consecutivePollFailures = 0;
+      if (typeof updateHostStatusIndicator === 'function') updateHostStatusIndicator(self);
+      return address;
+    });
   },
 
   getUid: function() {
@@ -180,11 +211,12 @@ NvHTTP.prototype = {
   },
 
   _openUrlWithTimeout: function(url, ppkstr) {
+    var request = sendMessage('openUrlScoped', [url, ppkstr, false, 4500]);
     return withTimeout(
-      sendMessage('openUrl', [url, ppkstr, false]),
+      request,
       5000,
       'Timeout retrieving server info',
-      function() { sendMessage('cancelRequest', []); }
+      function() { if (request.cancel) request.cancel(); }
     ).catch(error => {
       if (error && error.message === 'Timeout retrieving server info') {
         throw -1;
@@ -196,69 +228,23 @@ NvHTTP.prototype = {
   // Refreshes the server info using the base URL. This is useful for testing whether we can successfully ping a host at the base URL
   refreshServerInfo: function(scope) {
     if (scope) return this.refreshServerInfoScoped(this.address, scope);
-    if (this.ppkstr == null) {
-      // Use HTTP if we have no pinned cert
-      return this._openUrlWithTimeout(this._baseUrlHttp + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(retHttp) {
-        this._parseServerInfo(retHttp);
-      }.bind(this));
-    }
-    // Try HTTPS first
-    return this._openUrlWithTimeout(this._baseUrlHttps + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(ret) {
-      if (!this._parseServerInfo(ret)) { // If that fails
-        console.error('%c[utils.js, refreshServerInfo]', 'color: gray;', 'Error: Failed to parse server info from HTTPS, falling back to HTTP...');
-        // Try HTTP as a failover. Useful to clients who aren't paired yet
-        return this._openUrlWithTimeout(this._baseUrlHttp + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(retHttp) {
-          if (!this._parseServerInfo(retHttp)) {
-            return Promise.reject("Failed to parse server info from HTTP");
-          }
-        }.bind(this));
-      }
-    }.bind(this), function(error) {
-      if (error == -100) { // GS_CERT_MISMATCH
-        console.warn('%c[utils.js, refreshServerInfo]', 'color: gray;', 'Warning: Certificate mismatch. Retrying over HTTP...', this);
-        return this._openUrlWithTimeout(this._baseUrlHttp + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(retHttp) {
-          if (!this._parseServerInfo(retHttp)) {
-            return Promise.reject("Failed to parse server info from HTTP");
-          }
-        }.bind(this));
-      }
-      return Promise.reject(error);
-    }.bind(this));
+    return this.refreshServerInfoAtAddress(this.address);
   },
 
   // Refreshes the server info using a given address. This is useful for testing whether we can successfully ping a host at a given address
   refreshServerInfoAtAddress: function(givenAddress, scope) {
     if (scope) return this.refreshServerInfoScoped(givenAddress, scope);
     var urlAddr = formatAddressForUrl(givenAddress);
-    if (this.ppkstr == null) {
-      // Use HTTP if we have no pinned cert
-      return this._openUrlWithTimeout('http://' + urlAddr + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(retHttp) {
-        var parsed = this._parseServerInfo(retHttp);
-        if (!parsed) return Promise.reject("Failed to parse server info from HTTP");
-        return parsed;
-      }.bind(this));
-    }
-    // Try HTTPS first
-    return this._openUrlWithTimeout('https://' + urlAddr + ':' + this.httpsPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(ret) {
-      if (!this._parseServerInfo(ret)) { // If that fails
-        console.error('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'Error: Failed to parse server info from HTTPS, falling back to HTTP...');
-        // Try HTTP as a failover. Useful to clients who aren't paired yet
-        return this._openUrlWithTimeout('http://' + urlAddr + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(retHttp) {
-          var parsed = this._parseServerInfo(retHttp);
-          if (!parsed) return Promise.reject("Failed to parse server info from HTTP");
-          return parsed;
-        }.bind(this));
-      }
+    var secure = this.ppkstr != null;
+    this._authenticatedOnline = false;
+    var url = (secure ? 'https://' : 'http://') + urlAddr + ':' +
+      (secure ? this.httpsPort : this.httpPort) + '/serverinfo?' + this._buildUidStr();
+    return this._openUrlWithTimeout(url, this.ppkstr).then(function(ret) {
+      if (!this._parseServerInfo(ret, secure)) throw new Error('Invalid server response');
+      return true;
     }.bind(this), function(error) {
-      if (error == -100) { // GS_CERT_MISMATCH
-        console.warn('%c[utils.js, refreshServerInfoAtAddress]', 'color: gray;', 'Warning: Certificate mismatch. Retrying over HTTP...', this);
-        return this._openUrlWithTimeout('http://' + urlAddr + ':' + this.httpPort + '/serverinfo?' + this._buildUidStr(), this.ppkstr).then(function(retHttp) {
-          var parsed = this._parseServerInfo(retHttp);
-          if (!parsed) return Promise.reject("Failed to parse server info from HTTP");
-          return parsed;
-        }.bind(this));
-      }
-      return Promise.reject(error);
+      if (secure && error == -100) this.paired = false;
+      throw error;
     }.bind(this));
   },
 
@@ -336,19 +322,20 @@ NvHTTP.prototype = {
     var candidates = [];
 
     var addCandidate = function(addr) {
-      if (addr && !seen[addr]) { // skip empty strings AND duplicates
+      if (typeof addr === 'string') addr = addr.trim();
+      if (addr && !isLoopbackHost(addr) && !seen[addr]) {
         seen[addr] = true;
         candidates.push(addr);
       }
     };
 
     addCandidate(this.address);
-    if (scope) addCandidate(this.localAddress);
+    addCandidate(this.localAddress);
+    addCandidate(this.userEnteredAddress);
     // Only append '.local' if the hostname doesn't already end with it
     var localSuffix = this.hostname.endsWith('.local') ? this.hostname : this.hostname + '.local';
-    addCandidate(localSuffix);
     addCandidate(this.externalIP);
-    addCandidate(this.userEnteredAddress);
+    addCandidate(localSuffix);
 
     var tryNext = function(index) {
       if (scope && !scope.active) return;
@@ -400,7 +387,10 @@ NvHTTP.prototype = {
     return string;
   },
 
-  _parseServerInfo: function(xmlStr) {
+  _parseServerInfo: function(xmlStr, authenticated) {
+    // Defense in depth: even a stray legacy caller cannot overwrite pinned
+    // host identity, ports, addresses or capabilities with untrusted metadata.
+    if (this.ppkstr && authenticated !== true) return false;
     $xml = this._parseXML(xmlStr);
     $root = $xml.find('root');
 
@@ -413,7 +403,7 @@ NvHTTP.prototype = {
       return false;
     }
 
-    console.log('%c[utils.js, _parseServerInfo]', 'color: gray;', 'Parsing server info: ', $root);
+    // Server info contains private host identifiers; do not dump the XML.
 
     // Retrieve the hostname and handle name validation
     var serverName = $root.find('hostname').text().trim();
@@ -430,7 +420,8 @@ NvHTTP.prototype = {
     this.localAddress = $root.find('LocalIP').text().trim();
     // Missing/zero addresses must not erase the last physical NIC we learned.
     var learnedMac = normalizeWakeMac($root.find('mac').text());
-    if (learnedMac) this.macAddress = learnedMac;
+    var macChanged = authenticated === true && learnedMac && learnedMac !== this.macAddress;
+    if (macChanged) this.macAddress = learnedMac;
 
     // This is an extension which is not present in GFE. It is present for Sunshine to be able
     // to support dynamic HTTP WAN ports without requiring the user to manually enter the port.
@@ -445,7 +436,10 @@ NvHTTP.prototype = {
     }
 
     // These are present in all supported GFE versions
-    this.paired = $root.find('PairStatus').text().trim() == 1;
+    // HTTP deliberately reports PairStatus=0 even for an already paired client.
+    // Do not erase a known pairing merely because HTTPS is not ready yet.
+    if (authenticated !== false || !this.ppkstr) this.paired = $root.find('PairStatus').text().trim() == 1;
+    this._authenticatedOnline = authenticated === true && this.paired;
     this.appVersion = $root.find('appversion').text().trim();
     this.serverMajorVersion = parseInt(this.appVersion.substring(0, 1), 10);
 
@@ -489,6 +483,7 @@ NvHTTP.prototype = {
       this.currentGame = 0;
     }
 
+    if (macChanged && typeof updateMacAddress === 'function') updateMacAddress(this);
     return true;
   },
 
@@ -526,8 +521,8 @@ NvHTTP.prototype = {
 
   getAppListWithCacheFlush: function(scope) {
     var request = scope
-      ? scope.request(() => sendMessage('openUrl', [
-          this._baseUrlHttps + '/applist?' + this._buildUidStr(), this.ppkstr, false
+      ? scope.request(() => sendMessage('openUrlScoped', [
+          this._baseUrlHttps + '/applist?' + this._buildUidStr(), this.ppkstr, false, 9000
         ]), 10000)
       : withTimeout(
       sendMessage('openUrl', [
@@ -581,55 +576,81 @@ NvHTTP.prototype = {
   // Returns the box art based on the the given appId
   // Three layers of response time are possible: memory-cached (in JavaScript), storage-cached (in tizen.filesystem), and network-fetched (host sends binary over the network)
   // For explanations on the file system, see: https://developer.samsung.com/smarttv/develop/api-references/tizen-web-device-api-references/filesystem-api.html
-  getBoxArt: function(appId) {
-    return new Promise(function(resolve, reject) {
-      var boxArtFileName = 'boxart-' + appId;
-      var boxArtDir = 'wgt-private/' + this.hostname; // Widget private storage directory is r/w (read/write)
-
-      // Read the cached box art from the storage
-      try {
-        var fileHandleRead = tizen.filesystem.openFile(boxArtDir + '/' + boxArtFileName, 'r');
-        var fileContentInBlob = fileHandleRead.readBlob();
-        fileHandleRead.close();
-        console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Returning storage-cached box art: ', appId);
-
-        var reader = new FileReader();
+  getBoxArt: function(appId, scope, cacheOnly, forceRefresh) {
+    var self = this;
+    var valid = function() { return !isInGame && (!scope || scope.active); };
+    var check = function() { if (!valid()) throw new Error('Menu request cancelled'); };
+    // Keep existing safe cache names; server metadata cannot escape this directory.
+    var name = String(this.hostname || this.serverUid).replace(/[\\/]/g, '_');
+    if (!name || name === '.' || name === '..') name = 'PC';
+    var fileName = 'wgt-private/' + name + '/boxart-' + appId;
+    var decode = function(blob) {
+      var read = function() {
+        var reader, image, rejectRead;
+        var result = new Promise(function(resolve, reject) {
+        rejectRead = reject;
+        if (!valid()) { reject(new Error('Menu request cancelled')); return; }
+        if (!blob || !blob.size) { reject(new Error('Empty cached cover')); return; }
+        reader = new FileReader();
+        reader.onerror = function() { reject(new Error('Unreadable cover')); };
         reader.onloadend = function() {
-          var dataUrl = reader.result;
-          resolve(dataUrl);
-        };
-        reader.readAsDataURL(fileContentInBlob);
-      } catch (readError) {
-        console.warn('%c[utils.js, getBoxArt]', 'color: gray;', 'Warning: Cannot find or read box art from internal storage: ', readError);
-        // Fetch the new box art from the network
-        return sendMessage('openUrl', [
-          this._baseUrlHttps + '/appasset?' + this._buildUidStr() + '&appid=' + appId + '&AssetType=2&AssetIdx=0', this.ppkstr, true
-        ]).then(function(boxArtBuffer) {
-          var reader = new FileReader();
-          reader.onloadend = function() {
-            var dataUrl = reader.result;
-            try {
-              // Save the new box art file to the storage
-              var fileHandleWrite = tizen.filesystem.openFile(boxArtDir + '/' + boxArtFileName, 'w');
-              fileHandleWrite.writeData(boxArtBuffer);
-              fileHandleWrite.close();
-              console.log('%c[utils.js, getBoxArt]', 'color: gray;', 'Returning network-fetched box art: ', appId);
-              resolve(dataUrl);
-            } catch (writeError) {
-              console.error('%c[utils.js, getBoxArt]', 'color: gray;', 'Error: Unable to save or write box art to internal storage: ', writeError);
-              reject(writeError);
-            }
+          if (!valid()) { reject(new Error('Menu request cancelled')); return; }
+          if (reader.error || typeof reader.result !== 'string') { reject(new Error('Unreadable cover')); return; }
+          // Validate decoding, not just a PNG signature: corrupt nonempty caches
+          // must recover too. This runs only in the visible menu.
+          image = new Image();
+          image.onload = function() {
+            image.onload = image.onerror = null;
+            if (!valid()) reject(new Error('Menu request cancelled'));
+            else resolve(reader.result);
           };
-          var blob = new Blob([boxArtBuffer], {
-            type: 'image/png'
-          });
-          reader.readAsDataURL(blob);
-        }.bind(this), function(error) {
-          console.error('%c[utils.js, getBoxArt]', 'color: gray;', 'Error: Failed to retrieve box art from network: ', error);
-          reject(error);
-        }.bind(this));
-      }
-    }.bind(this));
+          image.onerror = function() { image.onload = image.onerror = null; reject(new Error('Invalid cover image')); };
+          image.src = reader.result;
+        };
+        reader.readAsDataURL(new Blob([blob], { type: 'image/png' }));
+        });
+        result.cancel = function() {
+          if (reader) {
+            reader.onloadend = reader.onerror = null;
+            if (reader.readyState === 1) { try { reader.abort(); } catch (e) {} }
+          }
+          if (image) { image.onload = image.onerror = null; image.src = ''; }
+          rejectRead(new Error('Menu request cancelled'));
+        };
+        return result;
+      };
+      return scope ? scope.request(read, 5000) : read();
+    };
+    var cached = function() {
+      var handle;
+      try {
+        check(); handle = tizen.filesystem.openFile(fileName, 'r');
+        return decode(handle.readBlob());
+      } catch (error) { return Promise.reject(error); }
+      finally { if (handle) { try { handle.close(); } catch (e) {} } }
+    };
+    var fetch = function() {
+      if (!valid()) return Promise.reject(new Error('Menu request cancelled'));
+      var request = function() { return sendMessage(scope ? 'openUrlScoped' : 'openUrl', [
+        self._baseUrlHttps + '/appasset?' + self._buildUidStr() + '&appid=' + appId + '&AssetType=2&AssetIdx=0', self.ppkstr, true
+      ].concat(scope ? [9000] : [])); };
+      return (scope ? scope.request(request, 10000) : request()).then(function(buffer) {
+        check();
+        return decode(new Blob([buffer], { type: 'image/png' })).then(function(url) {
+          check(); var handle;
+          try {
+            handle = tizen.filesystem.openFile(fileName, 'w'); handle.writeData(buffer);
+          } catch (e) {
+            // Cache/full-storage errors must not hide a valid downloaded cover.
+            console.warn('Cover displayed without caching.');
+          } finally { if (handle) { try { handle.close(); } catch (e) {} } }
+          return url;
+        });
+      });
+    };
+    if (cacheOnly) return cached();
+    // Refresh renews covers without deleting a working offline cache first.
+    return forceRefresh ? fetch().catch(cached) : cached().catch(fetch);
   },
 
   clearBoxArt: function() {
@@ -711,7 +732,13 @@ NvHTTP.prototype = {
         ).then(function(ret) {
           $xml = this._parseXML(ret);
           this.paired = $xml.find('paired').html() == '1';
-          return this.paired;
+          if (!this.paired) throw new Error('Sunshine did not confirm pairing');
+          // HTTP serverinfo before PIN confirmation intentionally contains no
+          // usable MAC. Learn it through pinned HTTPS immediately afterwards.
+          return this.refreshServerInfo().catch(function() {}).then(function() {
+            if (typeof updateMacAddress === 'function') updateMacAddress(this);
+            return true;
+          }.bind(this));
         }.bind(this));
       }.bind(this));
     }.bind(this));
@@ -720,7 +747,7 @@ NvHTTP.prototype = {
   sendWOL: function() {
     var mac = normalizeWakeMac(this.wakeMacOverride || this.macAddress);
     if (!mac) return Promise.reject(new Error('Enter the physical network adapter MAC address.'));
-    return sendMessage('wakeOnLan', [mac]);
+    return sendMessage('wakeOnLan', [mac, getWakeBroadcastAddress()]);
   },
 
   _buildUidStr: function() {

@@ -17,6 +17,8 @@ const Controller = (function() {
 
     analyzeButtonsAndAxes(newButtons, newAxes) {
       if (this.buttons.length !== newButtons.length || this.axes.length !== newAxes.length) {
+        this.buttons = newButtons.map((button) => new Button(button));
+        this.axes = newAxes.slice();
         return;
       }
       const changes = [];
@@ -51,7 +53,9 @@ const Controller = (function() {
       (navigator.webkitGetGamepads ? navigator.webkitGetGamepads() : []);
     for (var i = 0; i < pads.length; i++) {
       var pad = pads[i];
-      if (pad && gamepads[pad.index]) {
+      if (pad && pad.connected && !gamepads[pad.index]) {
+        gamepads[pad.index] = new Gamepad(pad);
+      } else if (pad && gamepads[pad.index]) {
         gamepads[pad.index].analyzeButtonsAndAxes(pad.buttons, pad.axes);
       }
     }
@@ -61,6 +65,11 @@ const Controller = (function() {
     if (!pollingInterval) {
       window.addEventListener('gamepadconnected', onGamepadConnected);
       window.addEventListener('gamepaddisconnected', onGamepadDisconnected);
+      // A controller can already be connected when the app/menu becomes active.
+      const pads = navigator.getGamepads ? navigator.getGamepads() : [];
+      for (const pad of pads) {
+        if (pad && pad.connected) gamepads[pad.index] = new Gamepad(pad);
+      }
       pollingInterval = setInterval(pollGamepads, 16);
     }
   }
@@ -463,7 +472,9 @@ function _rumblePump() {
     }
     _rumbleLastApplied[slot] = packed;
     _rumbleRenewedAt[slot] = now;
-    _rumbleNextAllowed[slot] = packed === 0 ? 0 : now + _RUMBLE_MIN_INTERVAL_MS;
+    // A stop is immediate, but must not erase the deadline of the last start.
+    // Otherwise alternating short pulses bypass the 10 Hz start limit entirely.
+    if (packed !== 0) _rumbleNextAllowed[slot] = now + _RUMBLE_MIN_INTERVAL_MS;
     _rumbleRetry[slot] = 0;
     if (packed === 0) { _rumbleInvalidateInflight(slot); }
     var failed = _rumbleFailureHandler(slot, ++_rumbleAttempt[slot], _rumbleGeneration[slot]);

@@ -4,6 +4,27 @@
 #include <errors.h>
 #include <string.h>
 #include <memory>
+#include <algorithm>
+#include <chrono>
+#include <mutex>
+#include <unordered_map>
+
+namespace {
+std::mutex menuRequestMutex;
+std::unordered_map<int, std::shared_ptr<int>> menuRequests;
+void cancelMenuRequest(int callbackId) {
+  std::lock_guard<std::mutex> lock(menuRequestMutex);
+  const auto it = menuRequests.find(callbackId);
+  if (it != menuRequests.end()) __atomic_store_n(it->second.get(), 1, __ATOMIC_RELAXED);
+}
+struct MenuRequestCleanup {
+  int id;
+  ~MenuRequestCleanup() {
+    std::lock_guard<std::mutex> lock(menuRequestMutex);
+    menuRequests.erase(id);
+  }
+};
+}
 
 #include <mkcert.h>
 #include <openssl/bio.h>
@@ -139,6 +160,43 @@ void MoonlightInstance::OpenUrl(int callbackId, std::string url, std::string ppk
   m_Dispatcher.post_job(std::bind(&MoonlightInstance::OpenUrl_private, this, callbackId, url, ppk, binaryResponse), false);
 }
 
+void MoonlightInstance::OpenUrlScoped(int callbackId, std::string url, std::string ppk,
+                                      bool binaryResponse, int timeoutMs) {
+  // Only menu metadata/artwork uses this path; launch/resume/pair stay unchanged.
+  const auto cancelled = std::make_shared<int>(0);
+  const auto deadline = std::chrono::steady_clock::now() +
+    std::chrono::milliseconds(std::max(1, std::min(timeoutMs, 10000)));
+  {
+    std::lock_guard<std::mutex> lock(menuRequestMutex);
+    menuRequests[callbackId] = cancelled;
+  }
+  m_Dispatcher.post_job([this, callbackId, url, ppk, binaryResponse, cancelled, deadline]() {
+    MenuRequestCleanup cleanup{callbackId};
+    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
+      deadline - std::chrono::steady_clock::now()).count();
+    if (remaining <= 0 || __atomic_load_n(cancelled.get(), __ATOMIC_RELAXED)) {
+      PostPromiseMessage(callbackId, "reject", "Menu request cancelled or expired.");
+      return;
+    }
+    std::unique_ptr<HTTP_DATA, decltype(&http_free_data)> data(http_create_data(), http_free_data);
+    if (!data) {
+      PostPromiseMessage(callbackId, "reject", "Error when creating data buffer.");
+      return;
+    }
+    const int err = http_request_bounded(url.c_str(), ppk.empty() ? nullptr : ppk.c_str(),
+                                        data.get(), static_cast<int>(remaining), cancelled.get());
+    if (err || __atomic_load_n(cancelled.get(), __ATOMIC_RELAXED)) {
+      PostPromiseMessage(callbackId, "reject", std::to_string(err ? err : GS_FAILED));
+    } else if (binaryResponse) {
+      std::vector<uint8_t> response(data->size);
+      if (data->size) memcpy(response.data(), data->memory, data->size);
+      PostPromiseMessage(callbackId, "resolve", response);
+    } else {
+      PostPromiseMessage(callbackId, "resolve", std::string(data->memory, data->size));
+    }
+  }, false);
+}
+
 MessageResult makeCert() {
   return g_Instance->MakeCert();
 }
@@ -155,8 +213,15 @@ void openUrl(int callbackId, std::string url, emscripten::val ppk, bool binaryRe
   g_Instance->OpenUrl(callbackId, url, ppkstr, binaryResponse);
 }
 
+void openUrlScoped(int callbackId, std::string url, emscripten::val ppk, bool binaryResponse, int timeoutMs) {
+  g_Instance->OpenUrlScoped(callbackId, url, ppk == emscripten::val::null() ? "" : ppk.as<std::string>(),
+                            binaryResponse, timeoutMs);
+}
+
 EMSCRIPTEN_BINDINGS(http) {
   emscripten::function("makeCert", &makeCert);
   emscripten::function("httpInit", &httpInit);
   emscripten::function("openUrl", &openUrl);
+  emscripten::function("openUrlScoped", &openUrlScoped);
+  emscripten::function("cancelMenuRequest", &cancelMenuRequest);
 }

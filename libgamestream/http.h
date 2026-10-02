@@ -32,6 +32,9 @@ typedef struct _HTTP_DATA {
 
 PHTTP_DATA http_create_data();
 int http_request(const char* url, const char* ppkstr, PHTTP_DATA data);
+// Menu requests have their own deadline/cancel flag, independent of pairing.
+int http_request_bounded(const char* url, const char* ppkstr, PHTTP_DATA data,
+                         int timeout_ms, const int* cancelled);
 void http_free_data(PHTTP_DATA data);
 
 #ifdef __cplusplus

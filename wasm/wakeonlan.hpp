@@ -5,6 +5,9 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <arpa/inet.h>
+#include <chrono>
+#include <thread>
 
 namespace mlwol {
 inline int Hex(char c) {
@@ -28,7 +31,7 @@ inline bool Packet(const std::string& text, std::array<unsigned char, 102>& pack
   for (int i = 0; i < 16; ++i) std::memcpy(packet.data() + 6 + i * 6, mac, 6);
   return true;
 }
-inline std::string Send(const std::string& mac) {
+inline std::string Send(const std::string& mac, const std::string& subnetBroadcast = "") {
   std::array<unsigned char, 102> packet;
   if (!Packet(mac, packet)) return "Invalid physical network adapter MAC address.";
   const int fd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -40,14 +43,24 @@ inline std::string Send(const std::string& mac) {
   }
   sockaddr_in address{};
   address.sin_family = AF_INET;
-  address.sin_port = htons(9);
   address.sin_addr.s_addr = INADDR_BROADCAST;
+  in_addr directed{};
+  const bool useDirected = !subnetBroadcast.empty() &&
+    inet_pton(AF_INET, subnetBroadcast.c_str(), &directed) == 1 &&
+    directed.s_addr != INADDR_ANY && directed.s_addr != INADDR_BROADCAST;
   bool sent = false;
-  // Finite burst, no resident worker/timer or unscoped IPv6 multicast.
+  // Finite, spaced burst over the common ports and actual TV subnet broadcast.
   for (int i = 0; i < 3; ++i) {
-    sent |= sendto(fd, packet.data(), packet.size(), MSG_DONTWAIT,
-                   reinterpret_cast<sockaddr*>(&address), sizeof(address)) ==
-            static_cast<ssize_t>(packet.size());
+    for (int target = 0; target < (useDirected ? 2 : 1); ++target) {
+      address.sin_addr.s_addr = target ? directed.s_addr : INADDR_BROADCAST;
+      for (int port : {9, 7}) {
+        address.sin_port = htons(port);
+        sent |= sendto(fd, packet.data(), packet.size(), MSG_DONTWAIT,
+                      reinterpret_cast<sockaddr*>(&address), sizeof(address)) ==
+                static_cast<ssize_t>(packet.size());
+      }
+    }
+    if (i < 2) std::this_thread::sleep_for(std::chrono::milliseconds(75));
   }
   close(fd);
   return sent ? "" : "TV could not send the local Wake-on-LAN broadcast.";

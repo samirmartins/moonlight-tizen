@@ -12,6 +12,7 @@
 #include <emscripten.h>
 
 #include <h264_stream.h>
+#include "h264_sps.hpp"
 
 #include <assert.h>
 #include <pthread.h>
@@ -64,13 +65,8 @@ static constexpr int kPtsRateWindowFrames = 64;
 static constexpr double kPtsStepMinFactor = 0.5;
 static constexpr double kPtsStepMaxFactor = 2.0;
 
-// Stages of the H.264 SPS fixup, so a decoder that dislikes one of them can be
-// bisected by lowering this rather than by rebuilding with parts commented out.
-//   0 = off, the bitstream is passed through untouched
-//   1 = declare the bitstream restrictions: no reordering, one buffered frame
-//   2 = also cap the reference frame count at one
-//   3 = also lower level_idc to the smallest level that fits the resolution
-static constexpr int kSpsFixupStage = 3;
+// Low-delay VUI only: retain the host's reference count, profile and level.
+static constexpr int kSpsFixupStage = 1;
 
 // Minimum interval between IDR requests triggered by append failures. A
 // keyframe costs several times a P-frame, so one request per rejected packet
@@ -271,6 +267,20 @@ void MoonlightInstance::SourceListener::OnSourceClosed() {
   m_Instance->m_EmssStateChanged.notify_all();
 }
 
+void MoonlightInstance::SourceListener::OnPipelineError(
+  samsung::wasm::MediaPipelineError error, const char*) {
+  if (!m_Instance->m_H264DecoderActive.load() || m_Instance->m_ConnectionCancelled.load()) return;
+  {
+    std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
+    m_Instance->m_H264PipelineFailed = true;
+  }
+  m_Instance->m_EmssStateChanged.notify_all();
+  m_Instance->m_EmssVideoStateChanged.notify_all();
+  ClLogMessage("H.264 decoder pipeline rejected the stream (error %d)\n", static_cast<int>(error));
+  PostToJs("DecoderError: H.264 decoder error. Try HEVC or AV1 on this TV.");
+  if (m_Instance->m_VideoStarted.load()) m_Instance->StopConnection();
+}
+
 // Records where the pipeline says it is. Deliberately does nothing else: this
 // runs on the main thread, and the frame path must never wait on it. It only
 // publishes two numbers that the decoder thread reads without locking.
@@ -351,9 +361,9 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
   g_Instance->m_MediaElement.SetSrc(g_Instance->m_Source.get());
   ClLogMessage("Waiting to close\n");
 
-  g_Instance->WaitFor(&g_Instance->m_EmssStateChanged, [] {
+  if (!g_Instance->WaitFor(&g_Instance->m_EmssStateChanged, [] {
     return g_Instance->m_EmssReadyState == EmssReadyState::kClosed;
-  });
+  })) return -1;
   if (g_Instance->m_ConnectionCancelled) {
     ClLogMessage("Connection cancelled during initial close wait\n");
     return -1;
@@ -459,10 +469,10 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
 
   ClLogMessage("Inb4 source open\n");
   g_Instance->m_Source->Open([](EmssOperationResult){});
-  g_Instance->WaitFor(&g_Instance->m_EmssStateChanged, [] {
+  if (!g_Instance->WaitFor(&g_Instance->m_EmssStateChanged, [] {
     return g_Instance->m_EmssReadyState == EmssReadyState::kOpenPending || 
            g_Instance->m_EmssReadyState == EmssReadyState::kOpen;
-  });
+  })) return -1;
   if (g_Instance->m_ConnectionCancelled) {
     ClLogMessage("Connection cancelled during open wait\n");
     return -1;
@@ -478,9 +488,9 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
   });
 
   ClLogMessage("Waiting for the video track to open\n");
-  g_Instance->WaitFor(&g_Instance->m_EmssVideoStateChanged, [] {
+  if (!g_Instance->WaitFor(&g_Instance->m_EmssVideoStateChanged, [] {
     return g_Instance->m_VideoStarted.load();
-  });
+  })) return -1;
   if (g_Instance->m_ConnectionCancelled) {
     ClLogMessage("Connection cancelled during video wait\n");
     return -1;
@@ -498,6 +508,8 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
 
   // Set the video format, video resolution and video frame rate based on the input parameters
   s_VideoFormat = videoFormat;
+  g_Instance->m_H264DecoderActive = (videoFormat & VIDEO_FORMAT_H264) != 0;
+  g_Instance->m_H264PipelineFailed = false;
   s_Width = width;
   s_Height = height;
   s_Framerate = redrawRate;
@@ -579,7 +591,7 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
 // Rewrites an H.264 SPS so the decoder provisions for a low delay stream.
 //
 // The stream is always low delay: the host emits I and P frames only, never
-// reorders, and keeps a single reference. The SPS it sends does not say so. A
+// reorders. Its reference count must remain what the encoder actually uses. A
 // hardware decoder reading an SPS with no bitstream restrictions does what the
 // standard requires and assumes reordering is possible, so it sizes its picture
 // buffer from level_idc and holds several frames before emitting the first. That
@@ -593,84 +605,7 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
 // h264bitstream handles the emulation prevention bytes in both directions, which
 // is the part that is genuinely awkward to do by hand. Returns the number of
 // bytes written to `out`, or 0 to mean "use the original".
-static unsigned int FixupSps(const uint8_t* nalu, unsigned int naluLen,
-                             uint8_t* out, unsigned int outCapacity) {
-  if (kSpsFixupStage <= 0 || naluLen < 5) {
-    return 0;
-  }
-
-  // Locate the Annex B start code so the NAL header can be handed to the parser
-  // at the right offset. Both three and four byte forms occur.
-  unsigned int startLen;
-  if (nalu[0] == 0x00 && nalu[1] == 0x00 && nalu[2] == 0x01) {
-    startLen = 3;
-  } else if (naluLen >= 6 && nalu[0] == 0x00 && nalu[1] == 0x00 &&
-             nalu[2] == 0x00 && nalu[3] == 0x01) {
-    startLen = 4;
-  } else {
-    return 0;
-  }
-
-  h264_stream_t* h = h264_new();
-  if (h == nullptr) {
-    return 0;
-  }
-
-  unsigned int written = 0;
-  do {
-    if (read_nal_unit(h, const_cast<uint8_t*>(nalu) + startLen,
-                      (int)(naluLen - startLen)) < 0) {
-      break;
-    }
-    if (h->nal->nal_unit_type != 7 || h->sps == nullptr) {
-      break;  // not an SPS after all
-    }
-
-    sps_t* sps = h->sps;
-
-    // Stage 1. The VUI is where the restrictions live, so it has to exist.
-    sps->vui_parameters_present_flag = 1;
-    sps->vui.bitstream_restriction_flag = 1;
-    sps->vui.num_reorder_frames = 0;
-    sps->vui.motion_vectors_over_pic_boundaries_flag = 1;
-    sps->vui.max_bytes_per_pic_denom = 2;
-    sps->vui.max_bits_per_mb_denom = 1;
-    sps->vui.log2_max_mv_length_horizontal = 16;
-    sps->vui.log2_max_mv_length_vertical = 16;
-
-    // Stage 2. One reference frame is all the stream uses. Some decoders reject
-    // a max_dec_frame_buffering below num_ref_frames, so the two move together.
-    if (kSpsFixupStage >= 2) {
-      sps->num_ref_frames = 1;
-    }
-    sps->vui.max_dec_frame_buffering = sps->num_ref_frames;
-
-    // Stage 3. Decoders that size their buffer from the declared level benefit
-    // from the smallest level that still fits. The thresholds match the ones in
-    // moonlight-android.
-    if (kSpsFixupStage >= 3) {
-      if (s_Width <= 720 && s_Height <= 480 && s_Framerate <= 60) {
-        sps->level_idc = 31;
-      } else if (s_Width <= 1280 && s_Height <= 720 && s_Framerate <= 60) {
-        sps->level_idc = 32;
-      } else if (s_Width <= 1920 && s_Height <= 1080 && s_Framerate <= 60) {
-        sps->level_idc = 42;
-      }
-      // Above 1080p, or above 60 Hz, leave the level as the host sent it
-    }
-
-    int rc = write_nal_unit(h, out + startLen, (int)(outCapacity - startLen));
-    if (rc <= 0) {
-      break;
-    }
-
-    memcpy(out, nalu, startLen);
-    written = startLen + (unsigned int)rc;
-  } while (false);
-
-  h264_free(h);
-  return written;
-}
+using mlh264::FixupSps;
 
 // Derives the presentation timestamp for the frame about to be submitted.
 //
@@ -1659,9 +1594,20 @@ void MoonlightInstance::SetDiagnostics(uint32_t generation) {
   m_PerformanceStatsEnabled = generation != 0 || m_OverlayStatsEnabled.load();
 }
 
-void MoonlightInstance::WaitFor(std::condition_variable* variable, std::function<bool()> condition) {
+bool MoonlightInstance::WaitFor(std::condition_variable* variable, std::function<bool()> condition) {
   std::unique_lock<std::mutex> lock(m_Mutex);
-  variable->wait(lock, [&]() { return m_ConnectionCancelled.load() || condition(); });
+  if (s_VideoFormat & VIDEO_FORMAT_H264) {
+    const bool ready = variable->wait_for(lock, std::chrono::seconds(15), [&]() {
+      return m_ConnectionCancelled.load() || m_H264PipelineFailed.load() || condition();
+    });
+    if (!ready || m_H264PipelineFailed.load()) {
+      ClLogMessage("H.264 decoder initialization failed or timed out\n");
+      return false;
+    }
+  } else {
+    variable->wait(lock, [&]() { return m_ConnectionCancelled.load() || condition(); });
+  }
+  return true;
 }
 
 DECODER_RENDERER_CALLBACKS MoonlightInstance::s_DrCallbacks = {

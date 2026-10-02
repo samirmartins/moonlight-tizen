@@ -35,9 +35,10 @@ static size_t _write_curl(void *contents, size_t size, size_t nmemb, void *userp
   size_t realsize = size * nmemb;
   PHTTP_DATA mem = (PHTTP_DATA)userp;
  
-  mem->memory = realloc(mem->memory, mem->size + realsize + 1);
-  if(mem->memory == NULL)
+  char* resized = realloc(mem->memory, mem->size + realsize + 1);
+  if(resized == NULL)
     return 0;
+  mem->memory = resized;
  
   memcpy(&(mem->memory[mem->size]), contents, realsize);
   mem->size += realsize;
@@ -70,13 +71,16 @@ void http_reset_cancel() {
 }
 
 static int _progress_callback(void *clientp, double dltotal, double dlnow, double ultotal, double ulnow) {
+  if (clientp != NULL)
+    return __atomic_load_n((const int*)clientp, __ATOMIC_RELAXED) != 0;
   if (g_CancelHttpRequest) {
     return 1;
   }
   return 0;
 }
 
-int http_request(const char* url, const char* ppkstr, PHTTP_DATA data) {
+int http_request_bounded(const char* url, const char* ppkstr, PHTTP_DATA data,
+                         int timeout_ms, const int* cancelled) {
   int ret;
   CURL *curl;
   const char* real_url = url;
@@ -84,15 +88,18 @@ int http_request(const char* url, const char* ppkstr, PHTTP_DATA data) {
   char* resolve_string = NULL;
   struct curl_slist *resolve_list = NULL;
 
-  http_reset_cancel();
+  if (cancelled == NULL) http_reset_cancel();
 
   curl = curl_easy_init();
+  if (curl == NULL) return GS_OUT_OF_MEMORY;
 
   curl_easy_setopt(curl, CURLOPT_CAINFO, "/curl/ca-bundle.crt");
   curl_easy_setopt(curl, CURLOPT_WRITEFUNCTION, _write_curl);
   curl_easy_setopt(curl, CURLOPT_FAILONERROR, 1L);
   curl_easy_setopt(curl, CURLOPT_NOPROGRESS, 0L);
   curl_easy_setopt(curl, CURLOPT_PROGRESSFUNCTION, _progress_callback);
+  curl_easy_setopt(curl, CURLOPT_PROGRESSDATA, cancelled);
+  if (timeout_ms > 0) curl_easy_setopt(curl, CURLOPT_TIMEOUT_MS, (long)timeout_ms);
   curl_easy_setopt(curl, CURLOPT_SSL_CTX_FUNCTION, *sslctx_function);
   curl_easy_setopt(curl, CURLOPT_SSL_SESSIONID_CACHE, 0L);
   curl_easy_setopt(curl, CURLOPT_MAXCONNECTS, 0L);
@@ -163,7 +170,8 @@ int http_request(const char* url, const char* ppkstr, PHTTP_DATA data) {
 
   CURLcode res = curl_easy_perform(curl);
 
-  printf("CURL: %s (PPK: '%s') -> %s\n", url, ppkstr ? ppkstr : "<NULL>", curl_easy_strerror(res));
+  // URLs may contain pairing secrets and private host identifiers.
+  printf("CURL request -> %s\n", curl_easy_strerror(res));
   
   if (res == CURLE_SSL_PINNEDPUBKEYNOTMATCH) {
     ret = GS_CERT_MISMATCH;
@@ -181,6 +189,10 @@ cleanup:
   if (resolve_list) curl_slist_free_all(resolve_list);
   curl_easy_cleanup(curl);
   return ret;
+}
+
+int http_request(const char* url, const char* ppkstr, PHTTP_DATA data) {
+  return http_request_bounded(url, ppkstr, data, 0, NULL);
 }
 
 PHTTP_DATA http_create_data() {

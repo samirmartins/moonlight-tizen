@@ -131,7 +131,7 @@ class MoonlightInstance {
 
   void STUN(int callbackId);
   void Pair(int callbackId, std::string serverMajorVersion, std::string address, int httpPort, std::string randomNumber);
-  void WakeOnLan(int callbackId, std::string macAddress);
+  void WakeOnLan(int callbackId, std::string macAddress, std::string broadcastAddress);
 
   virtual ~MoonlightInstance();
 
@@ -206,6 +206,7 @@ class MoonlightInstance {
 
   MessageResult HttpInit(std::string cert, std::string privateKey, std::string myUniqueId);
   void OpenUrl(int callbackId, std::string url, std::string ppk, bool binaryResponse);
+  void OpenUrlScoped(int callbackId, std::string url, std::string ppk, bool binaryResponse, int timeoutMs);
 
   LoadResult LoadCert(const char* certStr, const char* keyStr);
 
@@ -230,6 +231,7 @@ class MoonlightInstance {
     void OnSourceOpen() override;
     void OnSourceOpenPending() override;
     void OnSourceClosed() override;
+    void OnPipelineError(samsung::wasm::MediaPipelineError, const char*) override;
     // The pipeline's own clock. Samsung documents this as the preferred way to
     // receive time updates, and it is the only observable that tells us where
     // the TV actually is in the stream rather than where we assume it is.
@@ -248,7 +250,7 @@ class MoonlightInstance {
     MoonlightInstance* m_Instance;
   };
 
-  void WaitFor(std::condition_variable* variable, std::function<bool()> condition);
+  bool WaitFor(std::condition_variable* variable, std::function<bool()> condition);
 
   template<bool CollectStats>
   static int VidDecSubmitDecodeUnitImpl(PDECODE_UNIT decodeUnit);
@@ -287,12 +289,15 @@ class MoonlightInstance {
   std::atomic<int32_t> m_AccumulatedTicks;
   std::atomic<int32_t> m_MouseDeltaX, m_MouseDeltaY;
   Dispatcher m_Dispatcher;
+  Dispatcher m_WakeDispatcher;
 
   std::mutex m_Mutex;
   std::condition_variable m_EmssStateChanged;
   std::condition_variable m_EmssVideoStateChanged;
   EmssReadyState m_EmssReadyState;
   std::atomic<bool> m_VideoStarted;
+  std::atomic<bool> m_H264DecoderActive{false};
+  std::atomic<bool> m_H264PipelineFailed{false};
   std::atomic<bool> m_ConnectionCancelled;
   pthread_t m_StopThread;
   std::atomic<bool> m_StopNeedsLiStop;
@@ -335,7 +340,7 @@ MessageResult cancelRequest();
 void toggleStats();
 void stun(int callbackId);
 void pair(int callbackId, std::string serverMajorVersion, std::string address, int httpPort, std::string randomNumber, std::string uniqueId);
-void wakeOnLan(int callbackId, std::string macAddress);
+void wakeOnLan(int callbackId, std::string macAddress, std::string broadcastAddress);
 
 EM_BOOL handleKeyDown(int eventType, const EmscriptenKeyboardEvent* keyEvent, void* userData);
 EM_BOOL handleKeyUp(int eventType, const EmscriptenKeyboardEvent* keyEvent, void* userData);

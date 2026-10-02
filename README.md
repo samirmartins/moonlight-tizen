@@ -10,6 +10,8 @@ This fork focuses on smooth playback, low latency and full picture quality on Sa
 - Video is submitted directly on a clock disciplined against the TV, whose real refresh rate is reported to the host.
 - Gamepad input and rumble use coherent, coalesced state instead of blocking timing-critical paths.
 - Stream cleanup prevents work from one session leaking into the next.
+- A controller-first library keeps favorites, recent games and the last PC ready to
+  use, with Play, Resume and Wake & play in one screen.
 
 The implementation is capability-driven rather than tied to one TV model. Hardware
 validation is currently limited to a Samsung DU7700 running Tizen 9.0, with smooth
@@ -40,7 +42,7 @@ misbehaves on your TV.
 Both variants of the same release share an application ID and signing identity, so one
 replaces the other and keeps settings. Upgrades from older releases may be rejected if
 their author certificate differs. In that case the old widget must be uninstalled first,
-which removes its saved settings. A persistent release-signing certificate is still needed.
+which removes its saved settings. Published widgets use a persistent author certificate.
 
 ---
 
@@ -54,9 +56,12 @@ which removes its saved settings. A persistent release-signing certificate is st
   underrun, never beyond the selected value.
 - **Session diagnosis** is opt-in and resets to off when the app starts. It stores only the
   latest report locally; when off, its collection work is inactive.
-- **Wake-on-LAN** is available from an offline PC card or the PC menu. Its MAC stays in the
-  TV's local app storage and is sent only in the LAN wake packet; it is not embedded in the
-  widget or transmitted as telemetry.
+- **Wake & play** wakes an offline PC and launches the selected game when Sunshine is
+  ready. Checking the PC does not block waking it; **Refresh** restarts the check and
+  reloads games/covers. Menu requests are cancelled before streaming.
+- **Wake-on-LAN** learns the PC's MAC after successful pairing; a manual override remains
+  available. The MAC stays in TV storage and LAN wake packets, never in the widget or
+  diagnostic telemetry. Configure WoL on the PC and its network adapter first.
 
 ---
 

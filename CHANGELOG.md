@@ -7,6 +7,38 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.4.0
+
+### Added
+- Controller-first library with favorites, recent games, remembered selection/PC,
+  and Play, Resume and Wake & play actions
+- Normal/ForceGM identification in System Info and natural sorting of game titles
+
+### Fixed
+- Keeps Wake & play and Refresh available during Checking PC; bounds the full
+  check and ignores cancelled or superseded replies
+- Learns and saves the PC MAC after authenticated pairing, preserves valid/manual
+  addresses, and refreshes availability when Sunshine becomes ready
+- Sends WoL independently of HTTP requests, with spaced retries on common UDP
+  ports and subnet broadcast when available
+- Restores controller navigation after returning from settings and recognizes
+  controllers already connected when entering the menu
+- Corrects H.264 SPS serialization while preserving the encoder's reference count
+  and level; handles decoder startup errors and timeouts
+- Prevents alternating rumble start/stop pulses from bypassing the existing rate
+  limit, preserving motor intensities and immediate stop commands
+
+### Improved
+- Authenticates paired PC metadata over pinned HTTPS and displays external names
+  as text rather than HTML
+- Deduplicates concurrent PC opening, ignores loopback address candidates, and
+  cancels bounded menu requests before streaming
+- Recovers invalid cover caches, preserves offline covers on failed refreshes,
+  and displays downloaded covers even when storing them fails
+
+Direct video submission, PTS timing, HEVC/AV1, AudioWorklet and the diagnostic
+overlay are preserved. The legacy EMSS audio backend is not reintroduced.
+
 ## v3.3.10
 
 ### Improved

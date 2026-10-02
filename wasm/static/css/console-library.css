@@ -1,0 +1,31 @@
+/* Static, menu-only layout. No animations or continuous background effects. */
+#console-panel { display: none; margin: 24px 4vw 0; }
+#libraryHomeBtn, #libraryPCsBtn { display: none; }
+.console-library #main-header { background: #202633; box-shadow: none; }
+.console-library .mdl-layout__header-row { height: 76px; }
+.console-library #header-title { font-size: 26px; letter-spacing: 1px; text-shadow: none; }
+.console-toolbar-button { color: #fff; background: #363f51; border: 0; border-radius: 8px; padding: 12px 20px; margin: 0 8px; font: inherit; font-size: 20px; cursor: pointer; }
+.console-hero { display: flex; align-items: center; justify-content: space-between; gap: 28px; padding: 24px 28px; border: 1px solid #465169; background: #252e3e; border-radius: 14px; }
+.console-hero-info { flex: 1; min-width: 0; }
+#libraryHost { color: #8edbe8; font-size: 18px; }
+#libraryTitle { font-size: clamp(24px, 2.6vw, 42px); font-weight: 500; line-height: 1.2; margin: 8px 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#libraryStatus { color: #c4ccdb; font-size: 18px; min-height: 24px; }
+.console-actions { display: flex; flex-wrap: wrap; gap: 12px; max-width: 42%; }
+.console-button { color: #fff; background: #363f51; border: 1px solid #56617a; border-radius: 8px; padding: 14px 22px; font: inherit; font-size: 20px; cursor: pointer; }
+.console-button-primary { background: #006b83; border-color: #2cc4de; min-width: 160px; }
+.console-button:disabled { opacity: .45; cursor: default; }
+.console-filters { display: flex; gap: 12px; align-items: center; margin: 22px 0 16px; }
+.console-filters .console-button { padding: 10px 20px; }
+.console-filters [aria-pressed="true"] { background: #405571; border-color: #91b5e0; }
+#libraryRefresh { margin-left: auto; }
+#libraryEmpty { color: #c4ccdb; padding: 22px 0; font-size: 22px; }
+.console-library #game-grid { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: 22px; margin: 0 4vw 36px; width: auto; padding: 0; }
+.console-library .console-card { position: relative; display: flex; flex-direction: column; min-width: 0; width: 100%; height: auto; margin: 0; padding: 0; overflow: hidden; border: 2px solid #465169; border-radius: 10px; background: #222b3b; color: #fff; box-shadow: none; cursor: pointer; text-align: left; font-family: inherit; }
+.console-library .console-card img { position: static; display: block; width: 100%; height: 16vw; max-height: 330px; object-fit: cover; opacity: 1; border-radius: 0; animation: none; }
+.console-card-title { display: block; padding: 14px 12px; font-size: 19px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.console-card-badge { position: absolute; top: 10px; right: 10px; background: #142636; color: #fff; padding: 4px 8px; border-radius: 5px; font-size: 17px; }
+.console-card-badge:empty { display: none; }
+.console-library .console-card.hovered, .console-library .console-card:focus { border-color: #63e3f4; outline: 2px solid #63e3f4; outline-offset: 3px; transform: none; box-shadow: none; }
+.console-button:focus, .console-button.hovered, .console-toolbar-button:focus, .console-toolbar-button.hovered { outline: 3px solid #63e3f4; outline-offset: 3px; }
+.console-button[hidden], #libraryEmpty[hidden] { display: none; }
+@media (max-width: 1000px) { .console-library #game-grid { grid-template-columns: repeat(4,minmax(0,1fr)); } .console-hero { padding: 18px; } .console-button { font-size: 17px; padding: 12px 16px; } .console-card-title { font-size: 16px; } .console-library .console-card img { height: 25vw; } }

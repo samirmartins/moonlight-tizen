@@ -130,7 +130,7 @@ jobs:
 
             ## Credits:
 
-            Almost all of this application comes from [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen). If you would like to support that work financially, you can do so on [brightcraft's Patreon](https://www.patreon.com/cw/BrightCraft/membership).
+            Built on [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen), [ruanformigoni/moonlight-tizen](https://github.com/ruanformigoni/moonlight-tizen) and the [Moonlight project](https://github.com/moonlight-stream), with development assistance from Claude Code and OpenAI Codex.
           draft: false
           prerelease: false
       # Uploads both widgets as release assets in the newly created GitHub release.

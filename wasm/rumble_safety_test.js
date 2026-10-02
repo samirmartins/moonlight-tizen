@@ -60,17 +60,30 @@ run(`
   tick(0,pack(1000));tick(10,0);tick(20);tick(409);assert.strictEqual(attempts,1);
   tick(410);assert.strictEqual(attempts,2);
 `);
-// Successful device: identical timing/magnitudes/duration to the released version.
+// Sustained effects preserve exact timing/magnitudes/duration. Fast restarts
+// are intentionally rate-limited: stops no longer erase the start deadline.
 const sequence = `
   actuator.playEffect=(type,effect)=>{rumbleCalls.push({at:now,type,effect});};
   actuator.reset=()=>{rumbleCalls.push({at:now,type:'reset'});};
   let rng=12345;
   for(let frame=0;frame<3000;frame++) {
     rng=(Math.imul(rng,1664525)+1013904223)>>>0;
-    tick(frame*16,(rng%7===0)?pack(rng%65536):(rng%13===0?0:undefined));
+    tick(frame*16,(rng%7===0)?pack(1+rng%65535):undefined);
   }
   output.trace=JSON.stringify(rumbleCalls);
 `;
-const baseline=cp.execFileSync('git',['show','v3.3.9:wasm/platform/gamepad.js'],{encoding:'utf8'});
+const baseline=cp.execFileSync('git',['show','v3.3.10:wasm/platform/gamepad.js'],{encoding:'utf8'});
 assert.strictEqual(run(sequence).trace,run(sequence,baseline).trace);
-console.log('rumble_safety_test: retry, stale rejection, stop, unsupported, missing actuator and 3000-frame baseline trace OK');
+run(`
+  actuator.playEffect=(type,effect)=>rumbleCalls.push({at:now,type,effect});
+  actuator.reset=()=>rumbleCalls.push({at:now,type:'reset'});
+  for(let t=0;t<1008;t+=16)tick(t,t%32===0?pack(10000):0);
+  const starts=rumbleCalls.filter(call=>call.type==='dual-rumble');
+  assert(starts.length<=10);
+  for(let i=1;i<starts.length;i++)assert(starts[i].at-starts[i-1].at>=100);
+  for(const call of starts)assert.strictEqual(call.effect.weakMagnitude,10000/65535);
+  assert.strictEqual(rumbleCalls.filter(call=>call.type==='reset').length,starts.length);
+  tick(1020,0);const before=tasks;for(let t=1040;t<1400;t+=16)tick(t);
+  assert.strictEqual(tasks,before,'no continued work after stopped');
+`);
+console.log('rumble_safety_test: retries, stop, stale promises, 3000-frame sustained baseline and rapid pulse rate limit OK');

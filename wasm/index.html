@@ -12,6 +12,7 @@
   <link rel="stylesheet" href="static/css/material.min.css">
   <link rel="stylesheet" href="static/css/style.css">
   <link rel="stylesheet" href="static/css/menu-tools.css">
+  <link rel="stylesheet" href="static/css/console-library.css">
   <script type="text/javascript" src="platform.js"></script>
 </head>
 <body data-name="moonlight-tizen" data-tools="emscripten" data-configs="Debug Release" data-path="{tc}/{config}">
@@ -29,6 +30,8 @@
         <div class="mdl-layout-spacer"></div>
         <!-- Navigation bar -->
         <nav class="mdl-navigation">
+          <button type="button" id="libraryHomeBtn" class="console-toolbar-button">Library</button>
+          <button type="button" id="libraryPCsBtn" class="console-toolbar-button">PCs</button>
           <button type="button" id="settingsBtn" class="mdl-button mdl-js-button mdl-button--icon mdl-js-ripple-effect" role="link" aria-label="Settings">
             <i class="navigation-button-icons material-icons">settings</i>
           </button>
@@ -383,7 +386,28 @@
           </div>
         </div>
       </div>
-      <div id="game-grid"></div>
+      <section id="console-panel" aria-label="Game library">
+        <div class="console-hero">
+          <div class="console-hero-info">
+            <div id="libraryHost"></div>
+            <h1 id="libraryTitle">Your library</h1>
+            <div id="libraryStatus" role="status" aria-live="polite"></div>
+          </div>
+          <div class="console-actions">
+            <button type="button" id="libraryPlay" class="console-button console-button-primary">Play</button>
+            <button type="button" id="libraryFavorite" class="console-button" aria-pressed="false">☆ Favorite</button>
+            <button type="button" id="libraryCancel" class="console-button" hidden>Cancel wake</button>
+          </div>
+        </div>
+        <div class="console-filters" aria-label="Library filters">
+          <button type="button" id="libraryAll" class="console-button" aria-pressed="true">All games</button>
+          <button type="button" id="libraryFavorites" class="console-button" aria-pressed="false">Favorites</button>
+          <button type="button" id="libraryRecent" class="console-button" aria-pressed="false">Recent</button>
+          <button type="button" id="libraryRefresh" class="console-button">Refresh</button>
+        </div>
+        <p id="libraryEmpty" hidden></p>
+      </section>
+      <div id="game-grid" aria-label="Games"></div>
       <div id="listener"></div>
       <!-- Wasm module placeholder, Wasm gets thrown into here -->
       <div id="wasmSpinner" class="mdl-progress mdl-js-progress mdl-progress__indeterminate">
@@ -406,6 +430,7 @@
   <script type="text/javascript" src="platform/gamepad.js"></script>
   <script type="text/javascript" src="platform/audio.js"></script>
   <script type="text/javascript" src="platform/menu-tools.js"></script>
+  <script type="text/javascript" src="platform/console-library.js"></script>
   <script type="text/javascript" src="platform/diagnostics.js"></script>
   <script type="text/javascript" src="platform/index.js"></script>
   <script type="text/javascript" src="platform/navigation.js"></script>

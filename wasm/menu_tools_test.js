@@ -58,13 +58,13 @@ function deferred() { let resolve, reject; const promise = new Promise((a, b) =>
   c.beginBackgroundPollingOfHost(host);
   assert.strictEqual(timers.size, 0);
   c.isInGame = false;
-  const nv = new c.NvHTTP('192.168.1.2', 'test');
+  const nv = new c.NvHTTP('192.0.2.2', 'test');
   nv.httpPort = 47989; nv.httpsPort = 47984; nv.ppkstr = 'pinned';
   let parses = 0, requests = 0;
   nv._parseServerInfo = () => { parses++; return false; };
   const reply = deferred(), scope2 = c.createMenuRequestScope();
   c.sendMessage = () => { requests++; return reply.promise; };
-  const work = nv.refreshServerInfoScoped('192.168.1.2', scope2).catch(() => {});
+  const work = nv.refreshServerInfoScoped('192.0.2.2', scope2).catch(() => {});
   scope2.cancel(); reply.resolve('late XML'); await work; await flush();
   assert.strictEqual(parses, 0); assert.strictEqual(requests, 1);
   assert.strictEqual(timers.size, 0, 'no XML parsing, fallback or deadline after stop');
@@ -73,6 +73,7 @@ function deferred() { let resolve, reject; const promise = new Promise((a, b) =>
   host.macAddress = '12:34:56:78:9A:BC';
   host.sendWOL = () => wake.promise;
   host.selectServerAddress = (success, failure) => failure(new Error('offline'));
+  host.connect = scope => c.NvHTTP.prototype.connect.call(host,scope);
   c.WakeHost.open(host);
   element('wakeSend').onclick();
   assert.strictEqual(timers.size, 2);

@@ -4,6 +4,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 #include <cassert>
 #include <iostream>
 static int socketResult = 7, optionResult = 0, sendResult = 102;
@@ -20,7 +21,9 @@ static ssize_t FakeSend(int, const void* packet, size_t size, int flags,
   ++sends;
   assert(size == 102 && (flags & MSG_DONTWAIT));
   const auto* dest = reinterpret_cast<const sockaddr_in*>(address);
-  assert(dest->sin_port == htons(9) && dest->sin_addr.s_addr == INADDR_BROADCAST);
+  assert(dest->sin_port == htons(9) || dest->sin_port == htons(7));
+  in_addr directed{}; inet_pton(AF_INET,"192.0.2.255",&directed);
+  assert(dest->sin_addr.s_addr == INADDR_BROADCAST || dest->sin_addr.s_addr == directed.s_addr);
   assert(static_cast<const unsigned char*>(packet)[0] == 0xff);
   return sendResult;
 }
@@ -49,8 +52,9 @@ int main() {
   socketResult = 7; optionResult = -1;
   assert(!mlwol::Send("12:34:56:78:9A:BC").empty() && closes == 1 && sends == 0);
   optionResult = 0; sendResult = -1;
-  assert(!mlwol::Send("12:34:56:78:9A:BC").empty() && closes == 2 && sends == 3);
+  assert(!mlwol::Send("12:34:56:78:9A:BC").empty() && closes == 2 && sends == 6);
   sendResult = 102;
-  assert(mlwol::Send("12:34:56:78:9A:BC").empty() && closes == 3 && sends == 6);
+  assert(mlwol::Send("12:34:56:78:9A:BC").empty() && closes == 3 && sends == 12);
+  assert(mlwol::Send("12:34:56:78:9A:BC","192.0.2.255").empty() && closes == 4 && sends == 24);
   std::cout << "wakeonlan_test: ok (mock sockets, no PC woken)\n";
 }

@@ -67,6 +67,7 @@ MoonlightInstance::MoonlightInstance()
     }
 
 MoonlightInstance::~MoonlightInstance() { 
+  m_WakeDispatcher.stop();
   m_Dispatcher.stop();
 }
 
@@ -524,14 +525,17 @@ void MoonlightInstance::Pair(int callbackId, std::string serverMajorVersion, std
   m_Dispatcher.post_job(std::bind(&MoonlightInstance::Pair_private, this, callbackId, serverMajorVersion, address, httpPort, randomNumber), false);
 }
 
-void MoonlightInstance::WakeOnLan(int callbackId, std::string macAddress) {
+void MoonlightInstance::WakeOnLan(int callbackId, std::string macAddress, std::string broadcastAddress) {
   // Tizen sockets must run on a worker, not the JS/main thread (no proxy build).
-  m_Dispatcher.post_job([this, callbackId, macAddress]() {
+  // A stalled cover/server HTTP transfer must never block a wake packet.
+  // Lazy worker sleeps on its condition variable; no polling during gameplay.
+  m_WakeDispatcher.start();
+  m_WakeDispatcher.post_job([this, callbackId, macAddress, broadcastAddress]() {
     if (m_Running.load()) {
       PostPromiseMessage(callbackId, "reject", "Wake-on-LAN is available only outside a stream.");
       return;
     }
-    const std::string error = mlwol::Send(macAddress);
+    const std::string error = mlwol::Send(macAddress, broadcastAddress);
     PostPromiseMessage(callbackId, error.empty() ? "resolve" : "reject",
                        error.empty() ? "Wake packet sent" : error);
   }, false);
@@ -606,8 +610,8 @@ void pair(int callbackId, std::string serverMajorVersion, std::string address, i
   g_Instance->Pair(callbackId, serverMajorVersion, address, httpPort, randomNumber);
 }
 
-void wakeOnLan(int callbackId, std::string macAddress) {
-  g_Instance->WakeOnLan(callbackId, macAddress);
+void wakeOnLan(int callbackId, std::string macAddress, std::string broadcastAddress) {
+  g_Instance->WakeOnLan(callbackId, macAddress, broadcastAddress);
 }
 
 void setDiagnostics(uint32_t generation) {
