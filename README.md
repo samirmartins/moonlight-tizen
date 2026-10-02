@@ -4,7 +4,14 @@ A fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight
 
 ## Interface
 
-![Game library with eight open-source games, favorites and the Resume action](docs/images/game-library.png)
+![Game library with twelve open-source games, favorites and the Resume action](docs/images/game-library.png)
+
+<details>
+<summary>PC offline — Wake & play</summary>
+
+![Cached game library with twelve games and Wake & play available while the PC is offline](docs/images/game-library-wake.png)
+
+</details>
 
 <details>
 <summary>Basic settings</summary>
@@ -14,10 +21,10 @@ A fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight
 </details>
 
 Application UI rendered locally with the original application layout, a
-demonstration PC and eight real open-source games. Game images are reused under
-their published open licenses;
-see [image credits and licenses](docs/images/ATTRIBUTION.md). The Resume state is
-simulated; these captures demonstrate the interface, not gameplay on a TV.
+demonstration PC and twelve real open-source games. Game images are reused under
+their published open licenses; see [image credits and licenses](docs/images/ATTRIBUTION.md).
+The online Resume and offline Wake & play states are simulated; these captures
+demonstrate the interface, not gameplay or a Wake-on-LAN test on a TV.
 
 ## Why this fork
 
