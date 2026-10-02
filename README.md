@@ -13,9 +13,9 @@ A fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight
 
 </details>
 
-Application UI rendered locally with a demonstration PC and eight real
-open-source games. The library preview uses four columns and two rows to match
-the reported TV layout. Game images are reused under their published open licenses;
+Application UI rendered locally with the original application layout, a
+demonstration PC and eight real open-source games. Game images are reused under
+their published open licenses;
 see [image credits and licenses](docs/images/ATTRIBUTION.md). The Resume state is
 simulated; these captures demonstrate the interface, not gameplay on a TV.
 
