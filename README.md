@@ -123,6 +123,51 @@ point with a wired uplink is worth trying.
 
 ---
 
+## FAQ
+
+### Which build should I use: normal or ForceGM?
+
+**ForceGM** asks the TV firmware to enable panel Game Mode and is recommended on
+the tested DU7700. The **normal** build omits that request; use it if ForceGM
+causes problems on your TV. Both variants contain the same application code.
+See [Installation](#installation).
+
+### Why should the in-app Game Mode switch stay off with ForceGM?
+
+ForceGM requests Game Mode for the TV panel. The in-app switch selects the
+decoder's Ultra Low Latency mode, which can freeze video on some models.
+Leave the switch **off** when using ForceGM; it does not disable the panel request.
+See [Recommended settings](#recommended-settings).
+
+### How do I set up Wake & play?
+
+Enable Wake-on-LAN on the PC and its network adapter, then pair Moonlight while
+the PC is online so it can learn the adapter's MAC address. When the PC is offline,
+select a cached game and choose **Wake & play**. If prompted, enter the physical
+LAN adapter's MAC and choose **Save MAC**. Sunshine must be available after the
+PC wakes. **Checking PC** does not block the wake action.
+See [Recommended settings](#recommended-settings).
+
+### What if the PC does not appear or pairing fails?
+
+Keep the TV and PC on the same local network with Sunshine running. In **PCs**,
+choose **Add Host** and enter the PC's local IP address if discovery fails.
+For pairing, enter the current PIN shown on the TV in Sunshine's **PIN** page.
+If the pairing dialog says the PC is busy, stop its running streaming application
+before retrying. For other errors, check Sunshine's **Troubleshooting** logs.
+See [Quick start](#quick-start) and [Sunshine's setup guide](https://docs.lizardbyte.dev/projects/sunshine/latest/md_docs_2getting__started.html).
+
+### Can I update without losing settings?
+
+Install the new WGT over the existing app using the same installation method and,
+if re-signing, the same author certificate. Settings are retained when the
+application ID and author certificate match; normal and ForceGM builds of the same
+release share both. If installation fails because an older author certificate
+differs, uninstalling the old app before reinstalling removes its saved settings.
+See [Updates](INSTALLATION.md#updates).
+
+---
+
 ## Documentation and feedback
 
 - [Changelog](CHANGELOG.md)
