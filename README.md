@@ -1,4 +1,6 @@
-![Moonlight logo](docs/images/moonlight-logo.png)
+<p align="center">
+  <img src="docs/images/moonlight-logo.png" alt="Moonlight logo" width="96" height="96">
+</p>
 
 # Moonlight for Samsung TVs (Tizen) — Samir Martins’ Fork
 

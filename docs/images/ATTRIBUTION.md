@@ -11,8 +11,7 @@ online Resume and offline Wake & play are demonstration states.
 `settings.png` and `add-host.png` contain only this application's interface.
 `moonlight-logo.png` renders the existing application logo from
 `wasm/static/res/ic_moonlight_logo.svg`, without changes to its design. The
-144 × 144 logo is centered in a transparent 1200 × 176 canvas to display at a
-moderate size across the README width without requiring HTML alignment.
+96 × 96 PNG is centered above the title with GitHub-compatible HTML alignment.
 `interface.gif` combines Wake & play, settings, Resume and the initial Add Host
 screen in that order, with three seconds per frame. Its source captures are retained
 as lossless 2048 × 1152 PNGs; the GIF is scaled to 1920 × 1080 and uses a separate
