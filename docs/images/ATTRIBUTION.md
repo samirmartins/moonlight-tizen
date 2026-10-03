@@ -8,7 +8,11 @@ The original image files are retained without pixel changes in `open-games/`.
 The application's existing `object-fit: cover` scales and crops their visible
 area in `game-library.png` and `game-library-wake.png`; favorites, selection,
 online Resume and offline Wake & play are demonstration states.
-`settings.png` contains only this application's interface.
+`settings.png` and `add-host.png` contain only this application's interface.
+`interface.gif` combines Wake & play, settings, Resume and the initial Add Host
+screen in that order, with one second per frame. Its source captures are retained
+as lossless 2048 × 1152 PNGs; the GIF is scaled to 1920 × 1080 and uses a separate
+256-color palette for each frame with dithering.
 
 ## Source images
 
@@ -29,7 +33,7 @@ online Resume and offline Wake & play are demonstration states.
 
 ## Composite capture
 
-`game-library.png` and `game-library-wake.png` are distributed under [GPL-3.0](../../LICENSE), matching the
+`game-library.png`, `game-library-wake.png` and `interface.gif` are distributed under [GPL-3.0](../../LICENSE), matching the
 application UI. The unchanged source images retain the licenses above.
 For the cropped CC BY-SA 3.0 material incorporated into the composite, the
 adaptation uses CC BY-SA 4.0 and its one-way GPLv3 compatibility. See

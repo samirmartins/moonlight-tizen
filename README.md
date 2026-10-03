@@ -4,21 +4,10 @@ A fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight
 
 ## Interface
 
-![Game library with twelve open-source games, favorites and the Resume action](docs/images/game-library.png)
+![Moonlight interface: Wake & play, basic settings, Resume library and the initial Add Host screen](docs/images/interface.gif)
 
-<details>
-<summary>PC offline — Wake & play</summary>
-
-![Cached game library with twelve games and Wake & play available while the PC is offline](docs/images/game-library-wake.png)
-
-</details>
-
-<details>
-<summary>Basic settings</summary>
-
-![Basic settings for video resolution, frame rate and bitrate](docs/images/settings.png)
-
-</details>
+Four screens in a loop, one second per screen: **Wake & play → Settings →
+Resume → Add Host**. The animation is 1920 × 1080 (16:9).
 
 Application UI rendered locally with the original application layout, a
 demonstration PC and twelve real open-source games. Game images are reused under
