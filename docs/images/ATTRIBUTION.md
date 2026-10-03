@@ -10,7 +10,7 @@ area in `game-library.png` and `game-library-wake.png`; favorites, selection,
 online Resume and offline Wake & play are demonstration states.
 `settings.png` and `add-host.png` contain only this application's interface.
 `interface.gif` combines Wake & play, settings, Resume and the initial Add Host
-screen in that order, with one second per frame. Its source captures are retained
+screen in that order, with three seconds per frame. Its source captures are retained
 as lossless 2048 × 1152 PNGs; the GIF is scaled to 1920 × 1080 and uses a separate
 256-color palette for each frame with dithering.
 
