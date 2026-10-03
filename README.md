@@ -1,4 +1,4 @@
-# Moonlight Tizen
+# Moonlight for Samsung TVs — Samir Martins’ Fork
 
 A fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen) — an open-source client for NVIDIA GameStream and [Sunshine](https://app.lizardbyte.dev/Sunshine/) that streams games from your PC to a Samsung Smart TV.
 
