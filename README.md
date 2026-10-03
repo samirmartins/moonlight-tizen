@@ -9,31 +9,21 @@ A fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight
 Local UI demonstration with simulated PC states and openly licensed game images;
 see [image credits and licenses](docs/images/ATTRIBUTION.md).
 
-## Why this fork
+## Installation and quick start
 
-This fork focuses on smooth playback, low latency and full picture quality on Samsung TVs:
-
-- Audio playback runs separately from the interface.
-- Video timing follows the TV's refresh rate, which is reported to the host.
-- Gamepad controls include optional rumble feedback.
-- A controller-first library keeps favorites, recent games and the last PC ready to
-  use, with Play, Resume and Wake & play in one screen.
-
-Hardware validation is currently limited to a Samsung DU7700 running Tizen 9.0, with smooth
-1080p, 1440p and 4K playback. Reports from other models are welcome.
-
----
-
-## Quick start
-
-You need a Samsung TV running Tizen 5.5 or newer and a PC running Sunshine.
+You need a Samsung TV running **Tizen 5.5 or newer** and a PC running Sunshine.
 Keep the TV, PC and installation device on the same local network.
+
+Hardware validation is currently limited to a **Samsung DU7700 running Tizen 9.0**,
+with smooth 1080p, 1440p and 4K playback. Reports from other models are welcome.
+
+On the tested TV, we recommend the **ForceGM** version, which requests TV panel
+Game Mode. Keep Moonlight's in-app *Game Mode* switch **off**. If ForceGM causes
+problems on your TV, use the **normal** version, which does not request TV panel
+Game Mode.
 
 1. **Download Moonlight.** Get a `.wgt` from the
    [latest release](https://github.com/samirmartins/moonlight-tizen/releases/latest).
-   **ForceGM** requests TV Game Mode and is recommended on the tested DU7700;
-   use the **normal** build if ForceGM causes problems on your TV. Leave
-   Moonlight's in-app *Game Mode* switch **off** when using ForceGM.
 2. **Install on the TV.** Enable the TV's Developer Mode and install the downloaded
    widget with Apps2Samsung, following the
    [Installation Guide](INSTALLATION.md#apps2samsung-recommended).
@@ -50,13 +40,15 @@ Keep the TV, PC and installation device on the same local network.
 
 ---
 
-## Installation
+## Why this fork
 
-For the tested Samsung DU7700 running Tizen 9.0, we recommend installing the
-**ForceGM** version, which requests TV panel Game Mode. Keep Moonlight's in-app
-*Game Mode* switch **off**. If ForceGM causes problems on your TV, use the
-**normal** version, which does not request TV panel Game Mode. Install the widget
-with Apps2Samsung following the [Installation Guide](INSTALLATION.md#apps2samsung-recommended).
+This fork focuses on smooth playback, low latency and full picture quality on Samsung TVs:
+
+- Audio playback runs separately from the interface.
+- Video timing follows the TV's refresh rate, which is reported to the host.
+- Gamepad controls include optional rumble feedback.
+- A controller-first library keeps favorites, recent games and the last PC ready to
+  use, with Play, Resume and Wake & play in one screen.
 
 ---
 
@@ -89,7 +81,7 @@ library. The MAC stays in TV storage and LAN wake packets.
 
 ### What if the PC does not appear or pairing fails?
 
-Follow the manual **Add Host** and PIN steps in [Quick start](#quick-start).
+Follow the manual **Add Host** and PIN steps in [Installation and quick start](#installation-and-quick-start).
 If the pairing dialog says the PC is busy, stop its running streaming application
 before retrying. For other errors, check Sunshine's **Troubleshooting** logs.
 
