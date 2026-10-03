@@ -4,7 +4,9 @@
 
 <h1 align="center">Moonlight for Samsung TVs (Tizen) — Samir Martins’ Fork</h1>
 
-A fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen) — an open-source client for NVIDIA GameStream and [Sunshine](https://app.lizardbyte.dev/Sunshine/) that streams games from your PC to a Samsung Smart TV.
+An independently maintained fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen), with its own development direction and release cycle. Built on brightcraft's foundational work.
+
+An open-source client for NVIDIA GameStream and [Sunshine](https://app.lizardbyte.dev/Sunshine/) that streams games from your PC to a Samsung Smart TV.
 
 ---
 
@@ -134,7 +136,7 @@ ForceGM, widget extraction, tests and signing.
 
 This fork builds on work from:
 
-- **[brightcraft](https://github.com/brightcraft/moonlight-tizen)** — base repository and Tizen UI.
+- **[brightcraft](https://github.com/brightcraft/moonlight-tizen)** — foundational work, base repository and Tizen UI.
 - **[ruanformigoni](https://github.com/ruanformigoni/moonlight-tizen)** — Web Audio foundation.
 - **[Moonlight Game Streaming Project](https://github.com/moonlight-stream)** — GameStream protocol and Chrome OS client.
 - **[Samsung Developers Forum](https://github.com/SamsungDForum/moonlight-chrome)** — original WASM port to Tizen.
