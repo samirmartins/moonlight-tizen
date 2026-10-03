@@ -6,6 +6,68 @@ build outright, and to allow a fast iteration cycle.
 
 ---
 
+## Tests and GitHub Actions
+
+Run the same regression suite used by CI from the repository root:
+
+```bash
+bash build-tools/run-tests.sh
+```
+
+It runs every `wasm/*_test.js` plus the five standalone C++ tests for the audio
+ring, dispatcher, video timing, telemetry and mocked Wake-on-LAN. Dependencies:
+Node.js 22, GCC/G++, FFmpeg with libx264, OpenSSL development headers and Git.
+The H.264 and certificate tests also run native code with ASan/UBSan. A full Git
+checkout containing tags `v3.3.8` and `v3.3.10` is required by the existing
+regression comparisons. CI therefore uses `fetch-depth: 0`.
+
+`.github/workflows/ci.yml` runs these checks on pushes, pull requests and manual
+dispatches, with read-only repository permissions and no signing secret.
+These checks do not compile the Samsung WASM target or validate TV gameplay.
+
+### Release drafts
+
+The stable and development workflows remain **manual**. Both call
+`.github/workflows/package-release.yml`, which runs the tests before packaging
+the normal and ForceGM widgets from the same checkout. Stable dispatches run only
+from `master`; development drafts include a unique run ID and attempt in their tag.
+Development version metadata is injected after the tests, as packaging metadata.
+
+Both builds use the root Dockerfile, `nofile=1024:524288`, and the same persistent
+author certificate supplied through a BuildKit secret. Configure the repository
+Actions secret **`TIZEN_AUTHOR_P12_BASE64`** with the base64-encoded persistent
+author P12 whose passphrase is `123456`, as expected by the current Dockerfile.
+Use the signing identity already used for releases; a newly generated certificate
+will not preserve that identity. Never commit the P12 or its encoded contents.
+If the secret is missing or cannot be opened, packaging stops instead of falling
+back to a generated test certificate. The runner removes its temporary signing
+files even if a later step fails.
+
+The workflow loads images locally on its runner; it does not push them to GHCR.
+It extracts widgets with `docker create`/`docker cp`, without starting containers.
+Before release creation, `verify-widgets.py` checks the declared version and
+application identity, the expected public author certificate, the ForceGM
+metadata and byte equality of the other variant payloads. This consistency check
+does not replace cryptographic signature validation or a TV installation test.
+
+The workflow creates a **draft**, including both widgets and initial notes for
+review. Review the files and edit the notes before publishing manually. It never
+deletes earlier pre-releases or tags. Dispatching a workflow prepares a draft;
+it does not publish a release. A stable version already released cannot be
+overwritten by this workflow.
+
+For local widget consistency checks, export the expected **public** author
+certificate as DER and run:
+
+```bash
+python3 build-tools/verify-widgets.py \
+  Moonlight-v3.4.0-samirmartins.wgt \
+  Moonlight-v3.4.0-samirmartins-ForceGM.wgt \
+  --author-cert /path/to/public-author.der
+```
+
+---
+
 ## The `--ulimit` is mandatory
 
 The root `Dockerfile` **fails** with a misleading message:
@@ -124,9 +186,10 @@ installing the other `.wgt`.
   **unnecessary** (the installer brings its own JDK). It was kept because the recipe was
   validated with it present; removing it should be safe in principle, but has not been
   tested.
-- The packaging image creates a test certificate (profile `Moonlight`). Its author
-  identity is not guaranteed to match earlier releases; use a persistent certificate for
-  seamless upgrades across release builds.
+- Without a `tizen_author` BuildKit secret and its `SIGNING_CERT_SHA256` build
+  argument, local Docker builds create a test certificate (profile `Moonlight`).
+  Its identity is not guaranteed to match earlier releases. Release workflows
+  require the persistent certificate instead of allowing that fallback.
 - The `__BUILD_TYPE__` / `__BUILD_COMMIT__` placeholders in `wasm/platform/index.js` are
   substituted by the CI workflow, not by a local build. Locally they stay literal, which
   only affects the version string shown on the System Info screen.

@@ -1,0 +1,27 @@
+name: Tests
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - name: Install native test dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential ffmpeg libssl-dev
+      - name: Run JavaScript and native regression tests
+        run: bash build-tools/run-tests.sh

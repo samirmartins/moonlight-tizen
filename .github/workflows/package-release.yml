@@ -1,0 +1,141 @@
+name: Package release draft
+
+on:
+  workflow_call:
+    inputs:
+      prerelease:
+        type: boolean
+        required: true
+    secrets:
+      tizen-author-p12:
+        description: Persistent author P12 encoded as base64; passphrase expected by the current Dockerfile is 123456.
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-draft-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  tests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '22'
+          package-manager-cache: false
+      - run: sudo apt-get update && sudo apt-get install -y build-essential ffmpeg libssl-dev
+      - run: bash build-tools/run-tests.sh
+
+  package:
+    needs: tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    permissions:
+      contents: write
+    env:
+      DOCKER_BUILD_SUMMARY: 'false'
+      DOCKER_BUILD_RECORD_UPLOAD: 'false'
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - name: Prepare persistent signing identity and build metadata
+        id: prepare
+        env:
+          AUTHOR_P12_BASE64: ${{ secrets.tizen-author-p12 }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          test -n "$AUTHOR_P12_BASE64" || { echo 'Persistent signing secret is missing.' >&2; exit 1; }
+          umask 077
+          printf '%s' "$AUTHOR_P12_BASE64" | base64 --decode > "$RUNNER_TEMP/tizen-author.p12"
+          openssl pkcs12 -legacy -in "$RUNNER_TEMP/tizen-author.p12" -passin pass:123456 -clcerts -nokeys |
+            openssl x509 -outform DER > "$RUNNER_TEMP/tizen-author.der"
+          SIGNING_HASH=$(sha256sum "$RUNNER_TEMP/tizen-author.p12" | cut -d ' ' -f 1)
+          VERSION=$(python3 -c 'import xml.etree.ElementTree as e; print(e.parse("res/config.xml").getroot().attrib["version"])')
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          if [ "$PRERELEASE" = 'true' ]; then
+            SHORT_SHA=${GITHUB_SHA:0:7}
+            sed -i 's/__BUILD_TYPE__/development/g' wasm/platform/index.js
+            sed -i "s/__BUILD_COMMIT__/$SHORT_SHA/g" wasm/platform/index.js
+            TAG="v${VERSION}-dev-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          else
+            TAG="v${VERSION}"
+          fi
+          echo "signing_hash=$SIGNING_HASH" >> "$GITHUB_OUTPUT"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - name: Build signed normal widget locally
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          push: false
+          tags: moonlight-release:normal
+          ulimit: nofile=1024:524288
+          build-args: SIGNING_CERT_SHA256=${{ steps.prepare.outputs.signing_hash }}
+          secret-files: tizen_author=${{ runner.temp }}/tizen-author.p12
+          provenance: false
+          sbom: false
+      - name: Build signed ForceGM widget locally
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          load: true
+          push: false
+          tags: moonlight-release:forcegm
+          ulimit: nofile=1024:524288
+          build-args: |
+            SIGNING_CERT_SHA256=${{ steps.prepare.outputs.signing_hash }}
+            FORCE_GAME_MODE=1
+          secret-files: tizen_author=${{ runner.temp }}/tizen-author.p12
+          provenance: false
+          sbom: false
+      - name: Extract and check both widgets
+        env:
+          VERSION: ${{ steps.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/widgets"
+          for variant in normal forcegm; do
+            suffix=''
+            if [ "$variant" = forcegm ]; then suffix='-ForceGM'; fi
+            container=$(docker create "moonlight-release:$variant")
+            trap 'docker rm -f "$container" >/dev/null' EXIT
+            docker cp "$container:/home/moonlight/Moonlight-v${VERSION}-samirmartins${suffix}.wgt" "$RUNNER_TEMP/widgets/"
+            docker rm "$container" >/dev/null
+            trap - EXIT
+          done
+          python3 build-tools/verify-widgets.py \
+            "$RUNNER_TEMP/widgets/Moonlight-v${VERSION}-samirmartins.wgt" \
+            "$RUNNER_TEMP/widgets/Moonlight-v${VERSION}-samirmartins-ForceGM.wgt" \
+            --author-cert "$RUNNER_TEMP/tizen-author.der"
+      - name: Create a draft for manual review
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.prepare.outputs.tag }}
+          PRERELEASE: ${{ inputs.prerelease }}
+        run: |
+          set -euo pipefail
+          cat > "$RUNNER_TEMP/release-notes.md" <<'NOTES'
+          Both widgets are built from the same source. ForceGM requests TV panel Game Mode; leave the in-app Game Mode switch off.
+
+          Review the widgets and release notes before publishing this draft. Local/CI tests do not establish gameplay performance on a TV.
+          NOTES
+          printf '\n[Installation Guide](https://github.com/%s/blob/%s/INSTALLATION.md) · [Changelog](https://github.com/%s/blob/%s/CHANGELOG.md)\n' \
+            "$GITHUB_REPOSITORY" "$GITHUB_SHA" "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> "$RUNNER_TEMP/release-notes.md"
+          args=(--draft --title "$TAG" --target "$GITHUB_SHA" --notes-file "$RUNNER_TEMP/release-notes.md")
+          if [ "$PRERELEASE" = true ]; then args+=(--prerelease); fi
+          gh release create "$TAG" "$RUNNER_TEMP/widgets/"*.wgt "${args[@]}"
+      - name: Remove signing material from the runner
+        if: always()
+        run: rm -f "$RUNNER_TEMP/tizen-author.p12" "$RUNNER_TEMP/tizen-author.der"

@@ -8,6 +8,15 @@ Use the appropriate [issue template](https://github.com/samirmartins/moonlight-t
 
 ## Development
 
+Run the regression tests before building:
+
+```bash
+bash build-tools/run-tests.sh
+```
+
+See the [test dependencies and baseline tag requirements](../build-tools/README.md#tests-and-github-actions).
+These are also checked by GitHub Actions on pushes and pull requests.
+
 Build the project locally before opening a pull request:
 
 ```bash
