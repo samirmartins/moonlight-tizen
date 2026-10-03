@@ -1,21 +1,42 @@
 name: Bug Report
-description: Report something that isn`t working
+description: Report a problem with this Moonlight Tizen fork
 labels:
   - bug
 body:
   - type: markdown
     attributes:
       value: |
+        Before submitting, check the [FAQ](https://github.com/samirmartins/moonlight-tizen#faq) and existing issues.
+        Reports and attachments are public. Remove IP/MAC addresses, DUIDs, serial numbers,
+        PC/user names, personal file paths, emails, tokens and credentials from text, logs and images.
+        Do not upload private certificates or keys. Provide model names and versions, not device identifiers.
+  - type: markdown
+    attributes:
+      value: |
         ## Device Information
         Please provide information about the device you are using as a client.
   - type: input
+    id: moonlight-version
     attributes:
       label: Moonlight Version
-      description: What is the version of Moonlight you are using?
-      placeholder: "Example: 3.3.3"
+      description: Copy the app version shown in Moonlight's System Info. Include the commit if built from source.
+      placeholder: "Example: 3.4.0"
     validations:
       required: true
   - type: dropdown
+    id: build-variant
+    attributes:
+      label: Build Variant
+      description: Check the variant shown beside the app version in System Info.
+      options:
+        - Normal
+        - ForceGM
+        - Custom build
+        - Unknown
+    validations:
+      required: true
+  - type: dropdown
+    id: installation-method
     attributes:
       label: Installation Type
       description: What is the method you used to install Moonlight on your device?
@@ -26,17 +47,19 @@ body:
     validations:
       required: true
   - type: input
+    id: tv-model
     attributes:
       label: Device Model
-      description: What is the model of your device?
-      placeholder: "Example: UAU7000 or UE55AU7172UXXH"
+      description: Enter the Samsung TV model only; do not include its serial number or DUID.
+      placeholder: "Example: DU7700 or UE55AU7172UXXH"
     validations:
       required: true
   - type: input
+    id: tizen-version
     attributes:
       label: Device OS
-      description: What is the OS version of your device?
-      placeholder: "Example: Tizen 6.0"
+      description: Copy the Tizen version shown in Moonlight's System Info, or write Unknown.
+      placeholder: "Example: Tizen 9.0"
     validations:
       required: true
   - type: markdown
@@ -46,6 +69,7 @@ body:
         Please provide information about the computer you are streaming from.
         This information is important especially when experiencing performance issues.
   - type: dropdown
+    id: host-os
     attributes:
       label: Host OS
       description: What is the OS of your computer?
@@ -53,18 +77,66 @@ body:
         - Windows
         - Linux
         - macOS
+        - Other / Unknown
   - type: dropdown
+    id: host-software
     attributes:
       label: Host Software
       description: What streaming software are you using?
       options:
         - Sunshine
         - GeForce Experience
+        - Other / Unknown
+  - type: input
+    id: host-software-version
+    attributes:
+      label: Host Software Version
+      description: Enter the Sunshine or GeForce Experience version. Leave blank if unavailable or unrelated to the issue.
+      placeholder: "Exact version shown by the host software"
   - type: textarea
+    id: host-setup
     attributes:
       label: Host Setup
-      description: What is the hardware and software setup of your computer?
-      placeholder: "Example: Intel Core i7-14700K, NVIDIA GeForce RTX 4080, 32GB RAM DDR4, 240Hz Monitor, Windows 11 Pro 25H2."
+      description: For streaming or input issues, include the GPU, graphics driver and OS version. Include the controller model and connection type if relevant. Do not include PC/user names.
+      placeholder: "Example: NVIDIA GeForce RTX 4080, driver version, Windows version; DualSense connected to TV via Bluetooth."
+  - type: markdown
+    attributes:
+      value: |
+        ## Streaming and Network
+        Complete these fields when relevant. Leave them blank for installation or menu issues.
+        Report the settings used when the problem occurred; there is no need to change them for this report.
+  - type: dropdown
+    id: video-codec
+    attributes:
+      label: Video Codec
+      description: Select the codec used in the failing session, if known.
+      options:
+        - H.264
+        - HEVC (H.265)
+        - AV1
+        - Automatic / Unknown
+        - Not applicable (no stream)
+  - type: textarea
+    id: stream-settings
+    attributes:
+      label: Streaming Settings
+      description: Copy the configured resolution, frame rate and bitrate. Include these switches if relevant; Unknown is acceptable.
+      placeholder: |
+        Resolution: 1920 x 1080
+        Frame rate: 60 FPS
+        Configured bitrate: 20 Mbps
+        In-app Game Mode: Off
+        HDR: Off
+        Rumble feedback: Off
+  - type: textarea
+    id: network-setup
+    attributes:
+      label: Network Setup
+      description: Describe the TV and PC connections separately. For network issues, include link speed or Wi-Fi band if known. Do not include IP/MAC addresses or Wi-Fi names.
+      placeholder: |
+        TV: Ethernet, 100 Mbps
+        PC: Ethernet, 1 Gbps
+        Both on the same router; no VPN
   - type: markdown
     attributes:
       value: |
@@ -72,34 +144,41 @@ body:
         Please provide information about the issue you are experiencing.
         This information is important to help us understand the issue.
   - type: textarea
+    id: bug-description
     attributes:
       label: Bug Description
-      description: What kind of incorrect behavior did you see?
+      description: Describe the actual behavior, any error message and how often it occurs. If this started after an update, include the last working version, if known.
       placeholder: "Example: I can't see video output when I start streaming!"
     validations:
       required: true
   - type: textarea
+    id: reproduction-steps
     attributes:
       label: Reproduction Steps
-      description: Can you reproduce the issue? If so, please share below as steps.
+      description: List the steps that trigger the issue. If intermittent, describe what you were doing and write that it cannot be reproduced reliably.
       placeholder: |
-        Example: 
+        Example:
         1. Select computer.
         2. Open "Desktop" in the apps list.
         3. Wait for the connection to be established.
-        4. Seeing black screen without video.
+        4. The screen stays black, but audio plays.
+    validations:
+      required: true
   - type: textarea
+    id: expected-behavior
     attributes:
       label: Expected Behavior
       description: What is the correct behavior do you think?
       placeholder: "Example: Seeing video output of my computer screen!"
   - type: textarea
+    id: log-files
     attributes:
       label: Log Files
-      description: Provide any relevant logs to help us diagnose the issue.
-      placeholder: "Drag and drop the Moonlight and/or Sunshine log files here or click to upload."
+      description: Optional. Attach only relevant Moonlight/Sunshine logs after removing private addresses, names, paths, tokens and credentials. A cropped Session diagnosis image is also useful for streaming issues.
+      placeholder: "Attach redacted logs or paste the relevant excerpt. Do not upload certificates or keys."
   - type: textarea
+    id: screenshots
     attributes:
       label: Screenshots
-      description: Provide any relevant screenshots to help us troubleshoot the issue.
-      placeholder: "Drag and drop any relevant screenshots here or click to upload."
+      description: Optional. Crop to the app and cover private addresses, PC/user names and device identifiers before attaching. For playback issues, include performance statistics if available.
+      placeholder: "Attach screenshots with personal information hidden."
