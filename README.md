@@ -52,12 +52,11 @@ Keep the TV, PC and installation device on the same local network.
 
 ## Installation
 
-Choose a variant when downloading:
-
-| Build | Purpose |
-|---|---|
-| `Moonlight-…-samirmartins-ForceGM.wgt` | Requests TV panel Game Mode. |
-| `Moonlight-…-samirmartins.wgt` | Does not request TV panel Game Mode. |
+For the tested Samsung DU7700 running Tizen 9.0, we recommend installing the
+**ForceGM** version, which requests TV panel Game Mode. Keep Moonlight's in-app
+*Game Mode* switch **off**. If ForceGM causes problems on your TV, use the
+**normal** version, which does not request TV panel Game Mode. Install the widget
+with Apps2Samsung following the [Installation Guide](INSTALLATION.md#apps2samsung-recommended).
 
 ---
 
@@ -68,14 +67,6 @@ Choose a variant when downloading:
   fixed latency; buffering increases only when needed, up to the selected limit.
 - **Session diagnosis** is opt-in and resets to off when the app starts. It stores only the
   latest report locally.
-
----
-
-## Network note
-
-Some Samsung TVs have 100 Mbps Ethernet. Wired is preferable while the stream stays
-comfortably below that limit; at high 4K bitrates, strong Wi-Fi through a nearby access
-point with a wired uplink is worth trying.
 
 ---
 
