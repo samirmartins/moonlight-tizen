@@ -45,6 +45,32 @@ Development of this fork has been assisted by Claude Code and OpenAI Codex.
 
 ---
 
+## Quick start
+
+You need a Samsung TV running Tizen 5.5 or newer and a PC running Sunshine.
+Keep the TV, PC and installation device on the same local network.
+
+1. **Download Moonlight.** Get a `.wgt` from the
+   [latest release](https://github.com/samirmartins/moonlight-tizen/releases/latest).
+   **ForceGM** requests TV Game Mode and is recommended on the tested DU7700;
+   use the **normal** build if ForceGM causes problems on your TV. Leave
+   Moonlight's in-app *Game Mode* switch **off** when using ForceGM.
+2. **Install on the TV.** Enable the TV's Developer Mode and install the downloaded
+   widget with Apps2Samsung, following the
+   [Installation Guide](INSTALLATION.md#apps2samsung-recommended).
+3. **Set up Sunshine on the PC.** Follow Sunshine's
+   [Getting Started guide](https://docs.lizardbyte.dev/projects/sunshine/latest/md_docs_2getting__started.html),
+   open its web interface, and add your games under **Applications**.
+   You can use **Desktop** for the first connection. Keep Sunshine running.
+4. **Add and pair the PC.** Open Moonlight on the TV and select your PC from **PCs**.
+   If it is not listed, choose **Add Host** and enter the PC's local IP address.
+   Enter the PIN shown on the TV in Sunshine's **PIN** page on the PC to complete pairing.
+5. **Start playing.** Connect a gamepad to the TV, select a game or **Desktop**
+   in the library, and choose **Play**. Use **Resume** to reconnect to an
+   application that is already running.
+
+---
+
 ## Installation
 
 Requires Tizen 5.5 or newer. Download a `.wgt` from the
