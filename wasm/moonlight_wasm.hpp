@@ -1,4 +1,5 @@
 #include <atomic>
+#include <bitset>
 #include <memory>
 #include <emscripten/bind.h>
 #include <emscripten/html5.h>
@@ -143,6 +144,8 @@ class MoonlightInstance {
   EM_BOOL HandleWheel(const EmscriptenWheelEvent& event);
   EM_BOOL HandleKeyDown(const EmscriptenKeyboardEvent& event);
   EM_BOOL HandleKeyUp(const EmscriptenKeyboardEvent& event);
+  void SendKeyboardInput(uint32_t keyCode, uint16_t action, char modifiers);
+  void ReleaseHeldInput();
 
   void ReportMouseMovement();
 
@@ -283,6 +286,8 @@ class MoonlightInstance {
   pthread_t m_InputThread;
 
   bool m_MouseLocked;
+  std::bitset<256> m_HeldKeys;
+  std::bitset<8> m_HeldMouseButtons;
   long m_MouseLastPosX;
   long m_MouseLastPosY;
   bool m_WaitingForAllModifiersUp;
@@ -296,8 +301,8 @@ class MoonlightInstance {
   std::condition_variable m_EmssVideoStateChanged;
   EmssReadyState m_EmssReadyState;
   std::atomic<bool> m_VideoStarted;
-  std::atomic<bool> m_H264DecoderActive{false};
-  std::atomic<bool> m_H264PipelineFailed{false};
+  std::atomic<bool> m_DecoderActive{false};
+  std::atomic<bool> m_DecoderPipelineFailed{false};
   std::atomic<bool> m_ConnectionCancelled;
   pthread_t m_StopThread;
   std::atomic<bool> m_StopNeedsLiStop;
@@ -348,6 +353,8 @@ EM_BOOL handleMouseMove(int eventType, const EmscriptenMouseEvent* keyEvent, voi
 EM_BOOL handleMouseUp(int eventType, const EmscriptenMouseEvent* keyEvent, void* userData);
 EM_BOOL handleMouseDown(int eventType, const EmscriptenMouseEvent* keyEvent, void* userData);
 EM_BOOL handleWheel(int eventType, const EmscriptenWheelEvent* keyEvent, void* userData);
+EM_BOOL handleFocusLost(int eventType, const EmscriptenFocusEvent* event, void* userData);
+EM_BOOL handleVisibilityChange(int eventType, const EmscriptenVisibilityChangeEvent* event, void* userData);
 EM_BOOL handlePointerLockChange(int eventType, const EmscriptenPointerlockChangeEvent *pointerlockChangeEvent, void *userData);
 EM_BOOL handlePointerLockError(int eventType, const void *reserved, void *userData);
 

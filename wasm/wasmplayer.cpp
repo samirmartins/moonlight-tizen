@@ -269,15 +269,15 @@ void MoonlightInstance::SourceListener::OnSourceClosed() {
 
 void MoonlightInstance::SourceListener::OnPipelineError(
   samsung::wasm::MediaPipelineError error, const char*) {
-  if (!m_Instance->m_H264DecoderActive.load() || m_Instance->m_ConnectionCancelled.load()) return;
+  if (!m_Instance->m_DecoderActive.load() || m_Instance->m_ConnectionCancelled.load()) return;
   {
     std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
-    m_Instance->m_H264PipelineFailed = true;
+    m_Instance->m_DecoderPipelineFailed = true;
   }
   m_Instance->m_EmssStateChanged.notify_all();
   m_Instance->m_EmssVideoStateChanged.notify_all();
-  ClLogMessage("H.264 decoder pipeline rejected the stream (error %d)\n", static_cast<int>(error));
-  PostToJs("DecoderError: H.264 decoder error. Try HEVC or AV1 on this TV.");
+  ClLogMessage("Video decoder pipeline rejected the stream (error %d)\n", static_cast<int>(error));
+  PostToJs("DecoderError: Video decoder error. Try another codec on this TV.");
   if (m_Instance->m_VideoStarted.load()) m_Instance->StopConnection();
 }
 
@@ -508,8 +508,8 @@ int MoonlightInstance::VidDecSetup(int videoFormat, int width, int height, int r
 
   // Set the video format, video resolution and video frame rate based on the input parameters
   s_VideoFormat = videoFormat;
-  g_Instance->m_H264DecoderActive = (videoFormat & VIDEO_FORMAT_H264) != 0;
-  g_Instance->m_H264PipelineFailed = false;
+  g_Instance->m_DecoderActive = true;
+  g_Instance->m_DecoderPipelineFailed = false;
   s_Width = width;
   s_Height = height;
   s_Framerate = redrawRate;
@@ -1034,6 +1034,7 @@ static void StopRecoveryThread() {
 }
 
 void MoonlightInstance::VidDecCleanup(void) {
+  g_Instance->m_DecoderActive = false;
   StopRecoveryThread();
 
   // Clear the decode buffer
@@ -1596,16 +1597,12 @@ void MoonlightInstance::SetDiagnostics(uint32_t generation) {
 
 bool MoonlightInstance::WaitFor(std::condition_variable* variable, std::function<bool()> condition) {
   std::unique_lock<std::mutex> lock(m_Mutex);
-  if (s_VideoFormat & VIDEO_FORMAT_H264) {
-    const bool ready = variable->wait_for(lock, std::chrono::seconds(15), [&]() {
-      return m_ConnectionCancelled.load() || m_H264PipelineFailed.load() || condition();
-    });
-    if (!ready || m_H264PipelineFailed.load()) {
-      ClLogMessage("H.264 decoder initialization failed or timed out\n");
-      return false;
-    }
-  } else {
-    variable->wait(lock, [&]() { return m_ConnectionCancelled.load() || condition(); });
+  const bool ready = variable->wait_for(lock, std::chrono::seconds(15), [&]() {
+    return m_ConnectionCancelled.load() || m_DecoderPipelineFailed.load() || condition();
+  });
+  if (!ready || m_DecoderPipelineFailed.load()) {
+    ClLogMessage("Video decoder initialization failed or timed out\n");
+    return false;
   }
   return true;
 }

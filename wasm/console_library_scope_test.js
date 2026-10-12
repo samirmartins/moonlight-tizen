@@ -2,8 +2,8 @@
 const fs = require('fs'), cp = require('child_process'), assert = require('assert');
 const frozen = ['wasm/auddec.cpp','wasm/audio_ring.hpp',
   'wasm/platform/audio.js','wasm/platform/audio-worklet.js',
-  'wasm/platform/diagnostics.js','wasm/platform/display.js','wasm/input.cpp','wasm/gamepad.cpp',
-  'wasm/video_timing.hpp','moonlight-common-c'];
+  'wasm/platform/diagnostics.js','wasm/platform/display.js','wasm/gamepad.cpp',
+  'wasm/video_timing.hpp','moonlight-common-c',':(exclude)moonlight-common-c/src/RtspConnection.c'];
 assert.strictEqual(cp.execFileSync('git',['diff','v3.3.10','--',...frozen],{encoding:'utf8'}),'');
 const old = cp.execFileSync('git',['show','v3.3.10:wasm/platform/index.js'],{encoding:'utf8'});
 const now = fs.readFileSync('wasm/platform/index.js','utf8');

@@ -555,6 +555,8 @@ int main(int argc, char** argv) {
   emscripten_set_mouseup_callback(kCanvasName, NULL, EM_TRUE, handleMouseUp);
   emscripten_set_mousemove_callback(kCanvasName, NULL, EM_TRUE, handleMouseMove);
   emscripten_set_wheel_callback(kCanvasName, NULL, EM_TRUE, handleWheel);
+  emscripten_set_blur_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, EM_TRUE, handleFocusLost);
+  emscripten_set_visibilitychange_callback(NULL, EM_TRUE, handleVisibilityChange);
 
   // As we want to setup callbacks on DOM document and
   // emscripten_set_pointerlock... calls use document.querySelector

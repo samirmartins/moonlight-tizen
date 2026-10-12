@@ -43,7 +43,11 @@ EM_BOOL MoonlightInstance::HandleMouseDown(const EmscriptenMouseEvent &event) {
     return EM_TRUE;
   }
 
-  LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, ConvertButtonToLiButton(event.button));
+  const int button = ConvertButtonToLiButton(event.button);
+  LiSendMouseButtonEvent(BUTTON_ACTION_PRESS, button);
+  if (button > 0 && button < static_cast<int>(m_HeldMouseButtons.size())) {
+    m_HeldMouseButtons.set(button);
+  }
   return EM_TRUE;
 }
 
@@ -67,7 +71,11 @@ EM_BOOL MoonlightInstance::HandleMouseUp(const EmscriptenMouseEvent &event) {
     return EM_FALSE;
   }
 
-  LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, ConvertButtonToLiButton(event.button));
+  const int button = ConvertButtonToLiButton(event.button);
+  LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, button);
+  if (button > 0 && button < static_cast<int>(m_HeldMouseButtons.size())) {
+    m_HeldMouseButtons.reset(button);
+  }
   return EM_TRUE;
 }
 
@@ -110,7 +118,7 @@ EM_BOOL MoonlightInstance::HandleKeyDown(const EmscriptenKeyboardEvent &event) {
     }
   }
 
-  LiSendKeyboardEvent(KEY_PREFIX << 8 | keyCode, KEY_ACTION_DOWN, modifiers);
+  SendKeyboardInput(keyCode, KEY_ACTION_DOWN, modifiers);
   return EM_TRUE;
 }
 
@@ -128,7 +136,7 @@ EM_BOOL MoonlightInstance::HandleKeyUp(const EmscriptenKeyboardEvent &event) {
     m_WaitingForAllModifiersUp = false;
   }
 
-  LiSendKeyboardEvent(KEY_PREFIX << 8 | keyCode, KEY_ACTION_UP, modifiers);
+  SendKeyboardInput(keyCode, KEY_ACTION_UP, modifiers);
   return EM_TRUE;
 }
 
@@ -175,6 +183,33 @@ EM_BOOL handlePointerLockError(int eventType, const void *reserved, void *userDa
   return true;
 }
 
+EM_BOOL handleFocusLost(int, const EmscriptenFocusEvent*, void*) {
+  g_Instance->ReleaseHeldInput();
+  return EM_FALSE;
+}
+
+EM_BOOL handleVisibilityChange(int, const EmscriptenVisibilityChangeEvent* event, void*) {
+  if (event && event->hidden) g_Instance->ReleaseHeldInput();
+  return EM_FALSE;
+}
+
+void MoonlightInstance::ReleaseHeldInput() {
+  // DOM input and this release path run on the browser main thread only.
+  // No polling, allocation, gamepad changes, or work on the video/audio path.
+  const auto keys = m_HeldKeys;
+  const auto buttons = m_HeldMouseButtons;
+  m_HeldKeys.reset();
+  m_HeldMouseButtons.reset();
+  m_WaitingForAllModifiersUp = false;
+  if (!m_Running.load()) return;
+  for (size_t key = 0; key < keys.size(); ++key) {
+    if (keys.test(key)) LiSendKeyboardEvent(KEY_PREFIX << 8 | key, KEY_ACTION_UP, 0);
+  }
+  for (size_t button = 1; button < buttons.size(); ++button) {
+    if (buttons.test(button)) LiSendMouseButtonEvent(BUTTON_ACTION_RELEASE, button);
+  }
+}
+
 void MoonlightInstance::ReportMouseMovement() {
   const int32_t deltaX = m_MouseDeltaX.exchange(0, std::memory_order_acq_rel);
   const int32_t deltaY = m_MouseDeltaY.exchange(0, std::memory_order_acq_rel);
@@ -214,12 +249,19 @@ void MoonlightInstance::DidLockMouse(int32_t result) {
 }
 
 void MoonlightInstance::MouseLockLost() {
+  ReleaseHeldInput();
   m_MouseLocked = false;
 }
 
-void sendKeyboardEvent(uint32_t keyCode, uint16_t action, char modifiers) {
+void MoonlightInstance::SendKeyboardInput(uint32_t keyCode, uint16_t action, char modifiers) {
   // Send a keyboard event to the host
   LiSendKeyboardEvent(KEY_PREFIX << 8 | keyCode, action, modifiers);
+  if (action == KEY_ACTION_DOWN) m_HeldKeys.set(keyCode & 0xff);
+  else if (action == KEY_ACTION_UP) m_HeldKeys.reset(keyCode & 0xff);
+}
+
+void sendKeyboardEvent(uint32_t keyCode, uint16_t action, char modifiers) {
+  g_Instance->SendKeyboardInput(keyCode, action, modifiers);
 }
 
 EMSCRIPTEN_BINDINGS(input) {

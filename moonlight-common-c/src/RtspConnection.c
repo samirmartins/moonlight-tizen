@@ -4,6 +4,7 @@
 #define RTSP_CONNECT_TIMEOUT_SEC 10
 #define RTSP_RECEIVE_TIMEOUT_SEC 15
 #define RTSP_RETRY_DELAY_MS 500
+#define MAX_RTSP_RESPONSE_SIZE (1024 * 1024)
 
 static int currentSeqNumber;
 static char rtspTargetUrl[256];
@@ -310,6 +311,13 @@ static bool transactRtspMessageEnet(PRTSP_MESSAGE request, PRTSP_MESSAGE respons
         goto Exit;
     }
 
+    if (event.packet->dataLength > MAX_RTSP_RESPONSE_SIZE) {
+        *error = EMSGSIZE;
+        Limelog("RTSP response exceeded maximum allowed size\n");
+        enet_packet_destroy(event.packet);
+        goto Exit;
+    }
+
     responseBuffer = malloc(event.packet->dataLength);
     if (responseBuffer == NULL) {
         Limelog("Failed to allocate RTSP response buffer\n");
@@ -328,6 +336,13 @@ static bool transactRtspMessageEnet(PRTSP_MESSAGE request, PRTSP_MESSAGE respons
         if (serviceEnetHost(client, &event, RTSP_RECEIVE_TIMEOUT_SEC * 1000) <= 0 ||
             event.type != ENET_EVENT_TYPE_RECEIVE) {
             Limelog("Failed to receive RTSP reply payload: %d\n", LastSocketFail());
+            goto Exit;
+        }
+
+        if ((size_t)offset + event.packet->dataLength > MAX_RTSP_RESPONSE_SIZE) {
+            *error = EMSGSIZE;
+            Limelog("RTSP response exceeded maximum allowed size\n");
+            enet_packet_destroy(event.packet);
             goto Exit;
         }
 
@@ -436,6 +451,12 @@ static bool transactRtspMessageTcp(PRTSP_MESSAGE request, PRTSP_MESSAGE response
         struct pollfd pfd;
 
         if (offset >= responseBufferSize) {
+            if (offset >= MAX_RTSP_RESPONSE_SIZE) {
+                *error = EMSGSIZE;
+                Limelog("RTSP response exceeded maximum allowed size\n");
+                goto Exit;
+            }
+
             responseBufferSize = offset + 16384;
             responseBuffer = extendBuffer(responseBuffer, responseBufferSize);
             if (responseBuffer == NULL) {
@@ -664,6 +685,11 @@ static bool sendVideoAnnounce(PRTSP_MESSAGE response, int* error) {
 static int parseOpusConfigFromParamString(char* paramStr, int channelCount, POPUS_MULTISTREAM_CONFIGURATION opusConfig) {
     int i;
 
+    if (channelCount <= 0 || channelCount > AUDIO_CONFIGURATION_MAX_CHANNEL_COUNT) {
+        Limelog("Invalid channel count: %d\n", channelCount);
+        return -1;
+    }
+
     // Set channel count (included in the prefix, so not parsed below)
     opusConfig->channelCount = channelCount;
 
@@ -696,7 +722,7 @@ static int parseOpusConfigFromParamString(char* paramStr, int channelCount, POPU
 }
 
 // Parse the server port from the Transport header
-// Example: unicast;server_port=48000-48001;source=192.168.35.177
+// Example: unicast;server_port=48000-48001;source=192.0.2.10
 static bool parseServerPortFromTransport(PRTSP_MESSAGE response, uint16_t* port) {
     char* transport;
     char* portStart;
@@ -1196,7 +1222,14 @@ int performRtspHandshake(PSERVER_INFORMATION serverInfo) {
         // resolves any 454 session not found errors on
         // standard RTSP server implementations.
         // (i.e - sessionId = "DEADBEEFCAFE;timeout = 90") 
-        sessionIdString = strdup(strtok_r(sessionId, ";", &strtokCtx));
+        char* sessionToken = strtok_r(sessionId, ";", &strtokCtx);
+        if (sessionToken == NULL || sessionToken[0] == '\0') {
+            Limelog("RTSP SETUP streamid=audio has malformed session attribute\n");
+            ret = -1;
+            goto Exit;
+        }
+
+        sessionIdString = strdup(sessionToken);
         if (sessionIdString == NULL) {
             Limelog("Failed to duplicate session ID string\n");
             ret = -1;

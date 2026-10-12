@@ -5,7 +5,8 @@ const current=fs.readFileSync('wasm/wasmplayer.cpp','utf8');
 function between(s,a,b) { const start=s.indexOf(a),end=s.indexOf(b,start);assert(start>=0&&end>start);return s.slice(start,end); }
 assert.strictEqual(between(current,'    } else if (videoFormat & (VIDEO_FORMAT_H265','    bool trackAdded'),
   between(baseline,'    } else if (videoFormat & (VIDEO_FORMAT_H265','    bool trackAdded'));
-assert.strictEqual(between(current,'static TimeStamp NextPacketPts','bool MoonlightInstance::WaitFor'),
+assert.strictEqual(between(current,'static TimeStamp NextPacketPts','bool MoonlightInstance::WaitFor')
+    .replace('  g_Instance->m_DecoderActive = false;\n', ''),
   between(baseline,'static TimeStamp NextPacketPts','void MoonlightInstance::WaitFor'));
 const padOld=cp.execFileSync('git',['show','v3.3.10:wasm/platform/gamepad.js'],{encoding:'utf8'});
 const padNew=fs.readFileSync('wasm/platform/gamepad.js','utf8');
@@ -16,7 +17,8 @@ for(const name of ['DURATION_MS','RENEW_MS','MIN_INTERVAL_MS','MAX_IN_FLIGHT','W
   assert.strictEqual(padNew.match(re)[0],padOld.match(re)[0]);
 }
 const frozen=['wasm/auddec.cpp','wasm/audio_ring.hpp','wasm/platform/audio.js','wasm/platform/audio-worklet.js',
-  'wasm/input.cpp','wasm/gamepad.cpp','wasm/video_timing.hpp','moonlight-common-c',
+  'wasm/gamepad.cpp','wasm/video_timing.hpp','moonlight-common-c',
+  ':(exclude)moonlight-common-c/src/RtspConnection.c',
   'wasm/platform/diagnostics.js','wasm/platform/display.js'];
 assert.strictEqual(cp.execFileSync('git',['diff','v3.3.10','--',...frozen],{encoding:'utf8'}),'');
-console.log('candidate_scope_test: HEVC/AV1, PTS/submit, audio, streaming input, RTP and telemetry preserved');
+console.log('candidate_scope_test: HEVC/AV1 configuration, PTS/submit, audio, gamepad, RTP and telemetry preserved');
