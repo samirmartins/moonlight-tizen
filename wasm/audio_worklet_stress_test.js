@@ -1,5 +1,7 @@
 'use strict';
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
+const seconds=Number(process.env.ML_AUDIO_SECONDS||0);
+assert(Number.isFinite(seconds)&&seconds>=0&&seconds<=14400);
 for(const rate of [44100,48000,96000]) for(const channels of [1,2,6,8]) {
  let Processor;
  const c={AudioWorkletProcessor:class {constructor(){this.port={postMessage(){}};}},
@@ -9,16 +11,19 @@ for(const rate of [44100,48000,96000]) for(const channels of [1,2,6,8]) {
  const control=new Int32Array(memory,0,16),pcm=new Int16Array(memory,128,capacity*channels);
  for(let i=0;i<capacity;i++)for(let ch=0;ch<channels;ch++)pcm[i*channels+ch]=(ch+1)*1000;
  control[2]=7;control[3]=1;control[6]=2048;control[13]=2048;control[14]=4800;
+ if(seconds)control[0]=control[9]=-4096;
  const p=new Processor();
  p.port.onmessage({data:{type:'init',memory,controlPtr:0,pcmPtr:128,capacityFrames:capacity,channels,sourceRate:48000,generation:7}});
  const out=Array.from({length:channels+1},()=>new Float32Array(128));
- for(let quantum=0;quantum<500;quantum++){
+ const quanta=seconds?Math.ceil(seconds*rate/128):500;
+ const consumedBefore=Atomics.load(control,9)>>>0;
+ for(let quantum=0;quantum<quanta;quantum++){
   Atomics.store(control,1,((Atomics.load(control,0)>>>0)+4096)|0);
   p.process([], [out]);
   for(let ch=0;ch<channels;ch++)for(const value of out[ch])assert(Math.abs(value-(ch+1)*1000/32768)<1e-6);
   assert(out[channels].every(v=>v===0));
  }
- const consumed=Atomics.load(control,9)>>>0,expected=500*128*48000/rate;
+ const consumed=((Atomics.load(control,9)>>>0)-consumedBefore)>>>0,expected=quanta*128*48000/rate;
  assert(Math.abs(consumed/expected-1)<0.02,'Resampling must consume the expected source rate');
  // A delayed processor cannot consume samples belonging to another session.
  const read=Atomics.load(control,0);control[2]=8;out[0].fill(1);p.process([], [out]);

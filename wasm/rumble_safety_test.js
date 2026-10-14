@@ -62,11 +62,14 @@ run(`
 `);
 // Sustained effects preserve exact timing/magnitudes/duration. Fast restarts
 // are intentionally rate-limited: stops no longer erase the start deadline.
+const frames=Number(process.env.ML_RUMBLE_FRAMES||3000),seed=Number(process.env.ML_STRESS_SEED||12345);
+assert(Number.isInteger(frames)&&frames>0&&frames<=1000000);
+assert(Number.isInteger(seed)&&seed>=0&&seed<=0xffffffff);
 const sequence = `
   actuator.playEffect=(type,effect)=>{rumbleCalls.push({at:now,type,effect});};
   actuator.reset=()=>{rumbleCalls.push({at:now,type:'reset'});};
-  let rng=12345;
-  for(let frame=0;frame<3000;frame++) {
+  let rng=${seed};
+  for(let frame=0;frame<${frames};frame++) {
     rng=(Math.imul(rng,1664525)+1013904223)>>>0;
     tick(frame*16,(rng%7===0)?pack(1+rng%65535):undefined);
   }
@@ -86,4 +89,4 @@ run(`
   tick(1020,0);const before=tasks;for(let t=1040;t<1400;t+=16)tick(t);
   assert.strictEqual(tasks,before,'no continued work after stopped');
 `);
-console.log('rumble_safety_test: retries, stop, stale promises, 3000-frame sustained baseline and rapid pulse rate limit OK');
+console.log('rumble_safety_test: retries, stop, stale promises, configurable sustained baseline and rapid pulse rate limit OK');

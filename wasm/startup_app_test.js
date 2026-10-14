@@ -100,5 +100,45 @@ function fixture(options={}) {
  f=fixture({current:2,record:{startupApp:1,startupWake:true}});
  ['settings','hosts','runtime'].forEach(s=>f.c.ConsoleLibrary.ready(s));await f.tick(0);await f.tick(0);
  assert.strictEqual(f.calls.audio,0);assert.strictEqual(f.launched.length,0);assert.match(f.node('libraryStatus').textContent,/Another app/);
+ const cases=Number(process.env.ML_STARTUP_CASES||0),seed=Number(process.env.ML_STRESS_SEED||12345);
+ assert(Number.isInteger(cases)&&cases>=0&&cases<=100000);
+ assert(Number.isInteger(seed)&&seed>=0&&seed<=0xffffffff);
+ let rng=seed;
+ for(let index=0;index<cases;index++){
+  rng=(Math.imul(rng,1664525)+1013904223)>>>0;
+  const scenario=(rng>>>16)%7,ready=['settings','hosts','runtime'];
+  for(let k=2;k>0;k--){rng=(Math.imul(rng,1664525)+1013904223)>>>0;const j=rng%(k+1);[ready[k],ready[j]]=[ready[j],ready[k]];}
+  try {
+   const options={record:{startupApp:1,startupWake:true}};
+   if(scenario===1||scenario===2)options.online=false;
+   if(scenario===2)options.wakeDelayed=true;
+   if(scenario===3)options.delayed=true;
+   if(scenario===4)options.record.startupApp=0;
+   if(scenario===5){options.online=false;options.record.startupWake=false;}
+   if(scenario===6)options.current=2;
+   const x=fixture(options);ready.forEach(part=>x.c.ConsoleLibrary.ready(part));await x.flush();
+   if(scenario===4){
+    // Opening the library still performs its normal host refresh with autostart OFF.
+    assert.strictEqual(x.launched.length,0);assert.strictEqual(x.calls.connect,1);
+    assert.strictEqual(x.calls.wake,0);assert.strictEqual(x.calls.audio,0);
+   } else {
+    await x.tick(0);
+    if(scenario===0){await x.tick(0);assert.strictEqual(x.launched.length,1);}
+    if(scenario===1){await x.tick(1000);await x.tick(0);assert.strictEqual(x.calls.wake,1);assert.strictEqual(x.launched.length,1);}
+    if(scenario===2){x.node('libraryCancel').click();x.host.online=true;x.host.resolveWake();await x.flush();}
+    if(scenario===3){x.c.ConsoleLibrary.settings();x.host.resolve();await x.flush();}
+    if(scenario===5){await x.tick(60000);assert.strictEqual(x.calls.wake,0);}
+    if(scenario===6)await x.tick(0);
+    if(scenario>=2)assert.strictEqual(x.launched.length,0);
+   }
+   x.c.ConsoleLibrary.suspend();await x.flush();
+   assert.strictEqual(x.timers.size,0,'No pending launcher timers after suspension');
+   assert(x.calls.wake<=1&&x.calls.audio<=1&&x.launched.length<=1);
+  } catch(error) {
+   console.error('STRESS_CASE '+JSON.stringify({seed,index,scenario,ready}));
+   throw error;
+  }
+ }
+ if(cases)console.log('startup stress: '+cases+' seeded readiness/cancellation cases');
  console.log('startup_app_test: OFF, auto-WoL selection, persistence, fixed target, settings readiness, online/offline launch, cancellation, timeouts, missing app/MAC, audio restrictions and active-app guard OK');
 })().catch(e=>{console.error(e);process.exitCode=1;});

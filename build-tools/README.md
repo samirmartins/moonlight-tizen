@@ -43,6 +43,17 @@ For documentation-only changes, check content, links and templates; a TV test
 or WGT rebuild is not required. For runtime changes, select the full suite and
 focused native/browser checks appropriate to the affected behavior.
 
+Optional seeded stress is separate from the core runner. The existing JS fixtures
+accept `ML_STARTUP_CASES`, `ML_RUMBLE_FRAMES`, `ML_AUDIO_SECONDS`,
+`ML_LIFECYCLE_CYCLES` and `ML_STRESS_SEED`; defaults keep the normal core bounded.
+`protocol-fuzz.cpp` is an optional ASan/UBSan driver for the real RTSP/SPS parsers,
+not linked into the application. The maintainer's local coordinator builds it,
+supplies bounded synthetic seeds, preserves failing inputs and runs TSan separately.
+Malformed-input stress currently exposes a duplicate-RTSP-header leak and an
+invalid shift in the bundled H.264 bitstream writer; neither is a TV-playback
+regression established by these tests. Do not suppress these failures or change
+production behavior implicitly during test maintenance.
+
 ## Local compilation and packaging
 
 The release builds recorded for this fork used a two-stage local path.

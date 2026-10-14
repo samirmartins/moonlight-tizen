@@ -8,6 +8,9 @@ const stopped=section('void MoonlightInstance::OnConnectionStopped(', 'void* Moo
 const start=source.indexOf('  if (m_StopThread != 0) {',source.indexOf('MessageResult MoonlightInstance::StartStream('));
 const end=source.indexOf('\n  PostToJs(',start);
 assert(start>0&&end>start);
+const cycles=Number(process.env.ML_LIFECYCLE_CYCLES||30),seed=Number(process.env.ML_STRESS_SEED||12345);
+assert(Number.isInteger(cycles)&&cycles>0&&cycles<=10000);
+assert(Number.isInteger(seed)&&seed>=0&&seed<=0xffffffff);
 const fixture=`
 #include <atomic>
 #include <condition_variable>
@@ -19,6 +22,7 @@ const fixture=`
 #include <thread>
 #include <chrono>
 #include <cassert>
+#include <cstdint>
 #include <iostream>
 #include <pthread.h>
 namespace samsung { namespace wasm {
@@ -42,7 +46,7 @@ struct Source {
  ~Source(){if(deferred.joinable())deferred.join();}
  void Close(std::function<void(samsung::wasm::OperationResult)> cb){
   closes++;if(mode==2)return;
-  if(mode==1)deferred=std::thread([cb]{std::this_thread::sleep_for(std::chrono::milliseconds(40));cb(samsung::wasm::OperationResult::kSuccess);});
+  if(mode==1)deferred=std::thread([cb]{std::this_thread::sleep_for(std::chrono::milliseconds(${cycles>30?1:40}));cb(samsung::wasm::OperationResult::kSuccess);});
   else cb(samsung::wasm::OperationResult::kSuccess);
  }
 };
@@ -86,8 +90,10 @@ int main(int argc,char**argv){
   MoonlightInstance app;g_Instance=&app;app.m_Source->mode=2;
   app.StopConnection();app.BeginAgain();return 0;
  }
- for(int iteration=0;iteration<30;iteration++){
-  MoonlightInstance app;g_Instance=&app;app.m_Source->mode=iteration%2;
+ uint32_t rng=${seed}u;
+ for(int iteration=0;iteration<${cycles};iteration++){
+  rng=rng*1664525u+1013904223u;
+  MoonlightInstance app;g_Instance=&app;app.m_Source->mode=(rng>>16)%2;
   const auto previous=stops,previousCloses=closes;
   fakeCreate(&app.m_ConnectionThread,nullptr,[](void*)->void*{return nullptr;},nullptr);
   fakeCreate(&app.m_InputThread,nullptr,[](void*)->void*{assert(!g_Instance->m_Running);return nullptr;},nullptr);
@@ -110,7 +116,7 @@ try{
  const file=path.join(tmp,'test.cpp'),bin=path.join(tmp,'test');
  fs.writeFileSync(file,fixture+stopped+'\nvoid MoonlightInstance::BeginAgain(){\n'+source.slice(start,end)+'\n}\n'+tests);
  cp.execFileSync('g++',['-std=c++17','-O1','-g','-pthread','-fsanitize=address,undefined','-fno-omit-frame-pointer',file,'-o',bin],{stdio:'inherit'});
- cp.execFileSync(bin,[],{stdio:'inherit',timeout:10000});
+ cp.execFileSync(bin,[],{stdio:'inherit',timeout:Math.max(10000,cycles*20)});
  if(process.argv.includes('--strict')){
   let failures=0;
   for(const scenario of ['missing','duplicate','stale-worker']){
