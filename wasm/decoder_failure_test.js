@@ -44,7 +44,7 @@ const tests = `
 int main() {
  using Clock = std::chrono::steady_clock;
  const auto error = samsung::wasm::MediaPipelineError::kFixture;
- for (int codec = 0; codec < 3; ++codec) {
+ { // Codec-independent callback/wait contract; setup is tested separately.
   MoonlightInstance app; MoonlightInstance::SourceListener listener{&app}; bool ready = false;
   std::thread signal([&] { std::lock_guard<std::mutex> lock(app.m_Mutex); ready = true; app.m_EmssStateChanged.notify_all(); });
   assert(app.WaitFor(&app.m_EmssStateChanged, [&] { return ready; })); signal.join();
@@ -56,6 +56,9 @@ int main() {
   listener.OnPipelineError(error, nullptr); assert(app.stops == 1 && app.m_ConnectionCancelled);
   const int before = messages; listener.OnPipelineError(error, nullptr); assert(app.stops == 1 && messages == before);
  }
+ MoonlightInstance during;
+ std::thread cancel([&] { std::this_thread::sleep_for(std::chrono::milliseconds(20)); during.m_ConnectionCancelled = true; during.m_EmssStateChanged.notify_all(); });
+ assert(during.WaitFor(&during.m_EmssStateChanged, [] { return false; })); cancel.join();
  MoonlightInstance cancelled; cancelled.m_ConnectionCancelled = true;
  assert(cancelled.WaitFor(&cancelled.m_EmssStateChanged, [] { return false; }));
  MoonlightInstance inactive; inactive.m_DecoderActive = false;

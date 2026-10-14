@@ -72,8 +72,12 @@ int main(){
  std::cout<<"certificate_resources_test: PEM output, reload, errors and temporary ownership OK\\n";
 }
 `;
-const tmp=fs.mkdtempSync('/tmp/moonlight-cert-test-');
+const tmp=fs.mkdtempSync(path.join(require('os').tmpdir(),'moonlight-cert-test-'));
+try {
 const cpp=path.join(tmp,'test.cpp'),bin=path.join(tmp,'test');
 fs.writeFileSync(cpp,fixture+methods+tests);
 cp.execFileSync('g++',['-std=c++17','-O1','-g','-fsanitize=address,undefined','-fno-omit-frame-pointer',cpp,'-lssl','-lcrypto','-o',bin],{stdio:'inherit'});
 cp.execFileSync(bin,[],{stdio:'inherit',env:{...process.env,ASAN_OPTIONS:'detect_leaks=1',UBSAN_OPTIONS:'halt_on_error=1'}});
+
+} finally { fs.rmSync(tmp, {recursive: true, force: true}); }
+console.log('certificate_resources_test: completed');

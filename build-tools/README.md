@@ -12,13 +12,32 @@ From the repository root:
 bash build-tools/run-tests.sh
 ```
 
-Runs every `wasm/*_test.js` and the five standalone C++ tests: audio ring,
-dispatcher, video timing, telemetry and mocked Wake-on-LAN.
+Runs every `wasm/*_test.js` and six standalone C++ tests: audio ring, concurrent
+PCM stress, dispatcher, video timing, telemetry and mocked Wake-on-LAN.
+The JavaScript entries also compile native fixtures for RTSP/Opus, input focus,
+codec setup, decoder errors, session teardown, certificates and H.264 pixel equality.
+Historical source-identity checks are consolidated in `scope_contract_test.js`;
+they enforce approved scope, not performance. Baselines must not be refreshed
+silently to make a failing test pass.
 Dependencies: Node.js 22, GCC/G++, FFmpeg with libx264, OpenSSL development headers
-and Git. Some native checks use ASan/UBSan.
+and Git/GNU timeout. Native fixtures use ASan/UBSan.
+The runner checks completion markers, rejects unhandled rejections, bounds each
+process and cleans temporary files, including failed runs.
 The current comparisons require tags `v3.3.8`, `v3.3.10` and `v3.4.0`;
 use a full checkout. CI uses `fetch-depth: 0` and read-only permissions, without
 signing secrets. These tests do not compile the Samsung target or prove TV performance.
+
+Session lifecycle: the default core exercises ordered/repeated stops and deferred
+callbacks using production methods with recording adapters. Run
+`node wasm/session_lifecycle_test.js --strict` for the missing-close-callback and
+duplicate-stop and stale-worker safety contracts. These currently fail: teardown waits
+indefinitely without its callback; duplicate stop creates two workers, and a controlled
+ordering lets the orphaned worker affect the reopened session. Do not treat them
+as passing or fix the player implicitly during test maintenance.
+
+Extended native HTTP/RTP, browser layout/navigation and actual WGT signature/privacy
+checks are coordinated by the maintainer's local tools, separately from public CI.
+Browser/EMSS adapters are not a Samsung decoder or a physical controller.
 
 For documentation-only changes, check content, links and templates; a TV test
 or WGT rebuild is not required. For runtime changes, select the full suite and

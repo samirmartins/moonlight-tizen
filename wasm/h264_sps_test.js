@@ -1,6 +1,7 @@
 'use strict';
 const fs=require('fs'),cp=require('child_process'),path=require('path'),assert=require('assert');
-const tmp=fs.mkdtempSync('/tmp/moonlight-h264-3311-');
+const tmp=fs.mkdtempSync(path.join(require('os').tmpdir(),'moonlight-h264-test-'));
+try {
 const run=(exe,args,opts={})=>cp.execFileSync(exe,args,{stdio:'inherit',...opts});
 const objects=['h264_nal','h264_sei','h264_stream'].map(name=>{
   const out=path.join(tmp,name+'.o');
@@ -16,3 +17,5 @@ for(const size of ['1920x1080','2560x1440']) {
   assert.strictEqual(decode(input),decode(out),'SPS correction must preserve all decoded pixels/frames');
 }
 console.log('h264_sps_test: 1080p/1440p multi-reference, level/profile, 3/4-byte prefix, bounds and pixel equality OK');
+
+} finally { fs.rmSync(tmp, {recursive: true, force: true}); }

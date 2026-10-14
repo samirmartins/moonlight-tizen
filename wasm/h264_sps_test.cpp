@@ -10,6 +10,13 @@ static unsigned prefix(const std::vector<uint8_t>& v,size_t n) {
   return 0;
 }
 int main(int argc,char** argv) {
+  // Reject bounded malformed prefixes and undersized/truncated headers.
+  uint8_t invalid[] = {3, 2, 1, 0x67, 0x00, 0x00};
+  uint8_t scratch[128] = {};
+  for (unsigned n = 0; n < sizeof(invalid); ++n)
+    assert(mlh264::FixupSps(invalid, n, scratch, sizeof(scratch)) == 0);
+  const uint8_t aud[] = {0, 0, 1, 9, 0xf0};
+  assert(mlh264::FixupSps(aud, sizeof(aud), scratch, sizeof(scratch)) == 0);
   assert(argc==3);std::ifstream in(argv[1],std::ios::binary);
   std::vector<uint8_t> input((std::istreambuf_iterator<char>(in)),{}),output;
   assert(!input.empty());unsigned rewritten=0;
