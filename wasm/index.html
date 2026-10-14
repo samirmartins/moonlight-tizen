@@ -129,11 +129,11 @@
                 - Increase for better image quality or decrease to improve performance on slower connections.
               </span>
               <div id="videoBitrateMenu">
-                <button type="button" id="selectBitrate" class="mdl-button mdl-js-button mdl-js-ripple-effect">20 Mbps</button>
+                <button type="button" id="selectBitrate" class="mdl-button mdl-js-button mdl-js-ripple-effect">30 Mbps</button>
               </div>
               <div class="videoBitrateMenu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectBitrate">
                 <span id="bitrateLowestValue">0.5</span>
-                <input type="range" id="bitrateSlider" class="mdl-slider mdl-js-slider" min="0.5" max="150" step="0.5" value="10">
+                <input type="range" id="bitrateSlider" class="mdl-slider mdl-js-slider" min="0.5" max="150" step="0.5" value="30">
                 <span id="bitrateHighestValue">150</span>
               </div>
             </div>
@@ -275,7 +275,7 @@
                 - Increase for better video compression and quality or decrease to improve performance on lower-end devices.
               </span>
               <div id="videoCodecMenu">
-                <button type="button" id="selectCodec" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-value="HEVC">HEVC</button>
+                <button type="button" id="selectCodec" class="mdl-button mdl-js-button mdl-js-ripple-effect" data-value="H264">H.264</button>
               </div>
               <ul class="videoCodecMenu mdl-menu mdl-menu mdl-menu--bottom-left mdl-js-menu mdl-js-ripple-effect" for="selectCodec">
                 <li id="h264" class="mdl-menu__item" data-value="H264">H.264</li>
@@ -397,6 +397,19 @@
             <button type="button" id="libraryPlay" class="console-button console-button-primary">Play</button>
             <button type="button" id="libraryFavorite" class="console-button" aria-pressed="false">☆ Favorite</button>
             <button type="button" id="libraryCancel" class="console-button" hidden>Cancel wake</button>
+            <div class="console-startup" id="libraryStartup">
+              <label class="console-startup-check" for="libraryAutoStart">
+                <input type="checkbox" id="libraryAutoStart">
+                <span>Open this app when Moonlight starts</span>
+              </label>
+              <div class="console-startup-nested" id="libraryStartupWakeRow">
+                <label class="console-startup-check" for="libraryAutoWake">
+                  <input type="checkbox" id="libraryAutoWake" disabled>
+                  <span>Wake the PC if needed (Wake-on-LAN)</span>
+                </label>
+                <small id="libraryStartupHint">Waits for Sunshine before opening this app.</small>
+              </div>
+            </div>
           </div>
         </div>
         <div class="console-filters" aria-label="Library filters">

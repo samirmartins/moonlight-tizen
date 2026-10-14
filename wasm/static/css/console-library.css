@@ -11,6 +11,13 @@
 #libraryTitle { font-size: clamp(24px, 2.6vw, 42px); font-weight: 500; line-height: 1.2; margin: 8px 0 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 #libraryStatus { color: #c4ccdb; font-size: 18px; min-height: 24px; }
 .console-actions { display: flex; flex-wrap: wrap; gap: 12px; max-width: 42%; }
+.console-startup { flex-basis: 100%; min-width: 0; box-sizing: border-box; padding: 12px 14px; border: 1px solid #64758e; border-radius: 8px; background: #303d51; color: #edf1f8; }
+.console-startup-check { display: flex; align-items: center; gap: 12px; min-height: 34px; font-size: 18px; line-height: 25px; cursor: pointer; }
+.console-startup-check input { width: 22px; height: 22px; flex-shrink: 0; margin: 0; accent-color: #35bfd6; }
+.console-startup-check input:focus, .console-startup-check input.hovered { outline: 3px solid #63e3f4; outline-offset: 3px; }
+.console-startup-nested { margin: 10px 0 0 34px; padding: 6px 0 0 12px; border-left: 2px solid #64758e; }
+.console-startup-nested small { display: block; margin: 5px 0 0 34px; font-size: 16px; line-height: 23px; color: #cbd5e6; }
+.console-startup-nested.is-disabled { opacity: .55; }
 .console-button { color: #fff; background: #363f51; border: 1px solid #56617a; border-radius: 8px; padding: 14px 22px; font: inherit; font-size: 20px; cursor: pointer; }
 .console-button-primary { background: #006b83; border-color: #2cc4de; min-width: 160px; }
 .console-button:disabled { opacity: .45; cursor: default; }

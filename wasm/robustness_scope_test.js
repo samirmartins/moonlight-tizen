@@ -42,7 +42,14 @@ const files = cp.execFileSync('git', ['ls-tree', '-r', '--name-only', 'v3.4.0', 
  'moonlight-common-c', 'libgamestream', 'wasm/platform', 'wasm/static', 'wasm/index.html',
  'wasm/auddec.cpp', 'wasm/audio_ring.hpp', 'wasm/gamepad.cpp', 'wasm/video_timing.hpp', 'wasm/video_telemetry.hpp'], {encoding: 'utf8'}).trim().split('\n');
 for (const file of files) {
- if (file === 'moonlight-common-c/src/RtspConnection.c') continue;
+ if (['moonlight-common-c/src/RtspConnection.c', 'wasm/platform/console-library.js',
+      'wasm/platform/index.js', 'wasm/static/css/console-library.css', 'wasm/index.html'].includes(file)) continue;
  assert(fs.readFileSync(file).equals(cp.execFileSync('git', ['show', 'v3.4.0:' + file])), file);
 }
-console.log('robustness_scope_test: 3.4.0 normal video/audio/input movement, RTP/FEC, HTTP, UI, rumble and telemetry preserved');
+const index = current('wasm/platform/index.js'), indexOld = old('wasm/platform/index.js');
+assert.strictEqual(index.slice(0, index.indexOf('function restoreDefaultsSettingsValues()')),
+ indexOld.slice(0, indexOld.indexOf('function restoreDefaultsSettingsValues()')),
+ 'normal launch/stop, stream arguments, audio preparation and scheduling unchanged');
+assert.strictEqual(index.slice(index.indexOf('function loadHTTPCerts()')),
+ indexOld.slice(indexOld.indexOf('function loadHTTPCerts()')), 'pairing and host restoration unchanged');
+console.log('robustness_scope_test: normal video/audio/input movement, RTP/FEC, HTTP, stream arguments, rumble and telemetry preserved; menu startup/defaults scoped separately');
