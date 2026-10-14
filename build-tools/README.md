@@ -1,195 +1,120 @@
-# build-tools
+# Build tools
 
-Build tooling for this fork. The `Dockerfile` at the project root remains the official
-process; what lives here exists for two reasons: to record a finding that blocks the
-build outright, and to allow a fast iteration cycle.
-
----
+This guide separates regression checks, development builds and release signing.
+The public recipes remain available; their presence is not proof of a completed
+end-to-end build or compatibility with an existing installation.
 
 ## Tests and GitHub Actions
 
-Run the same regression suite used by CI from the repository root:
+From the repository root:
 
 ```bash
 bash build-tools/run-tests.sh
 ```
 
-It runs every `wasm/*_test.js` plus the five standalone C++ tests for the audio
-ring, dispatcher, video timing, telemetry and mocked Wake-on-LAN. Dependencies:
-Node.js 22, GCC/G++, FFmpeg with libx264, OpenSSL development headers and Git.
-The H.264 and certificate tests also run native code with ASan/UBSan. A full Git
-checkout containing tags `v3.3.8` and `v3.3.10` is required by the existing
-regression comparisons. CI therefore uses `fetch-depth: 0`.
+Runs every `wasm/*_test.js` and the five standalone C++ tests: audio ring,
+dispatcher, video timing, telemetry and mocked Wake-on-LAN.
+Dependencies: Node.js 22, GCC/G++, FFmpeg with libx264, OpenSSL development headers
+and Git. Some native checks use ASan/UBSan.
+The current comparisons require tags `v3.3.8`, `v3.3.10` and `v3.4.0`;
+use a full checkout. CI uses `fetch-depth: 0` and read-only permissions, without
+signing secrets. These tests do not compile the Samsung target or prove TV performance.
 
-`.github/workflows/ci.yml` runs these checks on pushes, pull requests and manual
-dispatches, with read-only repository permissions and no signing secret.
-These checks do not compile the Samsung WASM target or validate TV gameplay.
+For documentation-only changes, check content, links and templates; a TV test
+or WGT rebuild is not required. For runtime changes, select the full suite and
+focused native/browser checks appropriate to the affected behavior.
 
-### Release drafts
+## Local compilation and packaging
 
-The stable and development workflows remain **manual**. Both call
-`.github/workflows/package-release.yml`, which runs the tests before packaging
-the normal and ForceGM widgets from the same checkout. Stable dispatches run only
-from `master`; development drafts include a unique run ID and attempt in their tag.
-Development version metadata is injected after the tests, as packaging metadata.
+The release builds recorded for this fork used a two-stage local path.
+The Tizen installer needs `nofile=1024:524288`: an older bundled JVM may otherwise
+fail to allocate its descriptor table and leave the CLI uninstalled, producing
+a misleading `tizen: not found` later.
 
-Both builds use the root Dockerfile, `nofile=1024:524288`, and the same persistent
-author certificate supplied through a BuildKit secret. Configure the repository
-Actions secret **`TIZEN_AUTHOR_P12_BASE64`** with the base64-encoded persistent
-author P12 whose passphrase is `123456`, as expected by the current Dockerfile.
-Use the signing identity already used for releases; a newly generated certificate
-will not preserve that identity. Never commit the P12 or its encoded contents.
-If the secret is missing or cannot be opened, packaging stops instead of falling
-back to a generated test certificate. The runner removes its temporary signing
-files even if a later step fails.
-
-The workflow loads images locally on its runner; it does not push them to GHCR.
-It extracts widgets with `docker create`/`docker cp`, without starting containers.
-Before release creation, `verify-widgets.py` checks the declared version and
-application identity, the expected public author certificate, the ForceGM
-metadata and byte equality of the other variant payloads. This consistency check
-does not replace cryptographic signature validation or a TV installation test.
-
-The workflow creates a **draft**, including both widgets and initial notes for
-review. Review the files and edit the notes before publishing manually. It never
-deletes earlier pre-releases or tags. Dispatching a workflow prepares a draft;
-it does not publish a release. A stable version already released cannot be
-overwritten by this workflow.
-
-For local widget consistency checks, export the expected **public** author
-certificate as DER and run:
+Development recipes:
 
 ```bash
-python3 build-tools/verify-widgets.py \
-  Moonlight-v3.4.0-samirmartins.wgt \
-  Moonlight-v3.4.0-samirmartins-ForceGM.wgt \
-  --author-cert /path/to/public-author.der
+docker build -f build-tools/Dockerfile.buildonly -t moonlight-wasm-check .
+docker build --ulimit nofile=1024:524288 \
+  -f build-tools/Dockerfile.package -t moonlight-wgt .
 ```
 
----
-
-## The `--ulimit` is mandatory
-
-The root `Dockerfile` **fails** with a misleading message:
-
-```
-/bin/sh: 1: tizen: not found
-```
-
-The cause is neither the `tizen` CLI being off the PATH nor a missing JDK. The Tizen
-Studio installer **bundles its own JDK** (under `~/.package-manager/jdk`), but that JVM
-aborts during installation:
-
-```
-setting up jdk at /home/moonlight/.package-manager/jdk
-library initialization failed - unable to allocate file descriptor table - out of memory
-./installer.sh: line 19: 54 Aborted (core dumped) ".../jdk/bin/java" -jar installer.jar
-```
-
-The installer then **exits 0 having installed nothing**, which is why the next step is
-the one that breaks, with a message pointing somewhere else entirely.
-
-This is the classic behaviour of an older JVM in a container when `RLIMIT_NOFILE` is very
-high: the JVM tries to allocate a descriptor table proportional to the limit. BuildKit
-runs steps with an extremely high limit, while a plain `docker run` uses 1024, which is
-why the same installer works there.
-
-**Fix — pass the limit explicitly at build time:**
+Compilation alone validates neither packaging nor TV playback. The public root
+Dockerfile remains an alternative recipe, but its complete end-to-end execution
+has not been established by those two-stage builds:
 
 ```bash
 docker build --ulimit nofile=1024:524288 -t moonlight-tizen .
 ```
 
-No change to the `Dockerfile` is required.
+### Signing identity
 
-> Verified: the installer completes and produces `tizen-studio/tools/ide/bin/tizen`.
-> A full end-to-end build with the root `Dockerfile` plus `--ulimit` has **not** been
-> exercised; the widgets shipped so far came from the two-stage path described below.
+Generic Docker recipes can generate a **test certificate** when no persistent
+author key is supplied. A test key is not the release identity and can prevent
+installation over a previous version.
 
----
+For release builds, preserve the existing author identity and application/package
+IDs. Supply the private key separately through **local** BuildKit secret mounts,
+not through the source tree, image layers, logs or a remote runner. The public
+author certificate may be used for identity verification; it is not the private key.
+Recipes using a persistent key also require its SIGNING_CERT_SHA256 identity pin.
+Do not silently generate a replacement or re-sign an already published widget.
 
-## Two-stage fast cycle
+Extract the WGT from the packaging image with `docker create` and `docker cp`.
+The path is `/home/moonlight/Moonlight-v<version>-samirmartins[-ForceGM].wgt`;
+substitute the version in `res/config.xml` and omit `-ForceGM` for Normal.
+Remove only the temporary container created for extraction.
 
-The root `Dockerfile` downloads the Emscripten SDK (~1 GB) and Tizen Studio (~280 MB) in
-the same layer chain, so any code change invalidates everything. Separating compilation
-from packaging avoids that.
+## ForceGM
 
-**1. Compile and link** (validates all the C/C++, no Tizen Studio involved):
-
-```bash
-docker build -f build-tools/Dockerfile.buildonly -t moonlight-wasm-check .
-```
-
-**2. Package and sign** (starts from the image above):
-
-```bash
-docker build --ulimit nofile=1024:524288 \
-  -f build-tools/Dockerfile.package -t moonlight-wgt .
-```
-
-**3. Extract the `.wgt`:**
-
-```bash
-CID=$(docker create moonlight-wgt)
-docker cp "$CID:/home/moonlight/$(docker run --rm moonlight-wgt sh -c 'ls -1 /home/moonlight/*.wgt | xargs -n1 basename')" .
-docker rm "$CID"
-```
-
-The filename is assembled during the build from the version declared in `config.xml` and
-the variant — `Moonlight-v<version>-samirmartins[-ForceGM].wgt` — which is why the recipe
-discovers the name rather than hardcoding it.
-
-While iterating on code, only step 1 needs to run: it is the one that catches compile and
-link errors.
-
----
-
-## The ForceGM variant
-
-Upstream publishes two widgets per release, **built from the same code**. The only
-difference is one line in `config.xml`:
+Both variants use the same code. ForceGM adds this panel request to `config.xml`:
 
 ```xml
 <tizen:metadata key="http://samsung.com/tv/metadata/use.game.mode" value="true"/>
 ```
 
-It asks the TV firmware to put the **panel** into Game Mode while the app runs. It lived
-in `res/config.xml` until `ac6ba96` (Dec 2024), which removed it because it froze the app
-on newer Tizen; since then it has been a separate download.
-
-**Not to be confused with the in-app "Game Mode" switch**, which selects the EMSS
-`kUltraLow` latency mode (`wasm/main.cpp`). They are independent, and it is the switch,
-not the metadata, that breaks on Tizen 9.0. In this variant the switch must stay **off**:
-the decoder then uses `kLow`, which is stable, and the panel gets Game Mode from the
-metadata.
-
-Building it needs only the `--build-arg` on step 2; everything else is identical and the
-whole layer cache is reused:
+It is independent of the in-app decoder Game Mode switch (`kUltraLow`).
+On the tested Tizen 9 TV, leave that switch **off**; ForceGM still requests panel
+Game Mode. This does not establish identical behavior on every TV.
 
 ```bash
 docker build --ulimit nofile=1024:524288 --build-arg FORCE_GAME_MODE=1 \
   -f build-tools/Dockerfile.package -t moonlight-wgt-forcegm .
 ```
 
-The same `--build-arg` works on the root `Dockerfile` if you prefer the official
-single-step path.
+The root recipe accepts the same argument. Normal/ForceGM share application/package
+IDs; updating without losing settings also requires a compatible author identity
+and installation/re-signing method.
 
-Both widgets carry the **same** `tizen:application id` and `package`, as upstream does:
-installing one replaces the other, and saved settings are preserved. Going back is just
-installing the other `.wgt`.
+## Widget checks
 
----
+Export the expected **public** author certificate as DER and set WIDGET_VERSION
+for the files being checked (3.4.0 is an example):
 
-## Notes
+```bash
+WIDGET_VERSION=3.4.0
+python3 build-tools/verify-widgets.py \
+  "Moonlight-v${WIDGET_VERSION}-samirmartins.wgt" \
+  "Moonlight-v${WIDGET_VERSION}-samirmartins-ForceGM.wgt" \
+  --author-cert /path/to/public-author.der
+```
 
-- The `openjdk-17-jdk-headless` installed in `Dockerfile.package` turned out to be
-  **unnecessary** (the installer brings its own JDK). It was kept because the recipe was
-  validated with it present; removing it should be safe in principle, but has not been
-  tested.
-- Without a `tizen_author` BuildKit secret and its `SIGNING_CERT_SHA256` build
-  argument, local Docker builds create a test certificate (profile `Moonlight`).
-  Its identity is not guaranteed to match earlier releases. Release workflows
-  require the persistent certificate instead of allowing that fallback.
-- The `__BUILD_TYPE__` / `__BUILD_COMMIT__` placeholders in `wasm/platform/index.js` are
-  substituted by the CI workflow, not by a local build. Locally they stay literal, which
-  only affects the version string shown on the System Info screen.
+This checks version/IDs, public author identity, ForceGM metadata and variant
+payload equality. It does not replace cryptographic signature/digest coverage
+verification, privacy review or a TV installation test.
+
+## Legacy release workflows
+
+The stable/development packaging workflows remain manual and use the root recipe.
+They require private signing input on a remote runner and produce drafts.
+**They are not the maintainer's release-signing procedure. Do not upload the
+maintainer's private certificate or configure GitHub Secrets with it.**
+Use local signing and upload only audited WGTs/notes after explicit authorization.
+A draft, tag or workflow dispatch is also an external action, not implicit approval.
+
+## Recipe-specific notes
+
+- `Dockerfile.package` retains an extra JDK from its validated recipe; the Tizen
+  installer also bundles one. Removing it has not been tested.
+- `__BUILD_TYPE__` / `__BUILD_COMMIT__` are substituted by CI. A local path that
+  does not inject them may leave literal text in System Info; check the actual artifact.

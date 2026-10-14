@@ -4,35 +4,30 @@ Issues and focused pull requests are welcome.
 
 ## Issues
 
-Use the appropriate [issue template](https://github.com/samirmartins/moonlight-tizen/issues/new/choose). Include the Moonlight version, TV model, Tizen version, installation method, reproduction steps and relevant logs. Mask private addresses.
+Use the [issue templates](https://github.com/samirmartins/moonlight-tizen/issues/new/choose).
+Include app/TV/Tizen versions, installation method and reproduction steps.
+Mask private addresses and identifiers; never attach credentials, pairing/input
+keys, private certificates or unredacted logs.
 
 ## Development
 
-Run the regression tests before building:
+For runtime changes, run from the repository root:
 
 ```bash
 bash build-tools/run-tests.sh
 ```
 
-See the [test dependencies and baseline tag requirements](../build-tools/README.md#tests-and-github-actions).
-These are also checked by GitHub Actions on pushes and pull requests.
-
-Build the project locally before opening a pull request:
-
-```bash
-docker build --ulimit nofile=1024:524288 -t moonlight-tizen .
-```
-
-Add `--build-arg FORCE_GAME_MODE=1` for the ForceGM variant. See the
-[build guide](../build-tools/README.md) for the faster two-stage workflow.
-Dependencies are vendored; no submodule setup is required.
+See the [build guide](../build-tools/README.md) for dependencies, baseline tags,
+Samsung compilation, Normal/ForceGM and local signing. Dependencies are vendored;
+no submodule initialization is required.
+Documentation-only changes need content/link checks, not a build or TV test.
+Report tests actually run and any remaining hardware validation.
 
 ## Pull requests
 
-- Keep each pull request limited to one fix or feature.
-- Explain what changed, why, and how it was tested.
-- Follow the existing style and avoid unrelated refactoring.
-- Document user-visible behavior changes.
-- Explain any change to vendored dependencies and reference its upstream source when applicable.
+- Keep one fix/feature per PR and avoid unrelated refactoring.
+- Explain the reason, user-visible effects, tests and known limitations.
+- Document dependency changes and the relevant upstream source.
+- Keep private information out of source, screenshots, logs and commit metadata.
 
 By participating, you agree to the [Code of Conduct](../CODE_OF_CONDUCT.md).

@@ -121,8 +121,8 @@ See [Updates](INSTALLATION.md#updates).
 docker build --ulimit nofile=1024:524288 -t moonlight-tizen .
 ```
 
-The `--ulimit` is required. See the [build guide](build-tools/README.md) for
-ForceGM, widget extraction, tests and signing.
+Root build is not end-to-end verified; signing may use a test key.
+See [build/signing details](build-tools/README.md).
 
 ---
 
