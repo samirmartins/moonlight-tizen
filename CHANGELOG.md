@@ -14,8 +14,6 @@ that reason: the two lines are separate and should never be read as one.
 - Handles HEVC/AV1 decoder startup errors and timeouts without indefinite waits
 - Releases held keyboard keys and mouse buttons when focus or capture is lost
 - Uses H.264, 1920×1080 at 60 FPS and 30 Mbps as initial defaults, preserving saved preferences
-- Keeps the library manual: opening Moonlight does not start an app or send
-  Wake-on-LAN; Play, Resume and Wake & play remain available
 - Expands local regression coverage for playback, controller navigation,
   manual Wake-on-LAN, settings and package integrity
 
