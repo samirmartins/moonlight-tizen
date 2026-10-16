@@ -163,6 +163,7 @@ function handleMessage(msg) {
         break;
     }
     // Return to the app list with new current game
+    if (typeof AppLifecycle !== 'undefined' && AppLifecycle.deferMenu(api)) return;
     showApps(api);
     setTimeout(() => {
       // Scroll to the current game row
@@ -173,6 +174,7 @@ function handleMessage(msg) {
       }
     }, 1500);
   } else if (msg === 'Connection Established') {
+    if (typeof AppLifecycle !== 'undefined' && (!isInGame || document.hidden)) return;
     SessionDiagnostics.connected();
     // Prepare the screen for video stream
     $('#loadingSpinner').css('display', 'none');

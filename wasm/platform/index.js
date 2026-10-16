@@ -1817,6 +1817,10 @@ function prepareStreamAudio() {
 }
 
 function startGame(host, appID, audioPrepared) {
+  // Invalidate only continuations from before a Smart Hub transition.
+  const lifecycleEpoch = typeof AppLifecycle !== 'undefined' ? AppLifecycle.epoch() : 0;
+  const launchCurrent = function() { return typeof AppLifecycle === 'undefined' || AppLifecycle.current(lifecycleEpoch); };
+  if (!launchCurrent()) return;
   if (!host || !host.paired) {
     console.error('%c[index.js, startGame]', 'color: gray;', 'Operation failed; private details omitted.');
     return;
@@ -1828,9 +1832,12 @@ function startGame(host, appID, audioPrepared) {
 
   // Refresh the server info, because the user might have quit the game
   host.refreshServerInfo().then(function(ret) {
+    if (!launchCurrent()) return;
     host.getAppById(appID).then(function(appToStart) {
+      if (!launchCurrent()) return;
       if (host.currentGame != 0 && host.currentGame != appID) {
         host.getAppById(host.currentGame).then(function(currentApp) {
+          if (!launchCurrent()) return;
           // Find the existing overlay and dialog elements
           var quitAppOverlay = document.querySelector('#quitAppDialogOverlay');
           var quitAppDialog = document.querySelector('#quitAppDialog');
@@ -1847,6 +1854,7 @@ function startGame(host, appID, audioPrepared) {
           // Cancel the operation if the Cancel button is pressed
           $('#cancelQuitApp').off('click');
           $('#cancelQuitApp').on('click', function() {
+            if (!launchCurrent()) return;
             console.log('%c[index.js, startGame]', 'color: green;', 'Closing app dialog and returning.');
             quitAppOverlay.style.display = 'none';
             quitAppDialog.close();
@@ -1857,16 +1865,19 @@ function startGame(host, appID, audioPrepared) {
           // Quit the running app if the Continue button is pressed
           $('#continueQuitApp').off('click');
           $('#continueQuitApp').on('click', function() {
+            if (!launchCurrent()) return;
             console.log('%c[index.js, startGame]', 'color: green;', 'Quitting game, closing app dialog, and returning.');
             stopGame(host, function() {
+              if (!launchCurrent()) return;
               setTimeout(() => {
+                if (!launchCurrent()) return;
                 // Scroll to the current game row
                 Navigation.switch();
                 // Switch to Apps view
                 Navigation.change(Views.Apps);
               }, 1500);
               // Please, don't infinite loop with recursion
-              setTimeout(() => startGame(host, appID), 3000);
+              setTimeout(() => { if (launchCurrent()) startGame(host, appID); }, 3000);
             });
             quitAppOverlay.style.display = 'none';
             quitAppDialog.close();
@@ -1876,6 +1887,7 @@ function startGame(host, appID, audioPrepared) {
 
           return;
         }, function(failedCurrentApp) {
+          if (!launchCurrent()) return;
           console.error('%c[index.js, startGame]', 'color: gray;', 'Operation failed; private details omitted.'); // Logging both object (for console) and toString-ed object (for text logs)
           return;
         });
@@ -1931,6 +1943,7 @@ function startGame(host, appID, audioPrepared) {
           0x030002, // Surround channel mask << 16 | Surround channel count
           gamepadMask // Connect gamepad mask
         ).then(function(launchResult) {
+          if (!launchCurrent()) return;
           $xml = $($.parseXML(launchResult.toString()));
           $root = $xml.find('root');
           var status_code = $root.attr('status_code');
@@ -1939,6 +1952,7 @@ function startGame(host, appID, audioPrepared) {
             $('#loadingSpinnerMessage').text('');
             snackbarLogLong('Error ' + status_code + ': ' + status_message);
             showApps(host).then(() => {
+              if (!launchCurrent()) return;
               // Scroll to the current game row
               Navigation.switch();
               // Switch to Apps view
@@ -1954,13 +1968,16 @@ function startGame(host, appID, audioPrepared) {
             audioConfig, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
             performanceStats, clientRefreshRateX100
           ]).catch(function() {
+            if (!launchCurrent()) return;
             handleMessage('streamTerminated: 0');
             snackbarLogLong('Previous stream is still closing. Retry shortly.');
           });
         }, function(failedResumeApp) {
+          if (!launchCurrent()) return;
           console.error('%c[index.js, startGame]', 'color: gray;', 'Operation failed; private details omitted.');
           snackbarLog('Failed to resume ' + appToStart.title);
           showApps(host).then(() => {
+            if (!launchCurrent()) return;
             // Scroll to the current game row
             Navigation.switch();
             // Switch to Apps view
@@ -1981,6 +1998,7 @@ function startGame(host, appID, audioPrepared) {
         0x030002, // Surround channel mask << 16 | Surround channel count
         gamepadMask // Connect gamepad mask
       ).then(function(launchResult) {
+        if (!launchCurrent()) return;
         $xml = $($.parseXML(launchResult.toString()));
         $root = $xml.find('root');
         var status_code = $root.attr('status_code');
@@ -1994,6 +2012,7 @@ function startGame(host, appID, audioPrepared) {
           $('#loadingSpinnerMessage').text('');
           snackbarLogLong('Error ' + status_code + ': ' + status_message);
           showApps(host).then(() => {
+            if (!launchCurrent()) return;
             // Scroll to the current game row
             Navigation.switch();
             // Switch to Apps view
@@ -2009,13 +2028,16 @@ function startGame(host, appID, audioPrepared) {
           audioConfig, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
           performanceStats, clientRefreshRateX100
         ]).catch(function() {
+            if (!launchCurrent()) return;
             handleMessage('streamTerminated: 0');
             snackbarLogLong('Previous stream is still closing. Retry shortly.');
           });
       }, function(failedLaunchApp) {
+        if (!launchCurrent()) return;
         console.error('%c[index.js, startGame]', 'color: gray;', 'Operation failed; private details omitted.');
         snackbarLog('Failed to launch ' + appToStart.title + '.');
         showApps(host).then(() => {
+          if (!launchCurrent()) return;
           // Scroll to the current game row
           Navigation.switch();
           // Switch to Apps view
@@ -2025,6 +2047,7 @@ function startGame(host, appID, audioPrepared) {
       });
     });
   }, function(failedRefreshInfo) {
+    if (!launchCurrent()) return;
     console.error('%c[index.js, startGame]', 'color: gray;', 'Operation failed; private details omitted.'); // Logging both object (for console) and toString-ed object (for text logs)
   });
 }

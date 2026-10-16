@@ -36,7 +36,7 @@ var ConsoleLibrary = (function() {
     return r;
   }
   function save() { try { localStorage.setItem(key, JSON.stringify(prefs)); } catch (e) {} }
-  function valid(token) { return active && !isInGame && token === epoch && host && hosts[host.serverUid] === host; }
+  function valid(token) { return active && !isInGame && !document.hidden && token === epoch && host && hosts[host.serverUid] === host; }
   function status(text) { el('libraryStatus').textContent = text; }
   function cancel() {
     epoch++;
@@ -62,6 +62,15 @@ var ConsoleLibrary = (function() {
     preparedAudio = false;
     hide();
     el('game-grid').textContent = '';
+  }
+  function pause() {
+    cancel();
+    clearTimeout(launchTimer); launchTimer = 0; launchPending = false;
+  }
+  function resume() {
+    if (document.hidden) return;
+    if (active) { refresh(); focusCards(); }
+    else if (!started && runtimeReady && hostsReady) ready('runtime');
   }
   function preferred() {
     if (Object.prototype.hasOwnProperty.call(hosts, prefs.preferred)) return hosts[prefs.preferred];
@@ -292,7 +301,7 @@ var ConsoleLibrary = (function() {
     el('libraryHost').textContent = host.hostname || 'PC';
   }
   function open(pc) {
-    if (!pc || isDialogOpen) return Promise.resolve();
+    if (!pc || isDialogOpen || document.hidden) return Promise.resolve();
     cancel(); stopPollingHosts(); stopSubnetScanner();
     clearTimeout(launchTimer); launchTimer = 0; launchPending = false;
     host = pc; api = pc; active = true; busy = checking = false;
@@ -308,12 +317,13 @@ var ConsoleLibrary = (function() {
   }
   function ready(part) {
     if (part === 'runtime') runtimeReady = true; else hostsReady = true;
-    if (!runtimeReady || !hostsReady || started) return;
+    if (!runtimeReady || !hostsReady || started || document.hidden) return;
     started = true; bind();
     var pc = preferred();
     if (pc) open(pc); // Merely opening Moonlight never wakes or launches a PC.
   }
   return {
+    pause: pause, resume: resume,
     open: open, ready: ready, hide: hide, suspend: suspend, visible: function() { return active; },
     move: move, focusCards: focusCards, focusNav: focusNav,
     acceptNav: function() { var names = controls(); if (names.length) el(names[Math.max(0,Math.min(navIndex,names.length-1))]).click(); },

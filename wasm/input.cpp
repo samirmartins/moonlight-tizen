@@ -189,7 +189,11 @@ EM_BOOL handleFocusLost(int, const EmscriptenFocusEvent*, void*) {
 }
 
 EM_BOOL handleVisibilityChange(int, const EmscriptenVisibilityChangeEvent* event, void*) {
-  if (event && event->hidden) g_Instance->ReleaseHeldInput();
+  if (event && event->hidden) {
+    g_Instance->ReleaseHeldInput();
+    // Disconnect the client only. Never quit the host application on hide.
+    g_Instance->StopConnection();
+  }
   return EM_FALSE;
 }
 

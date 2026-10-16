@@ -35,6 +35,13 @@ retained; these safety contracts are now included in the default test.
 For a separate race check, set `ML_LIFECYCLE_SANITIZER=thread`.
 These fixtures do not emulate the full Samsung runtime or prove TV stability.
 
+Smart Hub: the approved policy disconnects only the client on visibility loss;
+the host game stays open and the user resumes manually from the library.
+`app_lifecycle_test.js` covers repeated hide/show, cancelled menu/WoL work,
+delayed launch/resume replies, stale connection messages and preserved launch
+payloads. `input_focus_test.js` checks held-input release before disconnect;
+blur alone does not stop a stream. Hardware suspension/EMSS still needs a TV test.
+
 Extended native HTTP/RTP, browser layout/navigation and actual WGT signature/privacy
 checks are coordinated by the maintainer's local tools, separately from public CI.
 Browser/EMSS adapters are not a Samsung decoder or a physical controller.

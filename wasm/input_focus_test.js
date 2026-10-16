@@ -53,6 +53,8 @@ public:
  EM_BOOL HandleKeyUp(const EmscriptenKeyboardEvent&);
  void SendKeyboardInput(uint32_t, uint16_t, char);
  void ReleaseHeldInput(); void ReportMouseMovement();
+ int stops = 0;
+ void StopConnection() { assert(m_HeldKeys.none() && m_HeldMouseButtons.none()); ++stops; m_Running = false; }
  void LockMouse(); void UnlockMouse(); void DidLockMouse(int32_t); void MouseLockLost();
  static void ClLogMessage(const char*, ...) {}
 };
@@ -71,12 +73,16 @@ int main() {
  assert(events[5].type == 0 && events[5].code == 0x8041 && events[5].action == KEY_ACTION_UP && events[5].modifiers == 0);
  for (int i = 6; i < 9; ++i) assert(events[i].type == 1 && events[i].action == BUTTON_ACTION_RELEASE);
  handleFocusLost(0, nullptr, nullptr); assert(events.size() == 9);
+ assert(app.stops == 0 && app.m_Running);
  app.HandleKeyDown(key); app.HandleKeyUp(key); auto size = events.size();
  app.ReleaseHeldInput(); assert(events.size() == size);
  app.HandleKeyDown(key);
  EmscriptenVisibilityChangeEvent visible{false}, hidden{true};
  handleVisibilityChange(0, &visible, nullptr); assert(app.m_HeldKeys.any());
+ handleVisibilityChange(0, nullptr, nullptr); assert(app.stops == 0);
  handleVisibilityChange(0, &hidden, nullptr); assert(app.m_HeldKeys.none());
+ assert(app.stops == 1 && !app.m_Running);
+ app.m_Running = true;
  sendKeyboardEvent(0x801b, KEY_ACTION_DOWN, 0); assert(app.m_HeldKeys.test(0x1b));
  EmscriptenPointerlockChangeEvent lock{false}; handlePointerLockChange(0, &lock, nullptr);
  assert(!app.m_MouseLocked && app.m_HeldKeys.none() && events.back().code == 0x801b);
