@@ -102,7 +102,7 @@ assert.strictEqual(between(current,'static TimeStamp NextPacketPts','bool Moonli
     .replace('  g_Instance->m_DecoderActive = false;\n', ''),
   between(baseline,'static TimeStamp NextPacketPts','void MoonlightInstance::WaitFor'));
 const padOld=cp.execFileSync('git',['show','v3.3.10:wasm/platform/gamepad.js'],{encoding:'utf8'});
-const padNew=fs.readFileSync('wasm/platform/gamepad.js','utf8');
+const padNew=require('./controller-mapping-scope.cjs').normalize('wasm/platform/gamepad.js',fs.readFileSync('wasm/platform/gamepad.js','utf8'));
 assert.strictEqual(between(padNew,'// Streaming gamepad publisher','// Rumble is sampled cheaply in rAF'),
   between(padOld,'// Streaming gamepad publisher','// Rumble is sampled cheaply in rAF'));
 for(const name of ['DURATION_MS','RENEW_MS','MIN_INTERVAL_MS','MAX_IN_FLIGHT','WATCHDOG_MS']) {
@@ -220,7 +220,7 @@ for (const file of files) {
   assert.strictEqual(withoutLogs(current(file)),withoutLogs(old(file)),file+' privacy-only logging');
  } else if (file === 'wasm/gamepad.cpp') {
   assert.strictEqual(withoutInputWake(current(file)), withoutInputWake(old(file)), file+' wake-only change');
- } else assert(fs.readFileSync(file).equals(cp.execFileSync('git', ['show', 'v3.4.0:' + file])), file);
+ } else assert.strictEqual(require('./controller-mapping-scope.cjs').normalize(file,current(file)), old(file), file);
 }
 const index = current('wasm/platform/index.js'), indexOld = old('wasm/platform/index.js');
 assert.strictEqual(withoutLogs(index.slice(0, index.indexOf('function restoreDefaultsSettingsValues()'))),

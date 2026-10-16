@@ -1,0 +1,8 @@
+DualSense controller artwork: Nicolae (Xelu) Berbece, free controller prompt pack.
+Public domain dedication: Creative Commons CC0 1.0.
+Original pack: https://thoseawesomeguys.com/prompts/
+License: https://creativecommons.org/publicdomain/zero/1.0/
+Input Overlay preset by Caro. Source artwork (unmodified atlas):
+https://github.com/univrsal/input-overlay/blob/bcbb7935a2285174a6525f0289cb53ca5875e6da/presets/dualsense/dualsense.png
+Credits:
+https://github.com/univrsal/input-overlay/blob/bcbb7935a2285174a6525f0289cb53ca5875e6da/presets/dualsense/CREDITS.md

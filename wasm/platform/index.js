@@ -80,6 +80,7 @@ function attachListeners() {
   $('#mouseEmulationSwitch').on('click', saveMouseEmulation);
   $('#flipABfaceButtonsSwitch').on('click', saveFlipABfaceButtons);
   $('#flipXYfaceButtonsSwitch').on('click', saveFlipXYfaceButtons);
+  $('#controllerMappingBtn').on('click', function() { ControllerMappingMenu.open(); });
   $('.audioConfigMenu li').on('click', saveAudioConfiguration);
   $('#jitterSlider').on('input', saveAudioJitter);
   $('#playHostAudioSwitch').on('click', savePlayHostAudio);
@@ -1826,6 +1827,7 @@ function startGame(host, appID, audioPrepared) {
     return;
   }
   if (!audioPrepared) prepareStreamAudio();
+  const customMapping = typeof ControllerMapping !== 'undefined' && ControllerMapping.prepareSession();
 
   // Reset the scheduler for the new stream, also inside the gesture handler
   startAudioScheduler();
@@ -1910,8 +1912,8 @@ function startGame(host, appID, audioPrepared) {
       const optimizeGames = $('#optimizeGamesSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const rumbleFeedback = $('#rumbleFeedbackSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const mouseEmulation = $('#mouseEmulationSwitch').parent().hasClass('is-checked') ? 1 : 0;
-      const flipABfaceButtons = $('#flipABfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
-      const flipXYfaceButtons = $('#flipXYfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
+      const flipABfaceButtons = !customMapping && $('#flipABfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
+      const flipXYfaceButtons = !customMapping && $('#flipXYfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
       var audioConfig = $('#selectAudio').data('value').toString();
       const audioJitterMs = parseInt($('#jitterSlider').val());
       const playHostAudio = $('#playHostAudioSwitch').parent().hasClass('is-checked') ? 1 : 0;

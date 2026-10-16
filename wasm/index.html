@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="static/css/style.css">
   <link rel="stylesheet" href="static/css/menu-tools.css">
   <link rel="stylesheet" href="static/css/console-library.css">
+  <link rel="stylesheet" href="static/css/controller-mapping.css">
   <script type="text/javascript" src="platform.js"></script>
 </head>
 <body data-name="moonlight-tizen" data-tools="emscripten" data-configs="Debug Release" data-path="{tc}/{config}">
@@ -187,6 +188,11 @@
             </div>
           </div>
           <div id="inputSettings" class="settings-options">
+            <div class="setting-option">
+              <label>Controller mapping</label>
+              <span class="mdl-list__item-text-body">Optional layout for game controls. Menu navigation stays unchanged.</span>
+              <button type="button" id="controllerMappingBtn" class="console-button">Remap controller buttons</button>
+            </div>
             <div class="setting-option">
               <label>Rumble feedback</label>
               <span class="mdl-list__item-text-body"></span>
@@ -428,6 +434,8 @@
   <script type="text/javascript" src="platform/common.js"></script>
   <script type="text/javascript" src="platform/display.js"></script>
   <script type="text/javascript" src="platform/gamepad.js"></script>
+  <script type="text/javascript" src="platform/controller-mapping.js"></script>
+  <script type="text/javascript" src="platform/controller-mapping-menu.js"></script>
   <script type="text/javascript" src="platform/audio.js"></script>
   <script type="text/javascript" src="platform/menu-tools.js"></script>
   <script type="text/javascript" src="platform/console-library.js"></script>

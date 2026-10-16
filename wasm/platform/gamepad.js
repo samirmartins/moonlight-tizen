@@ -311,9 +311,12 @@ function startGamepadSnapshot(rumbleEnabled) {
   _gpLastWords = new Int32Array(_gpWordCount);
   _gpLastWords.fill(0x7fffffff);
 
+  // Freeze the builder for this stream; the disabled path is the original function.
+  var buildSnapshot = typeof ControllerMapping !== 'undefined'
+    ? ControllerMapping.sessionBuilder(_gpBuildSnapshot) : _gpBuildSnapshot;
   var tick = function() {
     var pads = navigator.getGamepads ? navigator.getGamepads() : [];
-    _gpBuildSnapshot(pads);
+    buildSnapshot(pads);
     _gpPublishIfChanged();
     if (_rumbleEnabled) { _rumbleMaybeSchedule(); }
     _gpRafHandle = window.requestAnimationFrame(tick);

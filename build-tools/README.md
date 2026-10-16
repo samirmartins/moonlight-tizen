@@ -46,6 +46,12 @@ Extended native HTTP/RTP, browser layout/navigation and actual WGT signature/pri
 checks are coordinated by the maintainer's local tools, separately from public CI.
 Browser/EMSS adapters are not a Samsung decoder or a physical controller.
 
+Optional controller mapping: `controller_mapping_test.js` checks permutation
+validation, persistence/failure, exact trigger bits, multi-controller snapshots
+and the original function identity when OFF. The editor/test loop is menu-only;
+sticks, rumble and native streaming algorithms are unchanged. Historical source
+guards allow only the explicit integration points, not arbitrary input changes.
+
 For documentation-only changes, check content, links and templates; a TV test
 or WGT rebuild is not required. For runtime changes, select the full suite and
 focused native/browser checks appropriate to the affected behavior.

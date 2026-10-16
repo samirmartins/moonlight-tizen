@@ -2,6 +2,7 @@
 // Exact exceptions for the separately tested Smart Hub policy. Unknown changes
 // remain visible to the historical source-identity checks.
 function launch(source) {
+ source = require('./controller-mapping-scope.cjs').launch(source);
  return source.replace('  // Invalidate only continuations from before a Smart Hub transition.\n' +
   "  const lifecycleEpoch = typeof AppLifecycle !== 'undefined' ? AppLifecycle.epoch() : 0;\n" +
   "  const launchCurrent = function() { return typeof AppLifecycle === 'undefined' || AppLifecycle.current(lifecycleEpoch); };\n", '')
@@ -11,6 +12,7 @@ function launch(source) {
   .replace("    if (typeof AppLifecycle !== 'undefined' && (!isInGame || document.hidden)) return;\n", '');
 }
 function normalize(file, source) {
+ source = require('./controller-mapping-scope.cjs').normalize(file, source);
  if (file === 'wasm/input.cpp') return source.replace(
   '  if (event && event->hidden) {\n' +
   '    g_Instance->ReleaseHeldInput();\n' +
