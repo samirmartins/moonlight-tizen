@@ -2812,21 +2812,8 @@ function loadUserData() {
 }
 
 function loadUserDataCb() {
-  // Autostart must not race asynchronous loading of saved streaming settings.
-  // These counters exist only during settings loading, never during playback.
-  var pendingSettings = 0, settingsQueued = false;
-  function loadSetting(name, callback) {
-    pendingSettings++;
-    getData(name, function(value) {
-      try { callback(value); }
-      finally {
-        pendingSettings--;
-        if (settingsQueued && pendingSettings === 0) ConsoleLibrary.ready('settings');
-      }
-    });
-  }
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored resolution preferences.');
-  loadSetting('resolution', function(previousValue) {
+  getData('resolution', function(previousValue) {
     if (previousValue.resolution != null) {
       var resWidth = parseInt(previousValue.resolution.split(':')[0], 10);
       if (resWidth > maxSupportedWidth) {
@@ -2844,7 +2831,7 @@ function loadUserDataCb() {
 
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored frameRate preferences.');
-  loadSetting('frameRate', function(previousValue) {
+  getData('frameRate', function(previousValue) {
     if (previousValue.frameRate != null) {
       $('.videoFramerateMenu li').each(function() {
         if ($(this).data('value') === previousValue.frameRate) {
@@ -2856,7 +2843,7 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored bitrate preferences.');
-  loadSetting('bitrate', function(previousValue) {
+  getData('bitrate', function(previousValue) {
     $('#bitrateSlider')[0].MaterialSlider.change(previousValue.bitrate != null ? previousValue.bitrate : '30');
     // Update the video bitrate field based on the given value
     $('#selectBitrate').html($('#bitrateSlider').val() + ' Mbps');
@@ -2864,7 +2851,7 @@ function loadUserDataCb() {
 
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored ipAddressFieldMode preferences.');
-  loadSetting('ipAddressFieldMode', function(previousValue) {
+  getData('ipAddressFieldMode', function(previousValue) {
     if (previousValue.ipAddressFieldMode == null) {
       document.querySelector('#ipAddressFieldModeBtn').MaterialSwitch.off(); // Set the default state
     } else if (previousValue.ipAddressFieldMode == false) {
@@ -2877,7 +2864,7 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored sortAppsList preferences.');
-  loadSetting('sortAppsList', function(previousValue) {
+  getData('sortAppsList', function(previousValue) {
     if (previousValue.sortAppsList == null) {
       document.querySelector('#sortAppsListBtn').MaterialSwitch.off(); // Set the default state
     } else if (previousValue.sortAppsList == false) {
@@ -2888,7 +2875,7 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored optimizeGames preferences.');
-  loadSetting('optimizeGames', function(previousValue) {
+  getData('optimizeGames', function(previousValue) {
     if (previousValue.optimizeGames == null) {
       document.querySelector('#optimizeGamesBtn').MaterialSwitch.on(); // Set the default state
     } else if (previousValue.optimizeGames == false) {
@@ -2899,7 +2886,7 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored rumbleFeedback preferences.');
-  loadSetting('rumbleFeedback', function(previousValue) {
+  getData('rumbleFeedback', function(previousValue) {
     if (previousValue.rumbleFeedback == null) {
       document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.off(); // Set the default state
     } else if (previousValue.rumbleFeedback == false) {
@@ -2910,7 +2897,7 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored mouseEmulation preferences.');
-  loadSetting('mouseEmulation', function(previousValue) {
+  getData('mouseEmulation', function(previousValue) {
     if (previousValue.mouseEmulation == null) {
       document.querySelector('#mouseEmulationBtn').MaterialSwitch.off(); // Set the default state
     } else if (previousValue.mouseEmulation == false) {
@@ -2921,7 +2908,7 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored flipABfaceButtons preferences.');
-  loadSetting('flipABfaceButtons', function(previousValue) {
+  getData('flipABfaceButtons', function(previousValue) {
     if (previousValue.flipABfaceButtons == null) {
       document.querySelector('#flipABfaceButtonsBtn').MaterialSwitch.off(); // Set the default state
     } else if (previousValue.flipABfaceButtons == false) {
@@ -2932,7 +2919,7 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored flipXYfaceButtons preferences.');
-  loadSetting('flipXYfaceButtons', function(previousValue) {
+  getData('flipXYfaceButtons', function(previousValue) {
     if (previousValue.flipXYfaceButtons == null) {
       document.querySelector('#flipXYfaceButtonsBtn').MaterialSwitch.off(); // Set the default state
     } else if (previousValue.flipXYfaceButtons == false) {
@@ -2943,7 +2930,7 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioConfig preferences.');
-  loadSetting('audioConfig', function(previousValue) {
+  getData('audioConfig', function(previousValue) {
     if (previousValue.audioConfig != null) {
       $('.audioConfigMenu li').each(function() {
         if ($(this).data('value') === previousValue.audioConfig) {
@@ -2955,8 +2942,8 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored audioJitterMs preferences.');
-  loadSetting('audioJitterDefaultRevision', function(previousRevision) {
-    loadSetting('audioJitterMs', function(previousValue) {
+  getData('audioJitterDefaultRevision', function(previousRevision) {
+    getData('audioJitterMs', function(previousValue) {
       var storedValue = previousValue.audioJitterMs != null
         ? String(previousValue.audioJitterMs) : null;
       var isLegacyDefault = previousRevision.audioJitterDefaultRevision == null &&
@@ -2974,7 +2961,7 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored playHostAudio preferences.');
-  loadSetting('playHostAudio', function(previousValue) {
+  getData('playHostAudio', function(previousValue) {
     if (previousValue.playHostAudio == null) {
       document.querySelector('#playHostAudioBtn').MaterialSwitch.off(); // Set the default state
     } else if (previousValue.playHostAudio == false) {
@@ -2985,7 +2972,7 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored videoCodec preferences.');
-  loadSetting('videoCodec', function(previousValue) {
+  getData('videoCodec', function(previousValue) {
     if (previousValue.videoCodec != null) {
       $('.videoCodecMenu li').each(function() {
         if ($(this).data('value') === previousValue.videoCodec) {
@@ -2997,7 +2984,7 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored hdrMode preferences.');
-  loadSetting('hdrMode', function(previousValue) {
+  getData('hdrMode', function(previousValue) {
     if (previousValue.hdrMode == null) {
       document.querySelector('#hdrModeBtn').MaterialSwitch.off(); // Set the default state
     } else if (previousValue.hdrMode == false) {
@@ -3008,7 +2995,7 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored fullRange preferences.');
-  loadSetting('fullRange', function(previousValue) {
+  getData('fullRange', function(previousValue) {
     if (previousValue.fullRange == null) {
       document.querySelector('#fullRangeBtn').MaterialSwitch.off(); // Set the default state
     } else if (previousValue.fullRange == false) {
@@ -3019,7 +3006,7 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored gameMode preferences.');
-  loadSetting('gameMode', function(previousValue) {
+  getData('gameMode', function(previousValue) {
     if (previousValue.gameMode == null) {
       // Off on every version: this is the switch that freezes playback on some
       // models, and it must stay off in the ForceGM build
@@ -3036,7 +3023,7 @@ function loadUserDataCb() {
 
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored disableWarnings preferences.');
-  loadSetting('disableWarnings', function(previousValue) {
+  getData('disableWarnings', function(previousValue) {
     if (previousValue.disableWarnings == null) {
       document.querySelector('#disableWarningsBtn').MaterialSwitch.off(); // Set the default state
     } else if (previousValue.disableWarnings == false) {
@@ -3047,7 +3034,7 @@ function loadUserDataCb() {
   });
 
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored performanceStats preferences.');
-  loadSetting('performanceStats', function(previousValue) {
+  getData('performanceStats', function(previousValue) {
     if (previousValue.performanceStats == null) {
       document.querySelector('#performanceStatsBtn').MaterialSwitch.off(); // Set the default state
     } else if (previousValue.performanceStats == false) {
@@ -3056,8 +3043,6 @@ function loadUserDataCb() {
       document.querySelector('#performanceStatsBtn').MaterialSwitch.on();
     }
   });
-  settingsQueued = true;
-  if (pendingSettings === 0) ConsoleLibrary.ready('settings');
 }
 
 function loadHTTPCerts() {

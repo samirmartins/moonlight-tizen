@@ -38,107 +38,52 @@ function fixture(options={}) {
  return {c,node,host,timers,calls,launched,flush,tick,prefs:()=>JSON.parse(stored).hosts['fixture-pc']};
 }
 (async()=>{
- let f=fixture();f.c.ConsoleLibrary.ready('runtime');f.c.ConsoleLibrary.ready('hosts');await f.flush();
- assert.strictEqual(f.launched.length,0);assert.strictEqual(f.calls.wake,0);assert.strictEqual(f.calls.audio,0);
- assert(!f.node('libraryAutoStart').checked&&f.node('libraryAutoWake').disabled);
- f.node('libraryAutoStart').click();assert(f.node('libraryAutoWake').checked&&f.prefs().startupApp>0);
- const chosen=f.prefs().startupApp;f.node('libraryAutoWake').click();assert.strictEqual(f.prefs().startupWake,false);
- f.node('libraryAutoStart').click();assert(f.node('libraryAutoWake').disabled);
- f.node('libraryAutoStart').click();assert.strictEqual(f.prefs().startupWake,true);
- f.c.ConsoleLibrary.move(1,0);assert.strictEqual(f.prefs().startupApp,chosen,'Browsing must not retarget startup');
- f=fixture({record:{startupApp:1,startupWake:true}});
- f.c.ConsoleLibrary.ready('runtime');f.c.ConsoleLibrary.ready('hosts');await f.flush();
- assert.strictEqual(f.calls.connect,0,'Startup waits for settings');
- f.c.ConsoleLibrary.ready('settings');await f.tick(0);await f.tick(0);
- assert.deepStrictEqual(f.launched,[{app:1,audio:true}]);assert.strictEqual(f.calls.wake,0);assert.strictEqual(f.calls.audio,1);
- f.c.ConsoleLibrary.ready('runtime');f.c.ConsoleLibrary.ready('settings');assert.strictEqual(f.launched.length,1);
- f.c.isInGame=false;await f.c.ConsoleLibrary.open(f.host);await f.flush();assert.strictEqual(f.launched.length,1,'No restart when returning to the library');
- f=fixture({online:false,record:{startupApp:1,startupWake:true}});
- ['settings','hosts','runtime'].forEach(s=>f.c.ConsoleLibrary.ready(s));await f.tick(0);await f.tick(1000);await f.tick(0);
- assert.strictEqual(f.calls.wake,1);assert.strictEqual(f.launched.length,1);
- // Automatic wake owns one operation; manual clicks cannot duplicate it.
- f=fixture({online:false,wakeDelayed:true,record:{startupApp:1,startupWake:true}});
- ['settings','hosts','runtime'].forEach(s=>f.c.ConsoleLibrary.ready(s));await f.tick(0);
- f.node('libraryPlay').click();f.c.ConsoleLibrary.accept();assert.strictEqual(f.calls.wake,1);
- f.node('libraryCancel').click();f.host.online=true;f.host.resolveWake();await f.flush();
- assert.strictEqual(f.launched.length,0);assert.strictEqual(f.calls.audio,0);
- assert(!Array.from(f.timers.values()).some(t=>t.ms===1000),'Cancelled wake must not schedule a check');
- // Disabling startup WoL never disables the existing manual Wake & play.
- f=fixture({online:false,record:{startupApp:1,startupWake:false}});
- ['settings','hosts','runtime'].forEach(s=>f.c.ConsoleLibrary.ready(s));await f.tick(0);
- f.node('libraryCancel').click();f.node('libraryPlay').click();await f.flush();
- assert.strictEqual(f.calls.wake,1);assert.strictEqual(f.launched.length,1);
- f=fixture({delayed:true,record:{startupApp:1,startupWake:true}});
- ['settings','hosts','runtime'].forEach(s=>f.c.ConsoleLibrary.ready(s));await f.tick(0);
- f.c.ConsoleLibrary.settings();f.host.resolve();await f.flush();
- assert.strictEqual(f.launched.length,0);assert.strictEqual(f.calls.wake,0);
- // A timed-out address probe cannot resume the automatic sequence later.
- f=fixture({delayed:true,record:{startupApp:1,startupWake:true}});
- ['settings','hosts','runtime'].forEach(s=>f.c.ConsoleLibrary.ready(s));await f.tick(0);
- const oldProbe=f.host.resolve;await f.tick(8000);
- assert.strictEqual(f.calls.wake,1);oldProbe();await f.flush();
- assert.strictEqual(f.calls.list,0);assert.strictEqual(f.launched.length,0);
- await f.tick(1000);f.host.resolve();await f.flush();await f.tick(0);
- assert.strictEqual(f.launched.length,1);assert.strictEqual(f.calls.wake,1);
- f=fixture({online:false,record:{startupApp:1,startupWake:false}});
- ['settings','hosts','runtime'].forEach(s=>f.c.ConsoleLibrary.ready(s));await f.tick(0);
- assert.strictEqual(f.calls.wake,0);assert.strictEqual(f.calls.audio,0);
- await f.tick(60000);assert(!f.node('libraryPlay').disabled);assert.strictEqual(f.launched.length,0);
- f=fixture({online:false,noMac:true,record:{startupApp:1,startupWake:true}});
- ['settings','hosts','runtime'].forEach(s=>f.c.ConsoleLibrary.ready(s));await f.tick(0);
- assert.strictEqual(f.calls.wake,0);assert.match(f.node('libraryStatus').textContent,/MAC/);
- f=fixture({online:false,wakeFailure:true,record:{startupApp:1,startupWake:true}});
- ['settings','hosts','runtime'].forEach(s=>f.c.ConsoleLibrary.ready(s));await f.tick(0);assert.match(f.node('libraryStatus').textContent,/Could not send/);
- f=fixture({missing:true,record:{startupApp:1,startupWake:true}});
- ['settings','hosts','runtime'].forEach(s=>f.c.ConsoleLibrary.ready(s));await f.tick(0);assert.strictEqual(f.launched.length,0);assert.match(f.node('libraryStatus').textContent,/no longer available/);
- f=fixture({delayed:true,record:{startupApp:1,startupWake:true}});
- ['settings','hosts','runtime'].forEach(s=>f.c.ConsoleLibrary.ready(s));await f.tick(0);
- f.node('libraryCancel').click();f.host.resolve();await f.flush();assert.strictEqual(f.launched.length,0);assert.strictEqual(f.calls.audio,0);
- f=fixture({audioBlocked:true,record:{startupApp:1,startupWake:true}});
- ['settings','hosts','runtime'].forEach(s=>f.c.ConsoleLibrary.ready(s));await f.tick(0);await f.tick(0);await f.tick(1500);
- assert.strictEqual(f.launched.length,0);assert.strictEqual(f.calls.close,1);assert.match(f.node('libraryStatus').textContent,/button press/);
- f=fixture({current:2,record:{startupApp:1,startupWake:true}});
- ['settings','hosts','runtime'].forEach(s=>f.c.ConsoleLibrary.ready(s));await f.tick(0);await f.tick(0);
- assert.strictEqual(f.calls.audio,0);assert.strictEqual(f.launched.length,0);assert.match(f.node('libraryStatus').textContent,/Another app/);
- const cases=Number(process.env.ML_STARTUP_CASES||0),seed=Number(process.env.ML_STRESS_SEED||12345);
- assert(Number.isInteger(cases)&&cases>=0&&cases<=100000);
+ const html=fs.readFileSync('wasm/index.html','utf8');
+ const css=fs.readFileSync('wasm/static/css/console-library.css','utf8');
+ for(const name of ['libraryAutoStart','libraryAutoWake','libraryStartup','startAutomatic']){
+  assert(!source.includes(name),'Removed automatic launcher code: '+name);
+  assert(!html.includes(name),'Removed automatic launcher UI: '+name);
+ }
+ assert(!css.includes('.console-startup'));
+ const cases=Number(process.env.ML_STARTUP_CASES||24),seed=Number(process.env.ML_STRESS_SEED||12345);
+ assert(Number.isInteger(cases)&&cases>0&&cases<=100000);
  assert(Number.isInteger(seed)&&seed>=0&&seed<=0xffffffff);
  let rng=seed;
  for(let index=0;index<cases;index++){
   rng=(Math.imul(rng,1664525)+1013904223)>>>0;
-  const scenario=(rng>>>16)%7,ready=['settings','hosts','runtime'];
-  for(let k=2;k>0;k--){rng=(Math.imul(rng,1664525)+1013904223)>>>0;const j=rng%(k+1);[ready[k],ready[j]]=[ready[j],ready[k]];}
+  const online=!!(rng&0x10000),wake=!!(rng&0x20000);
+  const f=fixture({online,record:{startupApp:1,startupWake:wake,favorites:[2],recent:[1],focus:2}});
+  const ready=rng&1?['hosts','runtime']:['runtime','hosts'];
   try {
-   const options={record:{startupApp:1,startupWake:true}};
-   if(scenario===1||scenario===2)options.online=false;
-   if(scenario===2)options.wakeDelayed=true;
-   if(scenario===3)options.delayed=true;
-   if(scenario===4)options.record.startupApp=0;
-   if(scenario===5){options.online=false;options.record.startupWake=false;}
-   if(scenario===6)options.current=2;
-   const x=fixture(options);ready.forEach(part=>x.c.ConsoleLibrary.ready(part));await x.flush();
-   if(scenario===4){
-    // Opening the library still performs its normal host refresh with autostart OFF.
-    assert.strictEqual(x.launched.length,0);assert.strictEqual(x.calls.connect,1);
-    assert.strictEqual(x.calls.wake,0);assert.strictEqual(x.calls.audio,0);
-   } else {
-    await x.tick(0);
-    if(scenario===0){await x.tick(0);assert.strictEqual(x.launched.length,1);}
-    if(scenario===1){await x.tick(1000);await x.tick(0);assert.strictEqual(x.calls.wake,1);assert.strictEqual(x.launched.length,1);}
-    if(scenario===2){x.node('libraryCancel').click();x.host.online=true;x.host.resolveWake();await x.flush();}
-    if(scenario===3){x.c.ConsoleLibrary.settings();x.host.resolve();await x.flush();}
-    if(scenario===5){await x.tick(60000);assert.strictEqual(x.calls.wake,0);}
-    if(scenario===6)await x.tick(0);
-    if(scenario>=2)assert.strictEqual(x.launched.length,0);
-   }
-   x.c.ConsoleLibrary.suspend();await x.flush();
-   assert.strictEqual(x.timers.size,0,'No pending launcher timers after suspension');
-   assert(x.calls.wake<=1&&x.calls.audio<=1&&x.launched.length<=1);
+   ready.forEach(part=>f.c.ConsoleLibrary.ready(part));await f.flush();
+   assert.strictEqual(f.calls.connect,1,'The normal library refresh remains');
+   assert.strictEqual(f.launched.length,0);assert.strictEqual(f.calls.wake,0);assert.strictEqual(f.calls.audio,0);
+   f.c.ConsoleLibrary.ready('runtime');f.c.ConsoleLibrary.ready('hosts');await f.flush();
+   assert.strictEqual(f.calls.connect,1,'Readiness is idempotent');
+   assert.deepStrictEqual(f.prefs().favorites,[2]);assert.deepStrictEqual(f.prefs().recent,[1]);
+   assert.strictEqual(f.prefs().focus,2);
+   if(!online){await f.tick(5000);assert.strictEqual(f.calls.wake,0);assert.strictEqual(f.launched.length,0);}
+   // Old candidate preferences must never wake or launch, but manual Play still works.
+   f.node('libraryPlay').click();await f.flush();
+   assert.strictEqual(f.launched.length,1);assert.strictEqual(f.launched[0].app,2);
+   assert.strictEqual(f.calls.wake,online?0:1);
+   assert.strictEqual(f.calls.audio,online?0:1);
+   f.c.ConsoleLibrary.suspend();await f.flush();assert.strictEqual(f.timers.size,0);
   } catch(error) {
-   console.error('STRESS_CASE '+JSON.stringify({seed,index,scenario,ready}));
-   throw error;
+   console.error('STRESS_CASE '+JSON.stringify({seed,index,online,wake,ready}));throw error;
   }
  }
- if(cases)console.log('startup stress: '+cases+' seeded readiness/cancellation cases');
- console.log('startup_app_test: OFF, auto-WoL selection, persistence, fixed target, settings readiness, online/offline launch, cancellation, timeouts, missing app/MAC, audio restrictions and active-app guard OK');
+ let f=fixture({online:false,wakeDelayed:true,record:{startupApp:1,startupWake:true}});
+ ['hosts','runtime'].forEach(part=>f.c.ConsoleLibrary.ready(part));await f.flush();
+ f.node('libraryPlay').click();assert.strictEqual(f.calls.wake,1);
+ f.node('libraryPlay').click();f.c.ConsoleLibrary.accept();assert.strictEqual(f.calls.wake,1);
+ f.node('libraryCancel').click();f.host.online=true;f.host.resolveWake();await f.flush();
+ assert.strictEqual(f.launched.length,0);assert.strictEqual(f.calls.close,1);
+ f.c.ConsoleLibrary.suspend();assert.strictEqual(f.timers.size,0);
+ f=fixture({delayed:true,record:{startupApp:1,startupWake:true}});
+ ['runtime','hosts'].forEach(part=>f.c.ConsoleLibrary.ready(part));await f.flush();
+ f.c.ConsoleLibrary.settings();f.host.resolve();await f.flush();
+ assert.strictEqual(f.launched.length,0);assert.strictEqual(f.calls.wake,0);assert.strictEqual(f.calls.audio,0);
+ assert(!f.c.ConsoleLibrary.visible());
+ console.log('startup_app_test: '+cases+' cases; obsolete startup preferences inert, manual Play/WoL preserved, no automatic audio/launch, cancellation and settings return OK');
 })().catch(e=>{console.error(e);process.exitCode=1;});

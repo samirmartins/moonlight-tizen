@@ -8,7 +8,6 @@ var ConsoleLibrary = (function() {
   var runtimeReady = false, hostsReady = false, started = false, bound = false;
   var navIndex = 0, currentRecord = null;
   var launchPending = false, launchTimer = 0;
-  var settingsReady = false, startupTimer = 0, automatic = false, automaticTarget = 0;
   try {
     var saved = JSON.parse(localStorage.getItem(key));
     if (saved && typeof saved.preferred === 'string' && saved.hosts && typeof saved.hosts === 'object') prefs = saved;
@@ -33,8 +32,6 @@ var ConsoleLibrary = (function() {
     r.favorites = Array.isArray(r.favorites) ? r.favorites.map(id).filter(Boolean) : [];
     r.recent = Array.isArray(r.recent) ? r.recent.map(id).filter(Boolean).slice(0, 20) : [];
     r.focus = id(r.focus);
-    r.startupApp = id(r.startupApp);
-    r.startupWake = r.startupWake === true;
     currentRecord = r;
     return r;
   }
@@ -42,8 +39,6 @@ var ConsoleLibrary = (function() {
   function valid(token) { return active && !isInGame && token === epoch && host && hosts[host.serverUid] === host; }
   function status(text) { el('libraryStatus').textContent = text; }
   function cancel() {
-    clearTimeout(startupTimer); startupTimer = 0;
-    automatic = false; automaticTarget = 0;
     epoch++;
     if (scope) scope.cancel();
     if (coverScope) coverScope.cancel();
@@ -74,7 +69,7 @@ var ConsoleLibrary = (function() {
     return values.length === 1 ? values[0] : null;
   }
   function controls() {
-    return ['libraryPCsBtn','settingsBtn','quitRunningAppBtn','libraryPlay','libraryFavorite','libraryAutoStart','libraryAutoWake','libraryAll','libraryFavorites','libraryRecent','libraryRefresh','libraryCancel'].filter(function(name) {
+    return ['libraryPCsBtn','settingsBtn','quitRunningAppBtn','libraryPlay','libraryFavorite','libraryAll','libraryFavorites','libraryRecent','libraryRefresh','libraryCancel'].filter(function(name) {
       var node = el(name); return node && !node.disabled && node.style.display !== 'none' && !node.hidden;
     });
   }
@@ -97,15 +92,6 @@ var ConsoleLibrary = (function() {
     el('libraryFavorite').disabled = !app || busy;
     el('libraryFavorite').textContent = app && r.favorites.indexOf(app.id) !== -1 ? '★ Favorite' : '☆ Favorite';
     el('libraryFavorite').setAttribute('aria-pressed', !!app && r.favorites.indexOf(app.id) !== -1);
-    var startupSelected = !!app && r.startupApp === app.id;
-    el('libraryAutoStart').checked = startupSelected;
-    el('libraryAutoStart').disabled = !app || busy || launchPending;
-    el('libraryAutoWake').checked = startupSelected && r.startupWake;
-    el('libraryAutoWake').disabled = !startupSelected || busy || launchPending;
-    el('libraryStartupWakeRow').classList.toggle('is-disabled', el('libraryAutoWake').disabled);
-    var startupApp = apps.find(function(item) { return item.id === r.startupApp; });
-    el('libraryStartupHint').textContent = !startupSelected && startupApp ?
-      'Startup app: ' + startupApp.title : 'Waits for Sunshine before opening this app.';
     el('libraryRefresh').disabled = busy || launchPending;
     el('libraryCancel').hidden = !busy;
     el('quitRunningAppBtn').style.display = host.online && Number(host.currentGame) > 0 ? '' : 'none';
@@ -117,7 +103,6 @@ var ConsoleLibrary = (function() {
   }
   function select(appId) {
     if (!active || isInGame || !id(appId) || id(appId) === selected) return;
-    if (automatic && id(appId) !== automaticTarget) cancel();
     selected = id(appId); record().focus = selected; save(); updateSelection();
   }
   function list() {
@@ -134,7 +119,7 @@ var ConsoleLibrary = (function() {
       return descending ? -order : order;
     });
   }
-  function render(forceCovers, skipCovers) {
+  function render(forceCovers) {
     if (!active || isInGame) return;
     var r = record(), items = list(), grid = el('game-grid'), token = epoch, fragment = document.createDocumentFragment();
     if (!items.some(function(app) { return app.id === selected; })) selected = items.length ? items[0].id : 0;
@@ -161,7 +146,6 @@ var ConsoleLibrary = (function() {
     updateSelection();
     // Two covers at a time; all requests belong to the current menu visit.
     if (coverScope) coverScope.cancel();
-    if (skipCovers) { coverScope = null; return; }
     coverScope = createMenuRequestScope();
     var queue = items.slice(), currentScope = coverScope;
     function next() {
@@ -234,116 +218,6 @@ var ConsoleLibrary = (function() {
     if (at === -1) r.favorites.push(selected); else r.favorites.splice(at,1);
     save(); render();
   }
-  function setStartupApp() {
-    if (!picked() || busy || launchPending) { updateSelection(); return; }
-    var r = record();
-    r.startupApp = el('libraryAutoStart').checked ? selected : 0;
-    // Every OFF -> ON action opts into WoL again, as requested. Only the user
-    // may then disable WoL; browsing another card does not change this target.
-    r.startupWake = !!r.startupApp;
-    save(); updateSelection();
-  }
-  function setStartupWake() {
-    var r = record();
-    if (r.startupApp === selected && !busy && !launchPending) {
-      r.startupWake = el('libraryAutoWake').checked; save();
-    }
-    updateSelection();
-  }
-  function startAutomatic(appId, allowWake) {
-    if (!active || isInGame || isDialogOpen || !host || !host.paired) return;
-    cancel(); scope = createMenuRequestScope();
-    var current = scope, token = epoch, wakeSent = false;
-    automatic = true; automaticTarget = appId; busy = true;
-    status('Opening startup app…'); updateSelection();
-    Navigation.change(Views.AppsNav); navIndex = controls().indexOf('libraryCancel'); focusNav(0);
-    function live() { return valid(token) && current.active && automatic; }
-    function failed(text) {
-      if (!live()) return;
-      cancel(); scope = createMenuRequestScope(); render();
-      status(text); focusCards();
-    }
-    deadline = setTimeout(function() { failed('Startup timed out after 60 s. Select Play to try manually.'); },60000);
-    function prepareAudioAndLaunch() {
-      if (!live()) return;
-      if (Number(host.currentGame) > 0 && Number(host.currentGame) !== appId) {
-        failed('Another app is running. Select Play to confirm switching apps.'); return;
-      }
-      // Run outside the WASM reply stack. Reuse the manual launch preparation,
-      // never create an audio context from a proxied decoder callback.
-      prepareStreamAudio(); preparedAudio = true;
-      var audio = window._mlAudioCtx;
-      if (!audio) { failed('Could not prepare audio. Select Play to start manually.'); return; }
-      if (audio.state === 'running' || typeof audio.state !== 'string') {
-        launch(appId,true); return;
-      }
-      if (typeof audio.resume !== 'function') {
-        failed('This TV needs a button press for audio. Select Play to continue.'); return;
-      }
-      retry = setTimeout(function() {
-        failed('This TV needs a button press for audio. Select Play to continue.');
-      },1500);
-      try {
-        Promise.resolve(audio.resume()).then(function() {
-          if (!live()) return;
-          if (audio.state !== 'running') {
-            failed('This TV needs a button press for audio. Select Play to continue.'); return;
-          }
-          launch(appId,true);
-        },function() { failed('Audio startup was blocked. Select Play to continue.'); });
-      } catch (e) { failed('Audio startup was blocked. Select Play to continue.'); }
-    }
-    function loadStartupApp() {
-      current.request(function() { return host.getAppListWithCacheFlush(current); },8000).then(function(value) {
-        if (!live()) return;
-        apps = cleanApps(value); record().apps = apps; host._memCachedApplist = apps; save();
-        if (!apps.some(function(app) { return app.id === appId; })) {
-          failed('Startup app is no longer available. Choose another app.'); return;
-        }
-        selected = appId; record().focus = selected; save(); render(false,true);
-        retry = setTimeout(prepareAudioAndLaunch,0);
-      },function() { failed('Could not load the startup app. Select Refresh to retry.'); });
-    }
-    function check() {
-      if (!live()) return;
-      current.request(function() {
-        // Bound each probe independently. Timeout/cancel must stop its native
-        // address attempts before another probe or wake operation can begin.
-        var probe = createMenuRequestScope();
-        var operation = connect(probe,token);
-        operation.cancel = function() { probe.cancel(); };
-        operation.then(operation.cancel,operation.cancel);
-        return operation;
-      },8000).then(function() {
-        if (!live()) return;
-        if (!host.paired) { failed('PC needs pairing. Open PCs.'); return; }
-        if (!hostReady()) { status('Waiting for Sunshine…'); retry = setTimeout(check,3000); return; }
-        loadStartupApp();
-      },function() {
-        if (!live()) return;
-        if (allowWake && !wakeSent) {
-          sendWake();
-        } else {
-          status(allowWake ? 'Waiting for Sunshine…' : 'Waiting for PC · automatic Wake-on-LAN is off');
-          retry = setTimeout(check,3000);
-        }
-      });
-    }
-    function sendWake() {
-      if (!live()) return;
-      if (!normalizeWakeMac(host.wakeMacOverride || host.macAddress)) {
-        failed('Set this PC’s Wake-on-LAN MAC, then try again.'); return;
-      }
-      wakeSent = true; status('Waking PC…');
-      current.request(function() { return host.sendWOL(); },8000).then(function() {
-        if (!live()) return;
-        status('Wake packet sent · waiting for Sunshine…'); retry = setTimeout(check,1000);
-      },function() { failed('Could not send Wake-on-LAN. Select Play to retry.'); });
-    }
-    // An offline cached PC may be woken immediately, just like manual Wake &
-    // play. Do not hold WoL behind a long connection probe in that case.
-    if (allowWake && !host.online) sendWake(); else check();
-  }
   function launch(appId, audioReady) {
     var chosenHost = host;
     var r = record(); r.focus = appId;
@@ -395,8 +269,6 @@ var ConsoleLibrary = (function() {
     if (bound) return; bound = true;
     el('libraryPlay').onclick = function() { play(selected); };
     el('libraryFavorite').onclick = favorite;
-    el('libraryAutoStart').onchange = setStartupApp;
-    el('libraryAutoWake').onchange = setStartupWake;
     el('libraryRefresh').onclick = function() { refresh(true); };
     el('libraryCancel').onclick = function() { cancel(); scope = createMenuRequestScope(); status('Wake cancelled'); updateSelection(); focusCards(); };
     el('libraryPCsBtn').onclick = showHosts;
@@ -419,7 +291,7 @@ var ConsoleLibrary = (function() {
     el('header-title').textContent = 'Library';
     el('libraryHost').textContent = host.hostname || 'PC';
   }
-  function open(pc, startup) {
+  function open(pc) {
     if (!pc || isDialogOpen) return Promise.resolve();
     cancel(); stopPollingHosts(); stopSubnetScanner();
     clearTimeout(launchTimer); launchTimer = 0; launchPending = false;
@@ -430,28 +302,16 @@ var ConsoleLibrary = (function() {
     save(); bind();
     showAppsMode(); decorate();
     el('game-grid').style.display = 'grid'; $('#wasmSpinner').hide();
-    scope = createMenuRequestScope(); render(false,startup === true);
+    scope = createMenuRequestScope(); render();
     Navigation.change(Views.Apps); Navigation.start(); focusCards();
-    return startup === true ? Promise.resolve() : refresh();
+    return refresh();
   }
   function ready(part) {
-    if (part === 'runtime') runtimeReady = true;
-    else if (part === 'settings') settingsReady = true;
-    else hostsReady = true;
+    if (part === 'runtime') runtimeReady = true; else hostsReady = true;
     if (!runtimeReady || !hostsReady || started) return;
-    var pc = preferred();
-    var savedHost = pc && prefs.hosts[String(pc.serverUid)];
-    var startupApp = savedHost ? id(savedHost.startupApp) : 0;
-    if (startupApp && !settingsReady) return;
     started = true; bind();
-    if (pc) {
-      open(pc,!!startupApp);
-      // No timer or automatic network/audio work exists when this is OFF.
-      if (startupApp) startupTimer = setTimeout(function() {
-        startupTimer = 0;
-        if (active && !isInGame && host === pc) startAutomatic(startupApp,savedHost.startupWake === true);
-      },0);
-    }
+    var pc = preferred();
+    if (pc) open(pc); // Merely opening Moonlight never wakes or launches a PC.
   }
   return {
     open: open, ready: ready, hide: hide, suspend: suspend, visible: function() { return active; },

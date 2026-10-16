@@ -64,6 +64,8 @@ This fork focuses on smooth playback, low latency and full picture quality on Sa
 
 ## Recommended settings
 
+- **Initial defaults:** H.264, 1920×1080 at 60 FPS and 30 Mbps; saved settings are preserved.
+- Opening Moonlight shows the library; games and Wake & play are started manually.
 - **Rumble feedback** defaults off for broad controller compatibility.
 - **Audio jitter buffer** defaults to 100 ms, but this is an adaptive ceiling rather than
   fixed latency; buffering increases only when needed, up to the selected limit.

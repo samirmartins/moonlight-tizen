@@ -7,6 +7,21 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.4.1
+
+### Improved
+- Validates RTSP response sizes, session tokens and Opus channel counts before use
+- Handles HEVC/AV1 decoder startup errors and timeouts without indefinite waits
+- Releases held keyboard keys and mouse buttons when focus or capture is lost
+- Uses H.264, 1920×1080 at 60 FPS and 30 Mbps as initial defaults, preserving saved preferences
+- Keeps the library manual: opening Moonlight does not start an app or send
+  Wake-on-LAN; Play, Resume and Wake & play remain available
+- Expands local regression coverage for playback, controller navigation,
+  manual Wake-on-LAN, settings and package integrity
+
+Video timing, picture-quality controls, AudioWorklet, rumble and the diagnostic
+overlay are not retuned in this release.
+
 ## v3.4.0
 
 ### Added
