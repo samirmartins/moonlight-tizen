@@ -132,12 +132,14 @@ function realLauncher(f,stage,resume=false,source=launcher) {
  for(const resume of [false,true]) {
   f=fixture();const r=realLauncher(f,'none',resume);f.c.startGame(f.host,2,false);await f.flush();
   assert(r.calls.includes(resume?'resume':'launch'));
-  const sent=r.calls.find(x=>x.kind==='startRequest');assert(sent);assert.strictEqual(sent.args.length,28);
+  const sent=r.calls.find(x=>x.kind==='startRequest');assert(sent);assert.strictEqual(sent.args.length,26);
   assert.strictEqual(r.calls.filter(x=>x==='audio').length,1);assert.strictEqual(r.calls.filter(x=>x==='scheduler').length,1);
   const oldIndex=cp.execFileSync('git',['show','df6eb63:wasm/platform/index.js'],{encoding:'utf8'});
   const baseline=fixture(),old=realLauncher(baseline,'none',resume,oldIndex.slice(oldIndex.indexOf('function startGame('),oldIndex.indexOf('// Stop the running app title')));
   baseline.c.startGame(baseline.host,2,false);await baseline.flush();
-  assert.strictEqual(JSON.stringify(sent.args),JSON.stringify(old.calls.find(x=>x.kind==='startRequest').args),'native stream payload equals base');
+  const expectedArgs=old.calls.find(x=>x.kind==='startRequest').args.slice();
+  expectedArgs.splice(16,2); // Only the two explicitly retired flip arguments.
+  assert.strictEqual(JSON.stringify(sent.args),JSON.stringify(expectedArgs),'native stream payload equals base except retired flip arguments');
  }
  // Exact exceptions only: freeze all existing paths outside the approved
  // lifecycle integration. This also catches accidental payload/audio changes.

@@ -23,10 +23,6 @@ std::atomic<bool> rumbleFeedbackSwitch{false};
 bool mouseEmulationSwitch = false;
 bool mouseEmulationActive = false;
 
-// Flags for gamepad to track face buttons state
-bool flipABfaceButtonsSwitch = false;
-bool flipXYfaceButtonsSwitch = false;
-
 // For explanation on ordering, see: https://www.w3.org/TR/gamepad/#remapping
 // Enumeration for gamepad buttons
 enum GamepadButton {
@@ -199,41 +195,8 @@ static int GetButtonFlags(const GamepadState& gamepad) {
   // Triggers are considered analog buttons in the "Emscripten API", however they need
   // to be passed in separate arguments for "Limelight" (it even lacks flags for them).
 
-  const int* buttonMasks = nullptr;
-  int buttonMasksSize = 0;
-
-  // Define button mapping with A/B and X/Y swapped
-  static const int buttonMasksABXY[] = {
-    B_FLAG, A_FLAG, Y_FLAG, X_FLAG,
-    LB_FLAG, RB_FLAG,
-    0 /* LT_FLAG */, 0 /* RT_FLAG */,
-    BACK_FLAG, PLAY_FLAG,
-    LS_CLK_FLAG, RS_CLK_FLAG,
-    UP_FLAG, DOWN_FLAG, LEFT_FLAG, RIGHT_FLAG,
-    SPECIAL_FLAG,
-  };
-  // Define button mapping with A/B swapped
-  static const int buttonMasksAB[] = {
-    B_FLAG, A_FLAG, X_FLAG, Y_FLAG,
-    LB_FLAG, RB_FLAG,
-    0 /* LT_FLAG */, 0 /* RT_FLAG */,
-    BACK_FLAG, PLAY_FLAG,
-    LS_CLK_FLAG, RS_CLK_FLAG,
-    UP_FLAG, DOWN_FLAG, LEFT_FLAG, RIGHT_FLAG,
-    SPECIAL_FLAG,
-  };
-  // Define button mapping with X/Y swapped
-  static const int buttonMasksXY[] = {
-    A_FLAG, B_FLAG, Y_FLAG, X_FLAG,
-    LB_FLAG, RB_FLAG,
-    0 /* LT_FLAG */, 0 /* RT_FLAG */,
-    BACK_FLAG, PLAY_FLAG,
-    LS_CLK_FLAG, RS_CLK_FLAG,
-    UP_FLAG, DOWN_FLAG, LEFT_FLAG, RIGHT_FLAG,
-    SPECIAL_FLAG,
-  };
   // Define default button mapping
-  static const int buttonMasksDefault[] = {
+  static const int buttonMasks[] = {
     A_FLAG, B_FLAG, X_FLAG, Y_FLAG,
     LB_FLAG, RB_FLAG,
     0 /* LT_FLAG */, 0 /* RT_FLAG */,
@@ -242,25 +205,7 @@ static int GetButtonFlags(const GamepadState& gamepad) {
     UP_FLAG, DOWN_FLAG, LEFT_FLAG, RIGHT_FLAG,
     SPECIAL_FLAG,
   };
-
-  // Check if the A/B or X/Y face buttons switches are checked
-  if (flipABfaceButtonsSwitch && flipXYfaceButtonsSwitch) {
-    // Swap both A/B and X/Y buttons
-    buttonMasks = buttonMasksABXY;
-    buttonMasksSize = sizeof(buttonMasksABXY) / sizeof(buttonMasksABXY[0]);
-  } else if (flipABfaceButtonsSwitch) { // Check if the A/B face buttons switch is checked
-    // Swap A and B buttons
-    buttonMasks = buttonMasksAB;
-    buttonMasksSize = sizeof(buttonMasksAB) / sizeof(buttonMasksAB[0]);
-  } else if (flipXYfaceButtonsSwitch) { // Check if the X/Y face buttons switch is checked
-    // Swap X and Y buttons
-    buttonMasks = buttonMasksXY;
-    buttonMasksSize = sizeof(buttonMasksXY) / sizeof(buttonMasksXY[0]);
-  } else {
-    // Default buttons layout
-    buttonMasks = buttonMasksDefault;
-    buttonMasksSize = sizeof(buttonMasksDefault) / sizeof(buttonMasksDefault[0]);
-  }
+  constexpr int buttonMasksSize = sizeof(buttonMasks) / sizeof(buttonMasks[0]);
 
   int result = 0;
   
@@ -274,11 +219,9 @@ static int GetButtonFlags(const GamepadState& gamepad) {
 }
 
 // Function to handle the gamepad input state
-void MoonlightInstance::HandleGamepadInputState(bool rumbleFeedback, bool mouseEmulation, bool flipABfaceButtons, bool flipXYfaceButtons) {
+void MoonlightInstance::HandleGamepadInputState(bool rumbleFeedback, bool mouseEmulation) {
   rumbleFeedbackSwitch.store(rumbleFeedback, std::memory_order_release);
   mouseEmulationSwitch = mouseEmulation;
-  flipABfaceButtonsSwitch = flipABfaceButtons;
-  flipXYfaceButtonsSwitch = flipXYfaceButtons;
   mouseEmulationActive = false;
   s_inputNeedsTimedWake.store(false, std::memory_order_release);
   s_gamepadSession.fetch_add(1, std::memory_order_release);

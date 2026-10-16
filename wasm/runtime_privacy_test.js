@@ -4,7 +4,8 @@ const fs=require('fs'),cp=require('child_process'),vm=require('vm'),assert=requi
 const contracts=fs.readFileSync('wasm/scope_contract_test.js','utf8');
 const normalize=vm.runInNewContext('('+contracts.slice(contracts.indexOf('function withoutLogs'),contracts.indexOf('\n\n\n{')).trim()+')',{require});
 const normalizeWake=vm.runInNewContext('('+contracts.slice(contracts.indexOf('function withoutInputWake'),contracts.indexOf('\n{\n')).trim()+')',{require});
-const old=f=>cp.execFileSync('git',['show','v3.4.1:'+f],{encoding:'utf8'});
+const legacy=require('./controller-mapping-scope.cjs').legacy;
+const old=f=>legacy(f,cp.execFileSync('git',['show','v3.4.1:'+f],{encoding:'utf8'}));
 const lifecycle=require('./app-lifecycle-scope.cjs').normalize;
 for(const f of ['wasm/platform/index.js','wasm/platform/messages.js','wasm/platform/common.js',
  'wasm/static/js/utils.js','wasm/static/js/mdns-browser/main.js']){

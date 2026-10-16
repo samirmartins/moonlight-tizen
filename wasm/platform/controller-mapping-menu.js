@@ -56,7 +56,7 @@ var ControllerMappingMenu = (function() {
       '<h3 id="cm-selected"></h3><p id="cm-detail"></p><div class="cm-actions">'+button('cm-change','Change')+button('cm-test','Test buttons')+'</div>'+
       '<p id="cm-axes">Sticks: original axes, sensitivity and range.</p></section>'+
       '<section class="cm-assignments" aria-label="Button assignments"><p id="cm-list-title">Physical button → game input</p><div id="cm-rows"></div></section></div>'+
-      '<p id="cm-status" role="status"></p><p class="cm-note">When ON, this layout replaces the A/B and X/Y switches; their saved preferences are kept. Triggers stay analog. One layout applies to all controllers.</p>'+
+      '<p id="cm-status" role="status"></p><p class="cm-note">When ON, the saved layout applies to game controls. Triggers stay analog. One layout applies to all controllers.</p>'+
       '<footer>'+button('cm-reset','Restore layout')+'<div>'+button('cm-cancel','Cancel')+button('cm-save','Save')+'</div></footer></dialog>';
     document.body.appendChild(root); dialog = el('controllerMappingDialog');
     root.addEventListener('focusin',function(event) { if (event.target.tagName === 'BUTTON') focused = event.target.id; });
@@ -120,10 +120,6 @@ var ControllerMappingMenu = (function() {
     clearTimeout(navigationTimeout); navigationTimeout = null;
     repeatAction = null;
     var preview = draft.enabled ? draft.map.slice() : ControllerMapping.defaults().map;
-    if (!draft.enabled) {
-      if (el('flipABfaceButtonsSwitch').checked) { preview[0] = 1; preview[1] = 0; }
-      if (el('flipXYfaceButtonsSwitch').checked) { preview[2] = 3; preview[3] = 2; }
-    }
     window.addEventListener('gamepadinputchanged',blockGamepad,true);
     el('cm-test').textContent = 'Finish test'; render(); focus('cm-test');
     setStatus('Press buttons / move sticks. Hold L1 + R1 for 1 second to finish, or use Return on the TV remote.');
@@ -148,7 +144,7 @@ var ControllerMappingMenu = (function() {
         for (var n=0;n<19;n++) el('cm-row-'+n).classList.toggle('cm-pressed',pressed.includes(n));
         el('cm-axes').textContent = pad ? 'Axes '+axes.join(' / ')+' · L2/R2 '+triggers.join(' / ') : 'No controller detected. Connect one and press a button.';
         el('cm-detail').textContent = pressed.length ? 'Physical: '+pressed.map(function(n) { return names[n]; }).join(', ')+
-          ' · Game: '+pressed.map(function(n) { return names[preview[n]]; }).join(', ') : 'Press any standard button. Preview includes the custom layout when ON, otherwise the existing A/B and X/Y switches.';
+          ' · Game: '+pressed.map(function(n) { return names[preview[n]]; }).join(', ') : 'Press any standard button. Preview uses the custom layout when ON, otherwise the original controls.';
       }
       raf = requestAnimationFrame(tick);
     }

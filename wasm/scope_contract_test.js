@@ -4,6 +4,7 @@
 // Only the explicitly approved wake protocol may differ in native gamepad code.
 function withoutInputWake(source) {
  const assert = require('assert');
+ source = require('./controller-mapping-scope.cjs').legacy('wasm/gamepad.cpp', source);
  source = source.replace(/#include <(?:condition_variable|mutex|limits)>\n/g, '')
    .replace('#include <emscripten/threading.h>\n', '');
  const oldState = 'static std::mutex s_inputWakeMutex;\nstatic std::condition_variable s_inputWakeCv;\nstatic std::atomic<uint32_t> s_inputWakeGeneration{0};';
@@ -139,7 +140,7 @@ assert.strictEqual(between(now,'function showStreamMode()','// Maximize the size
   between(old,'function showStreamMode()','// Maximize the size'));
 assert.strictEqual(between(now,'function fullscreenWasmModule()','// Start the given appID'),
   between(old,'function fullscreenWasmModule()','// Start the given appID'));
-const oldCss = cp.execFileSync('git',['show','v3.3.10:wasm/static/css/style.css'],{encoding:'utf8'});
+const oldCss = require('./controller-mapping-scope.cjs').legacy('wasm/static/css/style.css', cp.execFileSync('git',['show','v3.3.10:wasm/static/css/style.css'],{encoding:'utf8'}));
 const css = fs.readFileSync('wasm/static/css/style.css','utf8');
 assert.strictEqual(css.slice(css.indexOf('   Streaming Layout')),oldCss.slice(oldCss.indexOf('   Streaming Layout')));
 
@@ -150,7 +151,7 @@ assert.strictEqual(css.slice(css.indexOf('   Streaming Layout')),oldCss.slice(ol
 // Keep the approved 3.4.0 streaming implementation byte-for-byte except for
 // the explicitly authorized error/lifecycle and held-input changes.
 const fs = require('fs'), cp = require('child_process'), assert = require('assert');
-function old(file) { return cp.execFileSync('git', ['show', 'v3.4.0:' + file], {encoding: 'utf8'}); }
+function old(file) { return require('./controller-mapping-scope.cjs').legacy(file, cp.execFileSync('git', ['show', 'v3.4.0:' + file], {encoding: 'utf8'})); }
 function current(file) { return fs.readFileSync(file, 'utf8'); }
 function maskMethod(source, marker) {
  const start = source.indexOf(marker); assert(start >= 0, marker);

@@ -78,8 +78,6 @@ function attachListeners() {
   $('#removeAllHostsBtn').on('click', deleteAllHostsDialog);
   $('#rumbleFeedbackSwitch').on('click', saveRumbleFeedback);
   $('#mouseEmulationSwitch').on('click', saveMouseEmulation);
-  $('#flipABfaceButtonsSwitch').on('click', saveFlipABfaceButtons);
-  $('#flipXYfaceButtonsSwitch').on('click', saveFlipXYfaceButtons);
   $('#controllerMappingBtn').on('click', function() { ControllerMappingMenu.open(); });
   $('.audioConfigMenu li').on('click', saveAudioConfiguration);
   $('#jitterSlider').on('input', saveAudioJitter);
@@ -1827,7 +1825,7 @@ function startGame(host, appID, audioPrepared) {
     return;
   }
   if (!audioPrepared) prepareStreamAudio();
-  const customMapping = typeof ControllerMapping !== 'undefined' && ControllerMapping.prepareSession();
+  if (typeof ControllerMapping !== 'undefined') ControllerMapping.prepareSession();
 
   // Reset the scheduler for the new stream, also inside the gesture handler
   startAudioScheduler();
@@ -1912,8 +1910,6 @@ function startGame(host, appID, audioPrepared) {
       const optimizeGames = $('#optimizeGamesSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const rumbleFeedback = $('#rumbleFeedbackSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const mouseEmulation = $('#mouseEmulationSwitch').parent().hasClass('is-checked') ? 1 : 0;
-      const flipABfaceButtons = !customMapping && $('#flipABfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
-      const flipXYfaceButtons = !customMapping && $('#flipXYfaceButtonsSwitch').parent().hasClass('is-checked') ? 1 : 0;
       var audioConfig = $('#selectAudio').data('value').toString();
       const audioJitterMs = parseInt($('#jitterSlider').val());
       const playHostAudio = $('#playHostAudioSwitch').parent().hasClass('is-checked') ? 1 : 0;
@@ -1966,7 +1962,7 @@ function startGame(host, appID, audioPrepared) {
           sendMessage('startRequest', [
             host.address, host.httpPort, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
             host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
-            framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
+            framePacing, optimizeGames, rumbleFeedback, mouseEmulation,
             audioConfig, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
             performanceStats, clientRefreshRateX100
           ]).catch(function() {
@@ -2026,7 +2022,7 @@ function startGame(host, appID, audioPrepared) {
         sendMessage('startRequest', [
           host.address, host.httpPort, streamWidth, streamHeight, frameRate, bitrate.toString(), rikey, rikeyid.toString(),
           host.appVersion, host.gfeVersion, $root.find('sessionUrl0').text().trim(), host.serverCodecModeSupport,
-          framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
+          framePacing, optimizeGames, rumbleFeedback, mouseEmulation,
           audioConfig, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
           performanceStats, clientRefreshRateX100
         ]).catch(function() {
@@ -2426,22 +2422,6 @@ function saveMouseEmulation() {
   }, 100);
 }
 
-function saveFlipABfaceButtons() {
-  setTimeout(() => {
-    const chosenFlipABfaceButtons = $('#flipABfaceButtonsSwitch').parent().hasClass('is-checked');
-    console.log('%c[index.js, saveFlipABfaceButtons]', 'color: green;', 'Saving flip A/B face buttons state: ' + chosenFlipABfaceButtons);
-    storeData('flipABfaceButtons', chosenFlipABfaceButtons, null);
-  }, 100);
-}
-
-function saveFlipXYfaceButtons() {
-  setTimeout(() => {
-    const chosenFlipXYfaceButtons = $('#flipXYfaceButtonsSwitch').parent().hasClass('is-checked');
-    console.log('%c[index.js, saveFlipXYfaceButtons]', 'color: green;', 'Saving flip X/Y face buttons state: ' + chosenFlipXYfaceButtons);
-    storeData('flipXYfaceButtons', chosenFlipXYfaceButtons, null);
-  }, 100);
-}
-
 function saveAudioConfiguration() {
   var chosenAudioConfig = $(this).data('value');
   $('#selectAudio').text($(this).text()).data('value', chosenAudioConfig);
@@ -2672,14 +2652,6 @@ function restoreDefaultsSettingsValues() {
   const defaultMouseEmulation = false;
   document.querySelector('#mouseEmulationBtn').MaterialSwitch.off();
   storeData('mouseEmulation', defaultMouseEmulation, null);
-
-  const defaultFlipABfaceButtons = false;
-  document.querySelector('#flipABfaceButtonsBtn').MaterialSwitch.off();
-  storeData('flipABfaceButtons', defaultFlipABfaceButtons, null);
-
-  const defaultFlipXYfaceButtons = false;
-  document.querySelector('#flipXYfaceButtonsBtn').MaterialSwitch.off();
-  storeData('flipXYfaceButtons', defaultFlipXYfaceButtons, null);
 
   const defaultAudioConfig = 'Stereo';
   $('#selectAudio').text('Stereo').data('value', defaultAudioConfig);
@@ -2917,28 +2889,6 @@ function loadUserDataCb() {
       document.querySelector('#mouseEmulationBtn').MaterialSwitch.off();
     } else {
       document.querySelector('#mouseEmulationBtn').MaterialSwitch.on();
-    }
-  });
-
-  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored flipABfaceButtons preferences.');
-  getData('flipABfaceButtons', function(previousValue) {
-    if (previousValue.flipABfaceButtons == null) {
-      document.querySelector('#flipABfaceButtonsBtn').MaterialSwitch.off(); // Set the default state
-    } else if (previousValue.flipABfaceButtons == false) {
-      document.querySelector('#flipABfaceButtonsBtn').MaterialSwitch.off();
-    } else {
-      document.querySelector('#flipABfaceButtonsBtn').MaterialSwitch.on();
-    }
-  });
-
-  console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored flipXYfaceButtons preferences.');
-  getData('flipXYfaceButtons', function(previousValue) {
-    if (previousValue.flipXYfaceButtons == null) {
-      document.querySelector('#flipXYfaceButtonsBtn').MaterialSwitch.off(); // Set the default state
-    } else if (previousValue.flipXYfaceButtons == false) {
-      document.querySelector('#flipXYfaceButtonsBtn').MaterialSwitch.off();
-    } else {
-      document.querySelector('#flipXYfaceButtonsBtn').MaterialSwitch.on();
     }
   });
 

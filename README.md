@@ -56,7 +56,7 @@ This fork focuses on smooth playback, low latency and full picture quality on Sa
 
 - Audio playback runs separately from the interface.
 - Video timing follows the TV's refresh rate, which is reported to the host.
-- Gamepad controls include optional rumble feedback.
+- Gamepad controls include optional rumble and saved button remapping with a visual editor and button test.
 - A controller-first library keeps favorites, recent games and the last PC ready to
   use, with Play, Resume and Wake & play in one screen.
 
@@ -66,6 +66,7 @@ This fork focuses on smooth playback, low latency and full picture quality on Sa
 
 - **Initial defaults:** H.264, 1920×1080 at 60 FPS and 30 Mbps; saved settings are preserved.
 - Opening Moonlight shows the library; games and Wake & play are started manually.
+- Leaving for Smart Hub disconnects only the client; the game stays on the PC for manual Resume.
 - **Rumble feedback** defaults off for broad controller compatibility.
 - **Audio jitter buffer** defaults to 100 ms, but this is an adaptive ceiling rather than
   fixed latency; buffering increases only when needed, up to the selected limit.
@@ -101,9 +102,10 @@ before retrying. For other errors, check Sunshine's **Troubleshooting** logs.
 
 Install the new WGT over the existing app using the same installation method and,
 if re-signing, the same author certificate. Settings are retained when the
-application ID and author certificate match; normal and ForceGM builds of the same
-release share both. If installation fails because an older author certificate
-differs, uninstalling the old app before reinstalling removes its saved settings.
+application ID and author certificate match and the installer does not uninstall
+the app; normal and ForceGM builds of the same release share both. A clean
+reinstallation, including an installer's automatic recovery, removes saved settings
+and pairing. Reuse your signing profile and avoid removing the previous version.
 See [Updates](INSTALLATION.md#updates).
 
 ---

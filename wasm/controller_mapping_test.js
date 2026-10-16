@@ -95,8 +95,9 @@ f.c._gpButtonCount=18;assert.strictEqual(f.m.sessionBuilder(f.c._gpBuildSnapshot
 const scope=require('./controller-mapping-scope.cjs');
 for(const file of ['wasm/platform/index.js','wasm/platform/navigation.js','wasm/platform/gamepad.js','wasm/index.html']) {
  const current=fs.readFileSync(file,'utf8'),old=cp.execFileSync('git',['show','9b6687e:'+file],{encoding:'utf8'});
- assert.strictEqual(scope.normalize(file,current),old,file+' approved mapping integration only');
- assert.notStrictEqual(scope.normalize(file,current+'\n// unexpected change'),old,'negative scope fixture');
+ const expected=scope.legacy(file,old);
+ assert.strictEqual(scope.normalize(file,current),expected,file+' approved mapping integration and legacy flip removal only');
+ assert.notStrictEqual(scope.normalize(file,current+'\n// unexpected change'),expected,'negative scope fixture');
 }
 for(const label of ['l1','l2','l3','r1','r2','r3'])assert(menu.includes('cm-'+label+'\">'+label.toUpperCase()+'</span>'));
 assert(!/(?:pad|gamepad)\.id\b|console\./.test(engine+menu),'no controller identifiers or new logs');

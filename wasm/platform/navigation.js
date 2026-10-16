@@ -1069,9 +1069,7 @@ const Views = {
     view: new ListView(() => [
       'controllerMappingBtn',
       'rumbleFeedbackBtn',
-      'mouseEmulationBtn',
-      'flipABfaceButtonsBtn',
-      'flipXYfaceButtonsBtn'
+      'mouseEmulationBtn'
     ]),
     up: function() {
       this.view.prevOption();

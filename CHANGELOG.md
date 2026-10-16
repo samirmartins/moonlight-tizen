@@ -7,6 +7,22 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.4.3
+
+### Added
+- Optional controller button remapping with a visual editor, button testing and
+  saved layouts; analog sticks and trigger precision are preserved, while menu
+  navigation keeps the original controls
+
+### Improved
+- Safely disconnects the client when leaving for Smart Hub, keeps the game
+  running on the PC and returns to the library for manual Resume
+- Fixes a missed input-worker notification that could delay controller updates
+- Delivers connection warnings asynchronously without making video reception
+  wait for the interface, rejecting messages from stopped or older sessions
+- Replaces the separate Flip A/B and Flip X/Y switches with the controller
+  remapping editor
+
 ## v3.4.2
 
 ### Improved

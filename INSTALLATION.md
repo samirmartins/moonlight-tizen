@@ -13,7 +13,12 @@ Use the normal WGT if ForceGM misbehaves on your TV.
 
 ### Updates
 
-Normal and ForceGM builds from the same release replace each other without removing settings. If an older installation has a different author certificate, uninstall it before retrying; uninstalling removes saved settings.
+Normal and ForceGM share the same application identity. Updates preserve settings
+and pairing only when the author certificate remains compatible and the installer
+does not uninstall the app. Reuse your Apps2Samsung signing profile; disable removal
+of the previous version and forced certificate regeneration. Automatic recovery
+after a certificate/install error can still remove the app and its data. Check the
+installer's messages before proceeding; a clean reinstall requires pairing again.
 
 ## Tizen Studio (alternative)
 

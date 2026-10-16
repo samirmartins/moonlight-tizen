@@ -14,8 +14,9 @@ assert.strictEqual(source.slice(0, start), baseline.slice(0, baseline.indexOf('v
 assert.strictEqual(source.slice(end), baseline.slice(baseline.indexOf('CONNECTION_LISTENER_CALLBACKS')));
 assert.strictEqual(fs.readFileSync('wasm/moonlight_wasm.hpp', 'utf8').replace(
   '  static void ApplyConnectionStatus(int connectionStatus, int generation);\n', ''),
-  cp.execFileSync('git', ['show', 'v3.4.2:wasm/moonlight_wasm.hpp'], {encoding: 'utf8'}),
-  'no unrelated header or layout changes');
+  require('./controller-mapping-scope.cjs').legacy('wasm/moonlight_wasm.hpp',
+    cp.execFileSync('git', ['show', 'v3.4.2:wasm/moonlight_wasm.hpp'], {encoding: 'utf8'})),
+  'no unrelated header or layout changes beyond retired flip arguments');
 const fixture = `
 #include <atomic>
 #include <cassert>
