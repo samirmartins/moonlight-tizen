@@ -7,6 +7,21 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.4.2
+
+### Improved
+- Makes stream start, stop and reopening safer with one teardown worker per
+  session and protection against delayed callbacks from previous sessions
+- Bounds the decoder close wait and retains resources until safe completion,
+  preventing unsafe reuse during cancellation or failed platform operations
+- Fixes duplicate RTSP header ownership and out-of-bounds reads on truncated replies
+- Validates H.264 SPS indices and Exp-Golomb values, avoiding invalid shifts
+  while preserving valid-stream pixels, profile, level and reference pictures
+- Keeps input keys, pairing PINs, PC addresses, session URLs and stored
+  credentials out of runtime logs
+- Expands regression coverage for concurrent stops, failed/missing callbacks,
+  stale workers, parser ownership and runtime-log privacy
+
 ## v3.4.1
 
 ### Improved
