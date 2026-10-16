@@ -4,11 +4,11 @@
 #include <chrono>
 #include <cmath>
 #include <cstring>
-#include <condition_variable>
-#include <mutex>
+#include <limits>
 
 #include <Limelight.h>
 #include <emscripten/emscripten.h>
+#include <emscripten/threading.h>
 
 // Bitmask for gamepad combo buttons to stop the streaming session
 const short STOP_STREAM_BUTTONS = BACK_FLAG | PLAY_FLAG | LB_FLAG | RB_FLAG;
@@ -102,9 +102,7 @@ static_assert(sizeof(GamepadSnapshot) == 4 + kMaxSnapshotPads * sizeof(GamepadSt
 static constexpr size_t kSnapshotWords = sizeof(GamepadSnapshot) / sizeof(uint32_t);
 alignas(4) static uint32_t s_gpSharedWords[kSnapshotWords + 1] = {};
 
-static std::mutex s_inputWakeMutex;
-static std::condition_variable s_inputWakeCv;
-static std::atomic<uint32_t> s_inputWakeGeneration{0};
+alignas(4) static uint32_t s_inputWakeGeneration = 0;
 static std::atomic<uint32_t> s_gamepadSession{0};
 // True only while an unchanged snapshot still needs time-based work: a held
 // stick driving mouse emulation or the one-second mouse-mode long press.
@@ -156,27 +154,23 @@ extern "C" EMSCRIPTEN_KEEPALIVE int gamepadSnapshotWordCount() {
 }
 
 void NotifyInputEvent() {
-  s_inputWakeGeneration.fetch_add(1, std::memory_order_release);
-  s_inputWakeCv.notify_one();
+  __atomic_add_fetch(&s_inputWakeGeneration, 1, __ATOMIC_RELEASE);
+  // Waking a worker does not acquire a mutex or wait for the browser thread.
+  emscripten_futex_wake(&s_inputWakeGeneration, 1);
 }
 
 void WaitForInputEvent(uint32_t& observedGeneration, int timeoutMs) {
-  uint32_t current = s_inputWakeGeneration.load(std::memory_order_acquire);
-  if (current != observedGeneration) {
-    observedGeneration = current;
-    return;
+  uint32_t current = __atomic_load_n(&s_inputWakeGeneration, __ATOMIC_ACQUIRE);
+  if (current == observedGeneration) {
+    // Compare-and-sleep is atomic: a notification between this load and the
+    // wait changes the word, so the worker cannot sleep through that event.
+    // Only the input worker calls this; the browser thread must never wait.
+    emscripten_futex_wait(&s_inputWakeGeneration, current,
+      timeoutMs < 0 ? std::numeric_limits<double>::infinity()
+                    : static_cast<double>(timeoutMs));
+    current = __atomic_load_n(&s_inputWakeGeneration, __ATOMIC_ACQUIRE);
   }
-  std::unique_lock<std::mutex> lock(s_inputWakeMutex);
-  if (timeoutMs >= 0) {
-    s_inputWakeCv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [&] {
-      return s_inputWakeGeneration.load(std::memory_order_acquire) != observedGeneration;
-    });
-  } else {
-    s_inputWakeCv.wait(lock, [&] {
-      return s_inputWakeGeneration.load(std::memory_order_acquire) != observedGeneration;
-    });
-  }
-  observedGeneration = s_inputWakeGeneration.load(std::memory_order_acquire);
+  observedGeneration = current;
 }
 
 bool InputNeedsTimedWake() {

@@ -270,6 +270,7 @@ class MoonlightInstance {
   std::shared_ptr<mlsession::CloseTicket> m_CloseTicket;
   std::shared_ptr<mlsession::CloseTicket> m_OpenTicket;
 
+  static void ApplyConnectionStatus(int connectionStatus, int generation);
   bool WaitFor(std::condition_variable* variable, std::function<bool()> condition);
 
   template<bool CollectStats>

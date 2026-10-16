@@ -61,19 +61,39 @@ void MoonlightInstance::ClLogMessage(const char* format, ...) {
   emscripten_log(EM_LOG_CONSOLE, "%s", message);
 }
 
-void MoonlightInstance::ClConnectionStatusUpdate(int connectionStatus) {
-  if (g_Instance->m_DisableWarningsEnabled == false) {
-    switch (connectionStatus) {
-      case CONN_STATUS_OKAY:
-        PostToJs(std::string("NoWarningMsg: ") + std::string("Connection to PC has been improved."));
-        break;
-      case CONN_STATUS_POOR:
-        PostToJs(std::string("WarningMsg: ") + std::string("Slow connection to PC.\nReduce your bitrate!"));
-        break;
-      default:
-        break;
-    }
+// Runs on the browser thread without making the video receiver wait. A queued
+// status must not paint over the menu or a newer stream after stop/reconnect.
+void MoonlightInstance::ApplyConnectionStatus(int connectionStatus, int generation) {
+  if (!g_Instance ||
+      !g_Instance->IsCurrentSession(static_cast<uint32_t>(generation)) ||
+      g_Instance->m_ConnectionCancelled.load(std::memory_order_acquire) ||
+      !g_Instance->m_Running.load(std::memory_order_acquire) ||
+      g_Instance->m_DisableWarningsEnabled) {
+    return;
   }
+  switch (connectionStatus) {
+    case CONN_STATUS_OKAY:
+      PostToJs(std::string("NoWarningMsg: ") + std::string("Connection to PC has been improved."));
+      break;
+    case CONN_STATUS_POOR:
+      PostToJs(std::string("WarningMsg: ") + std::string("Slow connection to PC.\nReduce your bitrate!"));
+      break;
+    default:
+      break;
+  }
+}
+
+void MoonlightInstance::ClConnectionStatusUpdate(int connectionStatus) {
+  if (!g_Instance || g_Instance->m_DisableWarningsEnabled ||
+      g_Instance->m_ConnectionCancelled.load(std::memory_order_acquire) ||
+      (connectionStatus != CONN_STATUS_OKAY && connectionStatus != CONN_STATUS_POOR)) {
+    return;
+  }
+  const auto generation = g_Instance->m_SessionGeneration.load(std::memory_order_acquire);
+  // Pass scalar arguments only. No synchronous main-thread call or message
+  // formatting is left on the RTP receive path; statuses retain FIFO order.
+  emscripten_async_run_in_main_runtime_thread(
+    EM_FUNC_SIG_VII, ApplyConnectionStatus, connectionStatus, static_cast<int>(generation));
 }
 
 CONNECTION_LISTENER_CALLBACKS MoonlightInstance::s_ClCallbacks = {

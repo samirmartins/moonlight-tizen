@@ -1,6 +1,27 @@
 'use strict';
 // Approved historical scope contracts; behavioral tests are independent.
 
+// Only the explicitly approved wake protocol may differ in native gamepad code.
+function withoutInputWake(source) {
+ const assert = require('assert');
+ source = source.replace(/#include <(?:condition_variable|mutex|limits)>\n/g, '')
+   .replace('#include <emscripten/threading.h>\n', '');
+ const oldState = 'static std::mutex s_inputWakeMutex;\nstatic std::condition_variable s_inputWakeCv;\nstatic std::atomic<uint32_t> s_inputWakeGeneration{0};';
+ const newState = 'alignas(4) static uint32_t s_inputWakeGeneration = 0;';
+ assert(source.includes(oldState) || source.includes(newState), 'known input wake state');
+ source = source.replace(oldState, '[input wake state]').replace(newState, '[input wake state]');
+ const start = source.indexOf('void NotifyInputEvent()');
+ const end = source.indexOf('bool InputNeedsTimedWake()', start);
+ assert(start > 0 && end > start);
+ return source.slice(0, start) + '[input wake methods]\n\n' + source.slice(end);
+}
+{
+ const fs = require('fs'), cp = require('child_process'), assert = require('assert');
+ assert.strictEqual(withoutInputWake(fs.readFileSync('wasm/gamepad.cpp', 'utf8')),
+   withoutInputWake(cp.execFileSync('git', ['show', 'v3.4.2:wasm/gamepad.cpp'], {encoding: 'utf8'})),
+   'gamepad snapshot/mapping/sampling/rumble unchanged outside the approved wake protocol');
+}
+
 function withoutLogs(source) {
  source=source.replace(/\.catch\(function\(\) \{\s*handleMessage\('streamTerminated: 0'\);\s*snackbarLogLong\('Previous stream is still closing\. Retry shortly\.'\);\s*\}\)/g,'');
  const assert=require('assert');
@@ -62,7 +83,7 @@ assert.strictEqual(cp.execFileSync('git', ['diff', 'v3.3.8', '--',
   'wasm/auddec.cpp', 'wasm/audio_ring.hpp',
   'moonlight-common-c/src/VideoDepacketizer.c', 'moonlight-common-c/src/VideoStream.c',
   'wasm/platform/audio.js', 'wasm/platform/audio-worklet.js',
-  'wasm/gamepad.cpp', 'wasm/platform/display.js'], {encoding: 'utf8'}), '');
+  'wasm/platform/display.js'], {encoding: 'utf8'}), '');
 // JS rumble changes in 3.3.10 are covered by rumble_safety_test; input sampling
 // is separately protected by the approved input scope contract.
 
@@ -88,7 +109,7 @@ for(const name of ['DURATION_MS','RENEW_MS','MIN_INTERVAL_MS','MAX_IN_FLIGHT','W
   assert.strictEqual(padNew.match(re)[0],padOld.match(re)[0]);
 }
 const frozen=['wasm/auddec.cpp','wasm/audio_ring.hpp','wasm/platform/audio.js','wasm/platform/audio-worklet.js',
-  'wasm/gamepad.cpp','wasm/video_timing.hpp','moonlight-common-c',
+  'wasm/video_timing.hpp','moonlight-common-c',
   ':(exclude)moonlight-common-c/src/RtspConnection.c',
   ':(exclude)moonlight-common-c/src/RtspParser.c',
   ':(exclude)moonlight-common-c/src/PlatformSockets.c',
@@ -196,6 +217,8 @@ for (const file of files) {
       'wasm/static/js/utils.js','wasm/static/js/mdns-browser/main.js'].includes(file)) continue;
  if (['wasm/platform/messages.js','wasm/platform/common.js'].includes(file)) {
   assert.strictEqual(withoutLogs(current(file)),withoutLogs(old(file)),file+' privacy-only logging');
+ } else if (file === 'wasm/gamepad.cpp') {
+  assert.strictEqual(withoutInputWake(current(file)), withoutInputWake(old(file)), file+' wake-only change');
  } else assert(fs.readFileSync(file).equals(cp.execFileSync('git', ['show', 'v3.4.0:' + file])), file);
 }
 const index = current('wasm/platform/index.js'), indexOld = old('wasm/platform/index.js');
