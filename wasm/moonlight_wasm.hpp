@@ -11,6 +11,7 @@
 #include "lib.hpp"
 #include "video_telemetry.hpp"
 #include "video_timing.hpp"
+#include "session_lifecycle.hpp"
 
 #include "samsung/wasm/elementary_media_stream_source.h"
 #include "samsung/wasm/elementary_media_stream_source_listener.h"
@@ -230,7 +231,7 @@ class MoonlightInstance {
   class SourceListener
     : public samsung::wasm::ElementaryMediaStreamSourceListener {
   public:
-    SourceListener(MoonlightInstance* instance);
+    SourceListener(MoonlightInstance* instance, uint32_t generation);
     void OnSourceOpen() override;
     void OnSourceOpenPending() override;
     void OnSourceClosed() override;
@@ -241,17 +242,33 @@ class MoonlightInstance {
     void OnPlaybackPositionChanged(samsung::wasm::Seconds) override;
   private:
     MoonlightInstance* m_Instance;
+    const uint32_t m_Generation;
   };
   class VideoTrackListener
     : public samsung::wasm::ElementaryMediaTrackListener {
   public:
-    VideoTrackListener(MoonlightInstance* instance);
+    VideoTrackListener(MoonlightInstance* instance, uint32_t generation);
     void OnTrackOpen() override;
     void OnTrackClosed(EmssTrackCloseReason) override;
     void OnSessionIdChanged(samsung::wasm::SessionId new_session_id) override;
   private:
     MoonlightInstance* m_Instance;
+    const uint32_t m_Generation;
   };
+
+  struct SessionJob { MoonlightInstance* instance; uint32_t generation; };
+  bool BeginSession();
+  void RequestStop(uint32_t error, bool stopCommon);
+  void ReleaseMedia();
+  bool IsCurrentSession(uint32_t generation) const {
+    return generation == m_SessionGeneration.load(std::memory_order_acquire);
+  }
+  std::mutex m_LifecycleMutex;
+  mlsession::Phase m_SessionPhase{mlsession::Phase::Idle};
+  std::atomic<uint32_t> m_SessionGeneration{0};
+  std::atomic<bool> m_StopComplete{true};
+  std::shared_ptr<mlsession::CloseTicket> m_CloseTicket;
+  std::shared_ptr<mlsession::CloseTicket> m_OpenTicket;
 
   bool WaitFor(std::condition_variable* variable, std::function<bool()> condition);
 
@@ -311,11 +328,9 @@ class MoonlightInstance {
 
   samsung::html::HTMLMediaElement m_MediaElement;
   std::unique_ptr<samsung::wasm::ElementaryMediaStreamSource> m_Source;
-  SourceListener m_SourceListener;
-  VideoTrackListener m_VideoTrackListener;
+  std::unique_ptr<SourceListener> m_SourceListener;
+  std::unique_ptr<VideoTrackListener> m_VideoTrackListener;
   samsung::wasm::ElementaryMediaTrack m_VideoTrack;
-  std::atomic<bool> m_SourceClosed;
-  std::condition_variable m_SourceClosedCV;
 };
 
 extern MoonlightInstance* g_Instance;

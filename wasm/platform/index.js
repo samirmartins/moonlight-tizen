@@ -24,7 +24,7 @@ try {
     }
   }
 } catch (e) {
-  console.error("Error fetching panel capabilities: " + e.message);
+  console.error('Operation failed; private details omitted.');
 }
 var isHdrCapable = webapis.avinfo.isHdrTvSupport(); // Check if the device supports HDR
 var hosts = {}; // Hosts is an associative array of NvHTTP objects, keyed by server UID
@@ -417,11 +417,11 @@ function hostChosen(host) {
     if (!current()) { finish(); return; }
     Navigation.push(Views.Apps);
     var opened;
-    try { opened = showApps(host); } catch (error) { finish(); console.error(error); return; }
+    try { opened = showApps(host); } catch (error) { finish(); console.error('Operation failed; private details omitted.'); return; }
     opened.then(function() {
       if (!current() || !ConsoleLibrary.visible() || api !== host || isDialogOpen) return;
       Navigation.switch(); Navigation.change(Views.Apps);
-    }).catch(console.error).then(finish, finish);
+    }).catch(function() { console.error('Library request failed.'); }).then(finish, finish);
   };
 
   // Avoid delay from other polling during pairing
@@ -674,7 +674,7 @@ function addHostDialog() {
   // Send a connection request if the Continue button is pressed
   $('#continueAddHost').off('click');
   $('#continueAddHost').on('click', function() {
-    console.log('%c[index.js, addHostDialog]', 'color: green;', 'Adding host, closing app dialog, and returning.');
+    console.log('%c[index.js, addHostDialog]', 'color: gray;', 'Operation recorded; private details omitted.');
     // Get the IP address value from the input field or select fields
     var inputHost;
     if ($('#ipAddressFieldModeSwitch').prop('checked')) {
@@ -713,7 +713,7 @@ function addHostDialog() {
     // Send a connection request to the Host object based on the given IP address
     var _nvhttpHost = new NvHTTP(parsedHostInput.addr, myUniqueid, parsedHostInput.addr);
     _nvhttpHost.httpPort = parsedHostInput.port;
-    console.log('%c[index.js, addHostDialog]', 'color: green;', 'Sending connection request to host address ' + _nvhttpHost.hostname);
+    console.log('%c[index.js, addHostDialog]', 'color: gray;', 'Operation recorded; private details omitted.');
     _nvhttpHost.refreshServerInfoAtAddress(parsedHostInput.addr).then(function(success) {
       snackbarLog('Connecting to ' + _nvhttpHost.hostname + '...');
       // Close the dialog if the user has provided the IP address
@@ -748,7 +748,7 @@ function addHostDialog() {
       updateIpAddressInputValidationState();
       initIpAddressFields();
     }.bind(this), function(failure) {
-      console.error('%c[index.js, addHostDialog]', 'color: green;', 'Error: Failed API object:\n', _nvhttpHost, '\n' + _nvhttpHost.toString()); // Logging both object (for console) and toString-ed object (for text logs)
+      console.error('%c[index.js, addHostDialog]', 'color: gray;', 'Operation failed; private details omitted.'); // Logging both object (for console) and toString-ed object (for text logs)
       snackbarLogLong('Failed to connect to ' + (_nvhttpHost.hostname || 'the host') + '. Ensure Sunshine is running on your PC or GameStream is enabled in GeForce Experience SHIELD settings.');
       // Re-enable the Continue button after failure processing
       $('#continueAddHost').removeClass('mdl-button--disabled').prop('disabled', false);
@@ -775,7 +775,7 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
 
   nvhttpHost.pollServer(function(returnedNvHTTPHost) {
     if (!returnedNvHTTPHost.online) {
-      console.error('%c[index.js, pairingDialog]', 'color: green;', 'Error: Failed to connect to ' + nvhttpHost.hostname + '. Ensure your host PC is online!', nvhttpHost, '\n' + nvhttpHost.toString()); // Logging both object (for console) and toString-ed object (for text logs)
+      console.error('%c[index.js, pairingDialog]', 'color: gray;', 'Operation failed; private details omitted.'); // Logging both object (for console) and toString-ed object (for text logs)
       snackbarLogLong('Failed to connect to ' + nvhttpHost.hostname + '. Ensure Sunshine is running on your host PC or GameStream is enabled in the GeForce Experience SHIELD settings.');
       onFailure();
       return;
@@ -830,7 +830,7 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
       onFailure(); // Release the PC-opening guard even if native cancel is late.
     });
 
-    console.log('%c[index.js, pairingDialog]', 'color: green;', 'Sending pairing request to ' + nvhttpHost.hostname + ' with PIN ' + randomNumber);
+    console.log('%c[index.js, pairingDialog]', 'color: gray;', 'Operation recorded; private details omitted.');
     nvhttpHost.pair(randomNumber).then(function() {
       isPairingInProgress = false;
       if (wasPairingCanceled) return;
@@ -848,7 +848,7 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
         console.log('%c[index.js, pairingDialog]', 'color: green;', 'Ignored pairing failure due to cancellation.');
         return;
       }
-      console.error('%c[index.js, pairingDialog]', 'color: green;', 'Error: Failed API object:\n', nvhttpHost, '\n' + nvhttpHost.toString()); // Logging both object (for console) and toString-ed object (for text logs)
+      console.error('%c[index.js, pairingDialog]', 'color: gray;', 'Operation failed; private details omitted.'); // Logging both object (for console) and toString-ed object (for text logs)
       
       // Keep the modal opened, but change the button for "Close"
       $('#cancelPairing').text('Close');
@@ -1143,7 +1143,7 @@ function deleteHostDialog(host) {
   // This means we can re-add the host, and will still be paired
   $('#continueDeleteHost').off('click');
   $('#continueDeleteHost').on('click', function() {
-    console.log('%c[index.js, deleteHostDialog]', 'color: green;', 'Removing host, closing app dialog, and returning.');
+    console.log('%c[index.js, deleteHostDialog]', 'color: gray;', 'Operation recorded; private details omitted.');
     // Remove the host container from the grid
     $('#host-container-' + host.serverUid).remove();
     // Stop background polling for removed host
@@ -1806,11 +1806,11 @@ function prepareStreamAudio() {
         window._mlAudioCtx = new AudioCtx();
       }
     } else {
-      console.error('%c[index.js, startGame]', 'color: green;', 'Error: No AudioContext available, the stream will have no audio.');
+      console.error('%c[index.js, startGame]', 'color: gray;', 'Operation failed; private details omitted.');
       window._mlAudioCtx = null;
     }
   } catch (e) {
-    console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to create the AudioContext: ' + e.message);
+    console.error('%c[index.js, startGame]', 'color: gray;', 'Operation failed; private details omitted.');
     window._mlAudioCtx = null;
   }
 
@@ -1818,7 +1818,7 @@ function prepareStreamAudio() {
 
 function startGame(host, appID, audioPrepared) {
   if (!host || !host.paired) {
-    console.error('%c[index.js, startGame]', 'color: green;', 'Error: Attempted to start a game, but the host was not initialized properly! Host object: ', host);
+    console.error('%c[index.js, startGame]', 'color: gray;', 'Operation failed; private details omitted.');
     return;
   }
   if (!audioPrepared) prepareStreamAudio();
@@ -1876,7 +1876,7 @@ function startGame(host, appID, audioPrepared) {
 
           return;
         }, function(failedCurrentApp) {
-          console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to get the current running app from ' + host.hostname + '\n Returned error was: ' + failedCurrentApp + '!', '\n Host object: ' + '\n', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
+          console.error('%c[index.js, startGame]', 'color: gray;', 'Operation failed; private details omitted.'); // Logging both object (for console) and toString-ed object (for text logs)
           return;
         });
         return;
@@ -1910,25 +1910,7 @@ function startGame(host, appID, audioPrepared) {
       const disableWarnings = $('#disableWarningsSwitch').parent().hasClass('is-checked') ? 1 : 0;
       const performanceStats = $('#performanceStatsSwitch').parent().hasClass('is-checked') ? 1 : 0;
 
-      console.log('%c[index.js, startGame]', 'color: green;', 'startRequest:' + 
-      '\n Host address: ' + host.address + ':' + host.httpPort + 
-      '\n Video resolution: ' + streamWidth + 'x' + streamHeight + 
-      '\n Video frame rate: ' + frameRate + ' FPS' + 
-      '\n Video bitrate: ' + bitrate + ' Kbps' + 
-      '\n Optimize game settings: ' + optimizeGames + 
-      '\n Rumble feedback: ' + rumbleFeedback + 
-      '\n Mouse emulation: ' + mouseEmulation + 
-      '\n Flip A/B face buttons: ' + flipABfaceButtons + 
-      '\n Flip X/Y face buttons: ' + flipXYfaceButtons + 
-      '\n Audio configuration: ' + audioConfig + 
-      '\n Audio jitter buffer: ' + audioJitterMs + ' ms' + 
-      '\n Play host audio: ' + playHostAudio + 
-      '\n Video codec: ' + videoCodec + 
-      '\n Video HDR mode: ' + hdrMode + 
-      '\n Full color range: ' + fullRange + 
-      '\n Game Mode: ' + gameMode + 
-      '\n Disable connection warnings: ' + disableWarnings + 
-      '\n Performance statistics: ' + performanceStats);
+      console.log('%c[index.js, startGame]', 'color: gray;', 'Operation recorded; private details omitted.');
 
       // Hide on-screen overlays until the streaming session begins
       $('#connection-warnings, #performance-stats').css('background', 'transparent').text('');
@@ -1971,9 +1953,12 @@ function startGame(host, appID, audioPrepared) {
             framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
             audioConfig, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
             performanceStats, clientRefreshRateX100
-          ]);
+          ]).catch(function() {
+            handleMessage('streamTerminated: 0');
+            snackbarLogLong('Previous stream is still closing. Retry shortly.');
+          });
         }, function(failedResumeApp) {
-          console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to resume app with id: ' + appID + '\n Returned error was: ' + failedResumeApp + '!');
+          console.error('%c[index.js, startGame]', 'color: gray;', 'Operation failed; private details omitted.');
           snackbarLog('Failed to resume ' + appToStart.title);
           showApps(host).then(() => {
             // Scroll to the current game row
@@ -2023,9 +2008,12 @@ function startGame(host, appID, audioPrepared) {
           framePacing, optimizeGames, rumbleFeedback, mouseEmulation, flipABfaceButtons, flipXYfaceButtons,
           audioConfig, audioJitterMs, playHostAudio, videoCodec, hdrMode, fullRange, gameMode, disableWarnings,
           performanceStats, clientRefreshRateX100
-        ]);
+        ]).catch(function() {
+            handleMessage('streamTerminated: 0');
+            snackbarLogLong('Previous stream is still closing. Retry shortly.');
+          });
       }, function(failedLaunchApp) {
-        console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to launch app with id: ' + appID + '\n Returned error was: ' + failedLaunchApp + '!');
+        console.error('%c[index.js, startGame]', 'color: gray;', 'Operation failed; private details omitted.');
         snackbarLog('Failed to launch ' + appToStart.title + '.');
         showApps(host).then(() => {
           // Scroll to the current game row
@@ -2037,7 +2025,7 @@ function startGame(host, appID, audioPrepared) {
       });
     });
   }, function(failedRefreshInfo) {
-    console.error('%c[index.js, startGame]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo + ' and failed server was: ' + '\n', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
+    console.error('%c[index.js, startGame]', 'color: gray;', 'Operation failed; private details omitted.'); // Logging both object (for console) and toString-ed object (for text logs)
   });
 }
 
@@ -2065,16 +2053,16 @@ function stopGame(host, callbackFunction) {
             if (typeof(callbackFunction) === "function") callbackFunction();
           });
         }, function(failedRefreshInfo2) {
-          console.error('%c[index.js, stopGame]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo2 + '! Failed server was: ' + '\n', host, '\n' + host.toString()); // Logging both object (for console) and toString-ed object (for text logs)
+          console.error('%c[index.js, stopGame]', 'color: gray;', 'Operation failed; private details omitted.'); // Logging both object (for console) and toString-ed object (for text logs)
         });
       }, function(failedQuitApp) {
-        console.error('%c[index.js, stopGame]', 'color: green;', 'Error: Failed to quit app! Returned error was: ' + failedQuitApp + '!');
+        console.error('%c[index.js, stopGame]', 'color: gray;', 'Operation failed; private details omitted.');
       });
     }, function(failedGetApp) {
-      console.error('%c[index.js, stopGame]', 'color: green;', 'Error: Failed to get app ID! Returned error was: ' + failedGetApp + '!');
+      console.error('%c[index.js, stopGame]', 'color: gray;', 'Operation failed; private details omitted.');
     });
   }, function(failedRefreshInfo) {
-    console.error('%c[index.js, stopGame]', 'color: green;', 'Error: Failed to refresh server info! Returned error was: ' + failedRefreshInfo + '!');
+    console.error('%c[index.js, stopGame]', 'color: gray;', 'Operation failed; private details omitted.');
   });
 }
 
@@ -2125,15 +2113,15 @@ function openIndexDB(callback) {
   const request = indexedDB.open(dbName, dbVersion);
 
   request.onerror = function(e) {
-    console.error('%c[index.js, openIndexDB]', 'color: green;', 'Error: Cannot create or access the IndexedDB database: ', e);
+    console.error('%c[index.js, openIndexDB]', 'color: gray;', 'Operation failed; private details omitted.');
   };
 
   request.onsuccess = function(e) {
-    console.log('%c[index.js, openIndexDB]', 'color: green;', 'Successfully created or accessed the IndexedDB database: ', e);
+    console.log('%c[index.js, openIndexDB]', 'color: gray;', 'Operation recorded; private details omitted.');
     db = request.result;
 
     db.onerror = function(e) {
-      console.error('%c[index.js, openIndexDB]', 'color: green;', 'Error: Failed to create or access the IndexedDB database: ', e);
+      console.error('%c[index.js, openIndexDB]', 'color: gray;', 'Operation failed; private details omitted.');
     };
 
     // Interim solution to create an objectStore
@@ -2168,7 +2156,7 @@ function getData(key, callbackFunction) {
 
       // Retrieve the data that was stored
       readRequest.onsuccess = function(e) {
-        console.log('%c[index.js, getData]', 'color: green;', 'Reading data from DB key: ' + key + ' with value: ' + readRequest.result);
+        console.log('%c[index.js, getData]', 'color: gray;', 'Operation recorded; private details omitted.');
         let value = null;
         if (readRequest.result) {
           value = JSON.parse(readRequest.result);
@@ -2177,11 +2165,11 @@ function getData(key, callbackFunction) {
       };
 
       transaction.onerror = function(e) {
-        console.error('%c[index.js, getData]', 'color: green;', 'Error: Unable to read data at the: ' + key + ' from IndexedDB: ' + e);
+        console.error('%c[index.js, getData]', 'color: gray;', 'Operation failed; private details omitted.');
         callCb(key, value, callbackFunction);
       };
     } catch (err) {
-      console.error('%c[index.js, getData]', 'color: green;', 'Error: Something went wrong while reading data at the key: ' + key + ' from IndexedDB: ' + err);
+      console.error('%c[index.js, getData]', 'color: gray;', 'Operation failed; private details omitted.');
       callCb(key, value, callbackFunction);
     }
   };
@@ -2202,17 +2190,17 @@ function storeData(key, data, callbackFunction) {
       const put = transaction.objectStore(storeName).put(JSON.stringify(data), key);
 
       transaction.oncomplete = function(e) {
-        console.log('%c[index.js, storeData]', 'color: green;', 'Storing data at key: ' + key + ' with data: ' + JSON.stringify(data));
+        console.log('%c[index.js, storeData]', 'color: gray;', 'Operation recorded; private details omitted.');
         if (callbackFunction) {
           callbackFunction();
         }
       };
 
       transaction.onerror = function(e) {
-        console.error('%c[index.js, storeData]', 'color: green;', 'Error: Unable to store data in IndexedDB: ' + e);
+        console.error('%c[index.js, storeData]', 'color: gray;', 'Operation failed; private details omitted.');
       };
     } catch (err) {
-      console.error('%c[index.js, storeData]', 'color: green;', 'Error: Something went wrong while storing data at the key: ' + key + ' from IndexedDB: ' + err);
+      console.error('%c[index.js, storeData]', 'color: gray;', 'Operation failed; private details omitted.');
     }
   };
 
@@ -2376,7 +2364,7 @@ function standardBitratePresets() {
 function saveIpAddressFieldMode() {
   setTimeout(() => {
     const chosenIpAddressFieldMode = $('#ipAddressFieldModeSwitch').parent().hasClass('is-checked');
-    console.log('%c[index.js, saveIpAddressFieldMode]', 'color: green;', 'Saving IP address field mode state: ' + chosenIpAddressFieldMode);
+    console.log('%c[index.js, saveIpAddressFieldMode]', 'color: gray;', 'Operation recorded; private details omitted.');
     storeData('ipAddressFieldMode', chosenIpAddressFieldMode, null);
   }, 100);
 }
@@ -2467,7 +2455,7 @@ function saveAudioJitter() {
 function savePlayHostAudio() {
   setTimeout(() => {
     const chosenPlayHostAudio = $('#playHostAudioSwitch').parent().hasClass('is-checked');
-    console.log('%c[index.js, savePlayHostAudio]', 'color: green;', 'Saving play host audio state: ' + chosenPlayHostAudio);
+    console.log('%c[index.js, savePlayHostAudio]', 'color: gray;', 'Operation recorded; private details omitted.');
     storeData('playHostAudio', chosenPlayHostAudio, null);
   }, 100);
 }
@@ -2792,7 +2780,7 @@ function loadSystemInfo() {
       'TV Model Name: ' + (modelName ? modelName : 'Unknown') + '\n' +
       'TV Model Group: ' + (modelGroup ? modelGroup : 'Unknown');
   } else {
-    console.error('%c[index.js, loadSystemInfo]', 'color: green;', 'Error: Failed to load system information!');
+    console.error('%c[index.js, loadSystemInfo]', 'color: gray;', 'Operation failed; private details omitted.');
     systemInfoPlaceholder.innerText = 'Failed to load system information!';
   }
 }
@@ -2807,7 +2795,7 @@ function getAppVariant() {
 }
 
 function loadUserData() {
-  console.log('%c[index.js, loadUserData]', 'color: green;', 'Loading stored user data...');
+  console.log('%c[index.js, loadUserData]', 'color: gray;', 'Operation recorded; private details omitted.');
   openIndexDB(loadUserDataCb);
 }
 
@@ -3071,19 +3059,19 @@ function loadHTTPCertsCb() {
           storeData('cert', cert, null);
           pairingCert = cert;
         }, function(failedCert) {
-          console.error('%c[index.js, loadHTTPCertsCb]', 'color: green;', 'Error: Failed to generate a new certificate! Returned error was: \n', failedCert + '!');
+          console.error('%c[index.js, loadHTTPCertsCb]', 'color: gray;', 'Operation failed; private details omitted.');
         }).then(function(ret) {
           sendMessage('httpInit', [pairingCert.cert, pairingCert.privateKey, myUniqueid]).then(function(ret) {
             restoreUiAfterWasmLoad();
           }, function(failedInit) {
-            console.error('%c[index.js, loadHTTPCertsCb]', 'color: green;', 'Error: Failed HTTP initialization! Returned error was: ', failedInit + '!');
+            console.error('%c[index.js, loadHTTPCertsCb]', 'color: gray;', 'Operation failed; private details omitted.');
           });
         });
       } else {
         sendMessage('httpInit', [pairingCert.cert, pairingCert.privateKey, myUniqueid]).then(function(ret) {
           restoreUiAfterWasmLoad();
         }, function(failedInit) {
-          console.error('%c[index.js, loadHTTPCertsCb]', 'color: green;', 'Error: Failed HTTP initialization! Returned error was: ', failedInit + '!');
+          console.error('%c[index.js, loadHTTPCertsCb]', 'color: gray;', 'Operation failed; private details omitted.');
         });
       }
 
@@ -3133,7 +3121,7 @@ window.onload = onWindowLoad;
 window.addEventListener('gamepadconnected', function(e) {
   const connectedGamepad = e.gamepad;
   const gamepadIndex = connectedGamepad.index;
-  console.log('%c[index.js, gamepadconnected]', 'color: green;', 'Gamepad connected:\n' + JSON.stringify(connectedGamepad), connectedGamepad);
+  console.log('%c[index.js, gamepadconnected]', 'color: gray;', 'Operation recorded; private details omitted.');
   snackbarLog('Gamepad ' + gamepadIndex + ' has been connected.');
 });
 
@@ -3141,7 +3129,7 @@ window.addEventListener('gamepadconnected', function(e) {
 window.addEventListener('gamepaddisconnected', function(e) {
   const disconnectedGamepad = e.gamepad;
   const gamepadIndex = disconnectedGamepad.index;
-  console.log('%c[index.js, gamepaddisconnected]', 'color: green;', 'Gamepad disconnected:\n' + JSON.stringify(disconnectedGamepad), disconnectedGamepad);
+  console.log('%c[index.js, gamepaddisconnected]', 'color: gray;', 'Operation recorded; private details omitted.');
   snackbarLog('Gamepad ' + gamepadIndex + ' has been disconnected.');
   console.warn('%c[index.js, gamepaddisconnected]', 'color: green;', 'Warning: Lost connection to gamepad ' + gamepadIndex + '. Please reconnect your gamepad!');
 });

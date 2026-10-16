@@ -124,7 +124,7 @@ function NvHTTP(address, clientUid, userEnteredAddress = '', macAddress) {
   this.gputype = '';
   this.supportedDisplayModes = {}; // key: y-resolution:x-resolution, value: array of supported frame rates
 
-  console.log('%c[utils.js, NvHTTP]', 'color: gray;', 'NvHTTP Object: \n' + this);
+  console.log('%c[utils.js, NvHTTP]', 'color: gray;', 'Operation recorded; private details omitted.');
 };
 
 // Unlike Promise.race(), this clears the losing timer as soon as the request
@@ -340,7 +340,7 @@ NvHTTP.prototype = {
     var tryNext = function(index) {
       if (scope && !scope.active) return;
       if (index >= candidates.length) {
-        console.error('%c[utils.js, selectServerAddress]', 'color: gray;', 'Error: Failed to contact the ' + this.hostname + '!', this);
+        console.error('%c[utils.js, selectServerAddress]', 'color: gray;', 'Operation failed; private details omitted.');
         onFailure();
         return;
       }
@@ -539,7 +539,7 @@ NvHTTP.prototype = {
 
       if ($root.attr('status_code') != 200) {
         // TODO: Bubble up an error here
-        console.error('%c[utils.js, getAppListWithCacheFlush]', 'color: gray;', 'Error: Failed to request app list: ', $root.attr('status_code'));
+        console.error('%c[utils.js, getAppListWithCacheFlush]', 'color: gray;', 'Operation failed; private details omitted.');
         return [];
       }
 
@@ -660,10 +660,10 @@ NvHTTP.prototype = {
       // Delete the cached box art directory from the storage
       try {
         tizen.filesystem.deleteDirectory(boxArtDir);
-        console.log('%c[utils.js, clearBoxArt]', 'color: gray;', 'Clearing the box art files from ' + boxArtDir);
+        console.log('%c[utils.js, clearBoxArt]', 'color: gray;', 'Operation recorded; private details omitted.');
         resolve();
       } catch (error) {
-        console.error('%c[utils.js, clearBoxArt]', 'color: gray;', 'Error: Failed to clear box art files: ', error);
+        console.error('%c[utils.js, clearBoxArt]', 'color: gray;', 'Operation failed; private details omitted.');
         reject(error);
       }
     }.bind(this));
@@ -698,13 +698,13 @@ NvHTTP.prototype = {
   },
 
   updateExternalAddressIP4: function() {
-    console.log('%c[utils.js, updateExternalAddressIP4]', 'color: gray;', 'Looking for the external IPv4 address of ' + this.hostname + '...');
+    console.log('%c[utils.js, updateExternalAddressIP4]', 'color: gray;', 'Operation recorded; private details omitted.');
     return sendMessage('STUN', []).then(function(addr) {
       if (addr) {
         this.externalIP = addr;
-        console.log('%c[utils.js, updateExternalAddressIP4]', 'color: gray;', 'External IPv4 address of ' + this.hostname + ' is ' + this.externalIP);
+        console.log('%c[utils.js, updateExternalAddressIP4]', 'color: gray;', 'Operation recorded; private details omitted.');
       } else {
-        console.error('%c[utils.js, updateExternalAddressIP4]', 'color: gray;', 'Error: External IPv4 address lookup failed!');
+        console.error('%c[utils.js, updateExternalAddressIP4]', 'color: gray;', 'Operation failed; private details omitted.');
       }
     }.bind(this))
   },

@@ -10,6 +10,35 @@ static unsigned prefix(const std::vector<uint8_t>& v,size_t n) {
   return 0;
 }
 int main(int argc,char** argv) {
+  // Exp-Golomb payloads can use 63 bits without shifting a 32-bit value by 32+.
+  for (uint32_t value : {0u, 1u, 65535u, 0x3fffffffu, 0x7fffffffu}) {
+    uint8_t storage[16] = {};
+    bs_t bits;
+    bs_init(&bits, storage, sizeof(storage));
+    bs_write_ue(&bits, value);
+    assert(!bs_overrun(&bits));
+    bs_init(&bits, storage, sizeof(storage));
+    assert(bs_read_ue(&bits) == value && !bs_overrun(&bits));
+  }
+  for (int32_t value : {-1073741823, -1, 0, 1, 1073741824}) {
+    uint8_t storage[16] = {};
+    bs_t bits;
+    bs_init(&bits, storage, sizeof(storage));
+    bs_write_se(&bits, value);
+    assert(!bs_overrun(&bits));
+    bs_init(&bits, storage, sizeof(storage));
+    assert(bs_read_se(&bits) == value && !bs_overrun(&bits));
+  }
+  {
+    uint8_t storage[16] = {};
+    bs_t bits;
+    bs_init(&bits, storage, sizeof(storage));
+    bs_read_ue(&bits);
+    assert(bs_overrun(&bits));
+    bs_init(&bits, storage, sizeof(storage));
+    bs_write_u(&bits, 33, 0);
+    assert(bs_overrun(&bits));
+  }
   // Reject bounded malformed prefixes and undersized/truncated headers.
   uint8_t invalid[] = {3, 2, 1, 0x67, 0x00, 0x00};
   uint8_t scratch[128] = {};

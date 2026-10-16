@@ -37,6 +37,7 @@ typedef struct
 	uint8_t* p;
 	uint8_t* end;
 	int bits_left;
+    int error;
 } bs_t;
 
 #define _OPTIMIZE_BS_ 1
@@ -84,6 +85,7 @@ static inline bs_t* bs_init(bs_t* b, uint8_t* buf, size_t size)
     b->p = buf;
     b->end = buf + size;
     b->bits_left = 8;
+    b->error = 0;
     return b;
 }
 
@@ -105,6 +107,7 @@ static inline bs_t* bs_clone(bs_t* dest, const bs_t* src)
     dest->p = src->p;
     dest->end = src->end;
     dest->bits_left = src->bits_left;
+    dest->error = src->error;
     return dest;
 }
 
@@ -115,7 +118,7 @@ static inline uint32_t bs_byte_aligned(bs_t* b)
 
 static inline int bs_eof(bs_t* b) { if (b->p >= b->end) { return 1; } else { return 0; } }
 
-static inline int bs_overrun(bs_t* b) { if (b->p > b->end) { return 1; } else { return 0; } }
+static inline int bs_overrun(bs_t* b) { if (b->error || b->p > b->end) { return 1; } else { return 0; } }
 
 static inline int bs_pos(bs_t* b) { if (b->p > b->end) { return (b->end - b->start); } else { return (b->p - b->start); } }
 
@@ -125,6 +128,7 @@ static inline uint32_t bs_read_u1(bs_t* b)
 {
     uint32_t r = 0;
     
+    if (bs_eof(b)) { b->error = 1; return 0; }
     b->bits_left--;
 
     if (! bs_eof(b))
@@ -158,6 +162,7 @@ static inline uint32_t bs_peek_u1(bs_t* b)
 static inline uint32_t bs_read_u(bs_t* b, int n)
 {
     uint32_t r = 0;
+    if (n < 0 || n > 32) { b->error = 1; return 0; }
     int i;
     for (i = 0; i < n; i++)
     {
@@ -192,16 +197,16 @@ static inline uint32_t bs_read_u8(bs_t* b)
 
 static inline uint32_t bs_read_ue(bs_t* b)
 {
-    int32_t r = 0;
-    int i = 0;
-
-    while( (bs_read_u1(b) == 0) && (i < 32) && (!bs_eof(b)) )
-    {
-        i++;
+    unsigned int zeros = 0;
+    for (;;) {
+        if (bs_eof(b)) { b->error = 1; return 0; }
+        if (bs_read_u1(b) != 0) break;
+        if (++zeros > 31) { b->error = 1; return 0; }
     }
-    r = bs_read_u(b, i);
-    r += (1 << i) - 1;
-    return r;
+    const uint32_t value = ((UINT32_C(1) << zeros) - 1) + bs_read_u(b, zeros);
+    // Parsed SPS fields are signed ints in this bundled library.
+    if (value > INT32_MAX) { b->error = 1; return 0; }
+    return value;
 }
 
 static inline int32_t bs_read_se(bs_t* b) 
@@ -209,7 +214,7 @@ static inline int32_t bs_read_se(bs_t* b)
     int32_t r = bs_read_ue(b);
     if (r & 0x01)
     {
-        r = (r+1)/2;
+        r = (int32_t)(((int64_t)r + 1)/2);
     }
     else
     {
@@ -221,6 +226,7 @@ static inline int32_t bs_read_se(bs_t* b)
 
 static inline void bs_write_u1(bs_t* b, uint32_t v)
 {
+    if (bs_eof(b)) { b->error = 1; return; }
     b->bits_left--;
 
     if (! bs_eof(b))
@@ -237,6 +243,7 @@ static inline void bs_write_u1(bs_t* b, uint32_t v)
 
 static inline void bs_write_u(bs_t* b, int n, uint32_t v)
 {
+    if (n < 0 || n > 32) { b->error = 1; return; }
     int i;
     for (i = 0; i < n; i++)
     {
@@ -261,70 +268,26 @@ static inline void bs_write_u8(bs_t* b, uint32_t v)
 
 static inline void bs_write_ue(bs_t* b, uint32_t v)
 {
-    static const int len_table[256] =
-    {
-        1,
-        1,
-        2,2,
-        3,3,3,3,
-        4,4,4,4,4,4,4,4,
-        5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,5,
-        6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
-        6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,6,
-        7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
-        7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
-        7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
-        7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,7,
-        8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,
-        8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,
-        8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,
-        8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,
-        8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,
-        8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,
-        8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,
-        8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,8,
-    };
-
-    int len;
-
-    if (v == 0)
-    {
-        bs_write_u1(b, 1);
-    }
-    else
-    {
-        v++;
-
-        if (v >= 0x01000000)
-        {
-            len = 24 + len_table[ v >> 24 ];
-        }
-        else if(v >= 0x00010000)
-        {
-            len = 16 + len_table[ v >> 16 ];
-        }
-        else if(v >= 0x00000100)
-        {
-            len =  8 + len_table[ v >>  8 ];
-        }
-        else 
-        {
-            len = len_table[ v ];
-        }
-
-        bs_write_u(b, 2*len-1, v);
-    }
+    if (v > INT32_MAX) { b->error = 1; return; }
+    const uint32_t value = v + 1;
+    unsigned int leading = 0;
+    for (uint32_t bits = value; bits > 1; bits >>= 1) ++leading;
+    // Exp-Golomb may have more than 32 bits, but its payload never does.
+    for (unsigned int i = 0; i < leading; ++i) bs_write_u1(b, 0);
+    bs_write_u(b, leading + 1, value);
 }
 
 static inline void bs_write_se(bs_t* b, int32_t v)
 {
     if (v <= 0)
     {
-        bs_write_ue(b, -v*2);
+        if (v < -INT32_MAX / 2) { b->error = 1; return; }
+        bs_write_ue(b, (uint32_t)(-(int64_t)v * 2));
     }
     else
     {
-        bs_write_ue(b, v*2 - 1);
+        if ((uint32_t)v > ((uint32_t)INT32_MAX + 1) / 2) { b->error = 1; return; }
+        bs_write_ue(b, (uint32_t)((int64_t)v * 2 - 1));
     }
 }
 

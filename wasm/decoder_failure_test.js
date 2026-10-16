@@ -30,12 +30,15 @@ public:
  std::mutex m_Mutex;
  std::condition_variable m_EmssStateChanged, m_EmssVideoStateChanged;
  std::atomic<bool> m_DecoderActive{true}, m_ConnectionCancelled{false}, m_DecoderPipelineFailed{false}, m_VideoStarted{false};
+ std::atomic<uint32_t> m_SessionGeneration{1};
+ bool IsCurrentSession(uint32_t g)const{return g==m_SessionGeneration.load();}
  int stops = 0;
  void StopConnection() { ++stops; m_ConnectionCancelled = true; }
  bool WaitFor(std::condition_variable*, std::function<bool()>);
  class SourceListener {
  public:
   MoonlightInstance* m_Instance;
+  uint32_t m_Generation=1;
   void OnPipelineError(samsung::wasm::MediaPipelineError, const char*);
  };
 };
@@ -64,6 +67,10 @@ int main() {
  MoonlightInstance inactive; inactive.m_DecoderActive = false;
  MoonlightInstance::SourceListener listener{&inactive}; const int before = messages;
  listener.OnPipelineError(error, nullptr); assert(messages == before && !inactive.m_DecoderPipelineFailed);
+ MoonlightInstance stale;
+ MoonlightInstance::SourceListener staleListener{&stale};stale.m_SessionGeneration=2;
+ const int beforeStale=messages;staleListener.OnPipelineError(error,nullptr);
+ assert(messages==beforeStale&&!stale.m_DecoderPipelineFailed);
  MoonlightInstance timeout; const auto start = Clock::now();
  assert(!timeout.WaitFor(&timeout.m_EmssVideoStateChanged, [] { return false; }));
  const double seconds = std::chrono::duration<double>(Clock::now() - start).count();

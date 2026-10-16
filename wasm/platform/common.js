@@ -84,7 +84,7 @@ var common = (function() {
     if (typeof window.handleMessage !== 'undefined') {
       window.handleMessage(message_event);
     } else {
-      console.log('%c[common.js, handleMessage]', 'color: gray;', 'Unhandled message: ' + message_event.data);
+      console.log('%c[common.js, handleMessage]', 'color: gray;', 'Unhandled message received.');
     }
   }
 

@@ -123,7 +123,7 @@ function handleMessage(msg) {
   // of large strings and creates avoidable GC pressure. Other, infrequent
   // control messages remain visible for diagnostics.
   if (msg.indexOf('StatMsg: ') !== 0) {
-    console.log('%c[messages.js, handleMessage]', 'color: gray;', 'Message data: ', msg);
+    console.log('%c[messages.js, handleMessage]', 'color: gray;', 'Control message received.');
   }
   // If it's a recognized event, notify the appropriate function
   if (msg.indexOf('streamTerminated: ') === 0) {

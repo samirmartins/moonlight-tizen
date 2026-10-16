@@ -77,7 +77,7 @@
         if (ListenerCallbacks.logMessage) { \
             char message[1024]; \
             snprintf(message, sizeof(message), format, ##__VA_ARGS__); \
-            ListenerCallbacks.logMessage(message); \
+            ListenerCallbacks.logMessage("%s", message); \
         } \
     } while(0)
 #else

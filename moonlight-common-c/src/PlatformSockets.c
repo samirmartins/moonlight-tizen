@@ -624,11 +624,11 @@ int resolveHostName(const char* host, int family, int tcpTestPort, struct sockad
     hints.ai_protocol = IPPROTO_TCP;
     err = getaddrinfo(host, NULL, &hints, &res);
     if (err != 0) {
-        Limelog("getaddrinfo(%s) failed: %d\n", host, err);
+        Limelog("Host address lookup failed: %d\n", err);
         return err;
     }
     else if (res == NULL) {
-        Limelog("getaddrinfo(%s) returned success without addresses\n", host);
+        Limelog("Host address lookup returned no addresses\n");
         return -1;
     }
 
@@ -657,7 +657,7 @@ int resolveHostName(const char* host, int family, int tcpTestPort, struct sockad
         return 0;
     }
 
-    Limelog("No working addresses found for host: %s\n", host);
+    Limelog("No working host addresses found\n");
     freeaddrinfo(res);
     return -1;
 }

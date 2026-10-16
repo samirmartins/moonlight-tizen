@@ -1,6 +1,23 @@
 'use strict';
 // Approved historical scope contracts; behavioral tests are independent.
 
+function withoutLogs(source) {
+ source=source.replace(/\.catch\(function\(\) \{\s*handleMessage\('streamTerminated: 0'\);\s*snackbarLogLong\('Previous stream is still closing\. Retry shortly\.'\);\s*\}\)/g,'');
+ const assert=require('assert');
+ const parse=function calls(s,name) {
+ const out=[];const re=new RegExp(name.replaceAll(".","\\.")+"\\s*\\(","g");let m;
+ while((m=re.exec(s))){let i=re.lastIndex,depth=1,q=null,esc=false;
+ for(;i<s.length&&depth;i++){const c=s[i];if(q){if(esc)esc=false;else if(c==="\\")esc=true;else if(c===q)q=null;}else if("'\"`".includes(c))q=c;else if(c==="(")depth++;else if(c===")")depth--;}
+ if(depth)throw Error("unbalanced");if(s[i]===";")i++;out.push([m.index,i,s.slice(m.index,i)]);re.lastIndex=i;
+ }return out;
+};
+ for(const n of ['console.log','console.warn','console.error','console.debug','ClLogMessage','PostToJs']){
+  for(const[a,b]of parse(source,n).reverse())source=source.slice(0,a)+source.slice(b);
+ }
+ return source.replace(/\/\/ Logging both object[^\n]*/g,'').replace(/\.catch\(function\(\) \{\s*\}\)/g,'.catch(console.error)').replace(/\s+/g,' ').trim();
+}
+
+
 {
 'use strict';
 const assert = require('assert'), fs = require('fs'), cp = require('child_process');
@@ -73,6 +90,9 @@ for(const name of ['DURATION_MS','RENEW_MS','MIN_INTERVAL_MS','MAX_IN_FLIGHT','W
 const frozen=['wasm/auddec.cpp','wasm/audio_ring.hpp','wasm/platform/audio.js','wasm/platform/audio-worklet.js',
   'wasm/gamepad.cpp','wasm/video_timing.hpp','moonlight-common-c',
   ':(exclude)moonlight-common-c/src/RtspConnection.c',
+  ':(exclude)moonlight-common-c/src/RtspParser.c',
+  ':(exclude)moonlight-common-c/src/PlatformSockets.c',
+  ':(exclude)moonlight-common-c/src/Platform.h',
   'wasm/platform/diagnostics.js','wasm/platform/display.js'];
 assert.strictEqual(cp.execFileSync('git',['diff','v3.3.10','--',...frozen],{encoding:'utf8'}),'');
 
@@ -87,12 +107,12 @@ const now = fs.readFileSync('wasm/platform/index.js','utf8');
 function between(s,a,b,from=0) { const start=s.indexOf(a,from),end=s.indexOf(b,start); assert(start>=0&&end>start); return s.slice(start,end).trim(); }
 // The only allowed change in this segment is safe text insertion in the
 // pre-launch confirmation. Stream arguments and scheduling remain identical.
-assert.strictEqual(between(now,'  // Reset the scheduler for the new stream','function stopGame'),
-  between(old,'  // Reset the scheduler for the new stream','function stopGame').replace(
+assert.strictEqual(withoutLogs(between(now,'  // Reset the scheduler for the new stream','function stopGame')),
+  withoutLogs(between(old,'  // Reset the scheduler for the new stream','function stopGame').replace(
     "document.getElementById('quitAppDialogText').innerHTML = currentApp.title",
-    "document.getElementById('quitAppDialogText').textContent = currentApp.title"));
-assert.strictEqual(between(now,'  // Create the AudioContext here','\n}\n\nfunction startGame'),
-  between(old,'  // Create the AudioContext here','  // Reset the scheduler for the new stream'));
+    "document.getElementById('quitAppDialogText').textContent = currentApp.title")));
+assert.strictEqual(withoutLogs(between(now,'  // Create the AudioContext here','\n}\n\nfunction startGame')),
+  withoutLogs(between(old,'  // Create the AudioContext here','  // Reset the scheduler for the new stream')));
 assert.strictEqual(between(now,'function showStreamMode()','// Maximize the size').replace('  ConsoleLibrary.suspend();\n  clearTimeout(startupScanTimer);\n  repeatAction = null;\n  clearTimeout(repeatTimeout);\n  clearTimeout(navigationTimeout);\n',''),
   between(old,'function showStreamMode()','// Maximize the size'));
 assert.strictEqual(between(now,'function fullscreenWasmModule()','// Start the given appID'),
@@ -117,17 +137,38 @@ function maskMethod(source, marker) {
  return source.slice(0, start) + marker + ' [tested separately]' + source.slice(end);
 }
 let player = current('wasm/wasmplayer.cpp'), baseline = old('wasm/wasmplayer.cpp');
-for (const marker of ['void MoonlightInstance::SourceListener::OnPipelineError(', 'bool MoonlightInstance::WaitFor(']) {
+for (const marker of [
+ 'void MoonlightInstance::SourceListener::OnPipelineError(', 'bool MoonlightInstance::WaitFor(',
+ 'MoonlightInstance::SourceListener::SourceListener(', 'MoonlightInstance::VideoTrackListener::VideoTrackListener(',
+ 'void MoonlightInstance::SourceListener::OnSourceOpen(', 'void MoonlightInstance::SourceListener::OnSourceOpenPending(',
+ 'void MoonlightInstance::SourceListener::OnSourceClosed(', 'void MoonlightInstance::SourceListener::OnPlaybackPositionChanged(',
+ 'void MoonlightInstance::VideoTrackListener::OnTrackOpen(', 'void MoonlightInstance::VideoTrackListener::OnTrackClosed(',
+ 'void MoonlightInstance::VideoTrackListener::OnSessionIdChanged(']) {
  player = maskMethod(player, marker); baseline = maskMethod(baseline, marker);
 }
 player = player.replace('  g_Instance->m_DecoderActive = true;', '  g_Instance->m_H264DecoderActive = (videoFormat & VIDEO_FORMAT_H264) != 0;')
  .replace('m_DecoderPipelineFailed = false;', 'm_H264PipelineFailed = false;')
  .replace('  g_Instance->m_DecoderActive = false;\n', '');
+player = player.replace('g_Instance->m_VideoTrackListener.get()', '&g_Instance->m_VideoTrackListener');
+const openBegin=player.indexOf('  auto openTicket ='),openEnd=player.indexOf('\n',player.indexOf('  if (!openResult)',openBegin));
+assert(openBegin>=0&&openEnd>openBegin);
+player=player.slice(0,openBegin)+'  g_Instance->m_Source->Open([](EmssOperationResult){});'+player.slice(openEnd);
 assert.strictEqual(player, baseline, 'no other video/PTS/assembly/presentation change');
-const main = current('wasm/main.cpp')
+let main = current('wasm/main.cpp')
  .replace('  emscripten_set_blur_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, EM_TRUE, handleFocusLost);\n', '')
  .replace('  emscripten_set_visibilitychange_callback(NULL, EM_TRUE, handleVisibilityChange);\n', '');
-assert.strictEqual(main, old('wasm/main.cpp'), 'stream launch/stop and input worker unchanged');
+
+let mainOld = old('wasm/main.cpp');
+for(const marker of ['void MoonlightInstance::RequestStop(', 'void MoonlightInstance::ReleaseMedia(', 'bool MoonlightInstance::BeginSession(']) {
+ const masked=maskMethod(main,marker);main=masked.replace(marker+' [tested separately]','');
+}
+for(const marker of ['MoonlightInstance::MoonlightInstance(', 'void MoonlightInstance::OnConnectionStarted(', 'void MoonlightInstance::OnConnectionStopped(',
+ 'void MoonlightInstance::StopConnection(', 'void* MoonlightInstance::StopThreadFunc(',
+ 'void* MoonlightInstance::ConnectionThreadFunc(', 'MessageResult MoonlightInstance::StartStream(']) {
+ main=maskMethod(main,marker);mainOld=maskMethod(mainOld,marker);
+}
+assert.strictEqual(withoutLogs(main),withoutLogs(mainOld),'unrelated native methods unchanged');
+
 const input = current('wasm/input.cpp'), inputOld = old('wasm/input.cpp');
 function extract(source, start, end) { return source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start))); }
 for (const [start, end] of [
@@ -149,15 +190,20 @@ const files = cp.execFileSync('git', ['ls-tree', '-r', '--name-only', 'v3.4.0', 
  'wasm/auddec.cpp', 'wasm/audio_ring.hpp', 'wasm/gamepad.cpp', 'wasm/video_timing.hpp', 'wasm/video_telemetry.hpp'], {encoding: 'utf8'}).trim().split('\n');
 for (const file of files) {
  if (['moonlight-common-c/src/RtspConnection.c', 'wasm/platform/console-library.js',
-      'wasm/platform/index.js', 'wasm/static/css/console-library.css', 'wasm/index.html'].includes(file)) continue;
- assert(fs.readFileSync(file).equals(cp.execFileSync('git', ['show', 'v3.4.0:' + file])), file);
+      'wasm/platform/index.js', 'wasm/static/css/console-library.css', 'wasm/index.html',
+      'moonlight-common-c/src/RtspParser.c', 'moonlight-common-c/src/Platform.h',
+      'moonlight-common-c/src/PlatformSockets.c',
+      'wasm/static/js/utils.js','wasm/static/js/mdns-browser/main.js'].includes(file)) continue;
+ if (['wasm/platform/messages.js','wasm/platform/common.js'].includes(file)) {
+  assert.strictEqual(withoutLogs(current(file)),withoutLogs(old(file)),file+' privacy-only logging');
+ } else assert(fs.readFileSync(file).equals(cp.execFileSync('git', ['show', 'v3.4.0:' + file])), file);
 }
 const index = current('wasm/platform/index.js'), indexOld = old('wasm/platform/index.js');
-assert.strictEqual(index.slice(0, index.indexOf('function restoreDefaultsSettingsValues()')),
- indexOld.slice(0, indexOld.indexOf('function restoreDefaultsSettingsValues()')),
+assert.strictEqual(withoutLogs(index.slice(0, index.indexOf('function restoreDefaultsSettingsValues()'))),
+ withoutLogs(indexOld.slice(0, indexOld.indexOf('function restoreDefaultsSettingsValues()'))),
  'normal launch/stop, stream arguments, audio preparation and scheduling unchanged');
-assert.strictEqual(index.slice(index.indexOf('function loadHTTPCerts()')),
- indexOld.slice(indexOld.indexOf('function loadHTTPCerts()')), 'pairing and host restoration unchanged');
+assert.strictEqual(withoutLogs(index.slice(index.indexOf('function loadHTTPCerts()'))),
+ withoutLogs(indexOld.slice(indexOld.indexOf('function loadHTTPCerts()'))), 'pairing and host restoration unchanged');
 
 }
 

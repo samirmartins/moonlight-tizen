@@ -243,10 +243,11 @@ static uint32_t ToMicroseconds(double milliseconds) {
 }
 
 MoonlightInstance::SourceListener::SourceListener(
-  MoonlightInstance* instance
-) : m_Instance(instance) {}
+  MoonlightInstance* instance, uint32_t generation
+) : m_Instance(instance), m_Generation(generation) {}
 
 void MoonlightInstance::SourceListener::OnSourceOpen() {
+  if (!m_Instance->IsCurrentSession(m_Generation)) return;
   ClLogMessage("EMSS::OnOpen\n");
   std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
   m_Instance->m_EmssReadyState = EmssReadyState::kOpen;
@@ -254,6 +255,7 @@ void MoonlightInstance::SourceListener::OnSourceOpen() {
 }
 
 void MoonlightInstance::SourceListener::OnSourceOpenPending() {
+  if (!m_Instance->IsCurrentSession(m_Generation)) return;
   ClLogMessage("EMSS::OnOpenPending\n");
   std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
   m_Instance->m_EmssReadyState = EmssReadyState::kOpenPending;
@@ -261,6 +263,7 @@ void MoonlightInstance::SourceListener::OnSourceOpenPending() {
 }
 
 void MoonlightInstance::SourceListener::OnSourceClosed() {
+  if (!m_Instance->IsCurrentSession(m_Generation)) return;
   ClLogMessage("EMSS::OnClosed\n");
   std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
   m_Instance->m_EmssReadyState = EmssReadyState::kClosed;
@@ -269,6 +272,7 @@ void MoonlightInstance::SourceListener::OnSourceClosed() {
 
 void MoonlightInstance::SourceListener::OnPipelineError(
   samsung::wasm::MediaPipelineError error, const char*) {
+  if (!m_Instance->IsCurrentSession(m_Generation)) return;
   if (!m_Instance->m_DecoderActive.load() || m_Instance->m_ConnectionCancelled.load()) return;
   {
     std::lock_guard<std::mutex> lock(m_Instance->m_Mutex);
@@ -287,6 +291,7 @@ void MoonlightInstance::SourceListener::OnPipelineError(
 void MoonlightInstance::SourceListener::OnPlaybackPositionChanged(
   samsung::wasm::Seconds position
 ) {
+  if (!m_Instance->IsCurrentSession(m_Generation)) return;
   auto positionUs = static_cast<int64_t>(position.count() * 1000000.0);
 
   // A pipeline that has not started yet can legitimately report zero; that is a
@@ -305,10 +310,10 @@ void MoonlightInstance::SourceListener::OnPlaybackPositionChanged(
   // never waits, and with the position in milliseconds because that is the
   // precision the drift loop works at.
   MAIN_THREAD_ASYNC_EM_ASM({
-    if (typeof publishPipelinePosition === 'function') {
+    if (Module.sessionGeneration === $1 && typeof publishPipelinePosition === 'function') {
       publishPipelinePosition($0);
     }
-  }, (int)(positionUs / 1000));
+  }, (int)(positionUs / 1000), m_Generation);
 
   if (!s_loggedPipelineClock) {
     s_loggedPipelineClock = true;
@@ -321,10 +326,11 @@ void MoonlightInstance::SourceListener::OnPlaybackPositionChanged(
 // source below carries video only.
 
 MoonlightInstance::VideoTrackListener::VideoTrackListener(
-  MoonlightInstance* instance
-) : m_Instance(instance) {}
+  MoonlightInstance* instance, uint32_t generation
+) : m_Instance(instance), m_Generation(generation) {}
 
 void MoonlightInstance::VideoTrackListener::OnTrackOpen() {
+  if (!m_Instance->IsCurrentSession(m_Generation)) return;
   ClLogMessage("VIDEO ElementaryMediaTrack::OnTrackOpen\n");
   std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
   m_Instance->m_VideoStarted = true;
@@ -333,12 +339,14 @@ void MoonlightInstance::VideoTrackListener::OnTrackOpen() {
 }
 
 void MoonlightInstance::VideoTrackListener::OnTrackClosed(samsung::wasm::ElementaryMediaTrack::CloseReason) {
+  if (!m_Instance->IsCurrentSession(m_Generation)) return;
   ClLogMessage("VIDEO ElementaryMediaTrack::OnTrackClosed\n");
   std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
   m_Instance->m_VideoStarted = false;
 }
 
 void MoonlightInstance::VideoTrackListener::OnSessionIdChanged(samsung::wasm::SessionId new_session_id) {
+  if (!m_Instance->IsCurrentSession(m_Generation)) return;
   ClLogMessage("VIDEO ElementaryMediaTrack::OnSessionIdChanged\n");
   std::unique_lock<std::mutex> lock(m_Instance->m_Mutex);
   m_Instance->m_VideoSessionId.store(new_session_id);
@@ -449,7 +457,7 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
 
       if (add_track_result) {
         g_Instance->m_VideoTrack = std::move(*add_track_result);
-        g_Instance->m_VideoTrack.SetListener(&g_Instance->m_VideoTrackListener);
+        g_Instance->m_VideoTrack.SetListener(g_Instance->m_VideoTrackListener.get());
         ClLogMessage("Using mimeType %s\n", mimetype.c_str());
         trackAdded = true;
         break;
@@ -468,7 +476,12 @@ int MoonlightInstance::StartupVidDecSetup(int videoFormat, int width, int height
   }
 
   ClLogMessage("Inb4 source open\n");
-  g_Instance->m_Source->Open([](EmssOperationResult){});
+  auto openTicket = std::make_shared<mlsession::CloseTicket>();
+  g_Instance->m_OpenTicket = openTicket;
+  auto openResult = g_Instance->m_Source->Open([openTicket](EmssOperationResult) {
+    openTicket->Complete(true);
+  });
+  if (!openResult) openTicket->Complete(true);
   if (!g_Instance->WaitFor(&g_Instance->m_EmssStateChanged, [] {
     return g_Instance->m_EmssReadyState == EmssReadyState::kOpenPending || 
            g_Instance->m_EmssReadyState == EmssReadyState::kOpen;

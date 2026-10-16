@@ -1,5 +1,6 @@
 #include "Platform.h"
 #include "Rtsp.h"
+#include <limits.h>
 
 // Check if String s begins with the given prefix
 static bool startsWith(const char* s, const char* prefix) {
@@ -79,6 +80,9 @@ int parseRtspMessage(PRTSP_MESSAGE msg, char* rtspMessage, int length) {
     char typeFlag = TOKEN_OPTION;
 
     // Put the raw message into a string we can use
+    if (rtspMessage == NULL || length <= 0 || length == INT_MAX) {
+        return RTSP_ERROR_MALFORMED;
+    }
     char* messageBuffer = malloc(length + 1);
     if (messageBuffer == NULL) {
         exitCode = RTSP_ERROR_NO_MEMORY;
@@ -168,6 +172,10 @@ int parseRtspMessage(PRTSP_MESSAGE msg, char* rtspMessage, int length) {
                 // Check if we're at the end of the message portion marked by \r\n\r\n
                 // endCheck points to the remainder of messageBuffer after the token
                 endCheck = &token[0] + strlen(token) + 1;
+                if (endCheck > messageBuffer + length) {
+                    exitCode = RTSP_ERROR_MALFORMED;
+                    goto ExitFailure;
+                }
 
                 // See if we've hit the end of the message. The first \r is missing because it's been tokenized
                 if (startsWith(endCheck, "\n") && endCheck[1] == '\0') {
@@ -294,7 +302,15 @@ void insertOption(POPTION_ITEM* optionsHead, POPTION_ITEM opt) {
     while (current != NULL) {
         // Check for duplicate option; if so, replace the option currently there
         if (!strcmp(current->option, opt->option)) {
+            // Transfer both fields and their ownership; the incoming node is consumed.
+            if (current->flags & FLAG_ALLOCATED_OPTION_FIELDS) {
+                free(current->option);
+                free(current->content);
+            }
+            current->option = opt->option;
             current->content = opt->content;
+            current->flags = opt->flags;
+            free(opt);
             return;
         }
         if (current->next == NULL) {

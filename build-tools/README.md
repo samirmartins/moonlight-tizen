@@ -27,13 +27,13 @@ The current comparisons require tags `v3.3.8`, `v3.3.10` and `v3.4.0`;
 use a full checkout. CI uses `fetch-depth: 0` and read-only permissions, without
 signing secrets. These tests do not compile the Samsung target or prove TV performance.
 
-Session lifecycle: the default core exercises ordered/repeated stops and deferred
-callbacks using production methods with recording adapters. Run
-`node wasm/session_lifecycle_test.js --strict` for the missing-close-callback and
-duplicate-stop and stale-worker safety contracts. These currently fail: teardown waits
-indefinitely without its callback; duplicate stop creates two workers, and a controlled
-ordering lets the orphaned worker affect the reopened session. Do not treat them
-as passing or fix the player implicitly during test maintenance.
+Session lifecycle: the core compiles production methods with real pthreads and a
+controllable platform adapter. It covers concurrent duplicate stops, absent/failed
+Open/Close callbacks, thread-creation failure, retained resource ownership, delayed
+completion, stale workers/listeners and reopening. The `--strict` entry point is
+retained; these safety contracts are now included in the default test.
+For a separate race check, set `ML_LIFECYCLE_SANITIZER=thread`.
+These fixtures do not emulate the full Samsung runtime or prove TV stability.
 
 Extended native HTTP/RTP, browser layout/navigation and actual WGT signature/privacy
 checks are coordinated by the maintainer's local tools, separately from public CI.
@@ -49,10 +49,10 @@ accept `ML_STARTUP_CASES`, `ML_RUMBLE_FRAMES`, `ML_AUDIO_SECONDS`,
 `protocol-fuzz.cpp` is an optional ASan/UBSan driver for the real RTSP/SPS parsers,
 not linked into the application. The maintainer's local coordinator builds it,
 supplies bounded synthetic seeds, preserves failing inputs and runs TSan separately.
-Malformed-input stress currently exposes a duplicate-RTSP-header leak and an
-invalid shift in the bundled H.264 bitstream writer; neither is a TV-playback
-regression established by these tests. Do not suppress these failures or change
-production behavior implicitly during test maintenance.
+The reproduced duplicate-RTSP-header leak, truncated-header out-of-bounds read
+and H.264 Exp-Golomb/array-bound failures are covered by defensive repairs and
+regression tests. Valid SPS decoding preserves pixels, profile, level and references.
+Fuzz success is bounded input evidence, not proof against every malformed stream.
 
 ## Local compilation and packaging
 

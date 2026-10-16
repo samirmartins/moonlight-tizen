@@ -7,7 +7,8 @@
 namespace mlh264 {
 inline unsigned int FixupSps(const uint8_t* nalu, unsigned int naluLen,
                              uint8_t* out, unsigned int outCapacity) {
-  if (naluLen < 5 || outCapacity < naluLen + 32) {
+  if (nalu == nullptr || out == nullptr || naluLen < 5 ||
+      outCapacity < 32 || naluLen > outCapacity - 32) {
     return 0;
   }
 
@@ -22,6 +23,9 @@ inline unsigned int FixupSps(const uint8_t* nalu, unsigned int naluLen,
   } else {
     return 0;
   }
+
+  // Only SPS syntax is accepted here; do not feed arbitrary NALs to the parser.
+  if ((nalu[startLen] & 0x9f) != 7) return 0;
 
   h264_stream_t* h = h264_new();
   if (h == nullptr) {

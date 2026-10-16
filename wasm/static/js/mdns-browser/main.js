@@ -36,13 +36,11 @@ function findNvService(ipString, scan) {
 
     var isIpv4 = /^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(existingAddress);
     if (!isIpv4 && existingHost.online) {
-      console.log('%c[main.js, findNvService]', 'color: gray;',
-        'Keeping online non-IPv4 address:', existingAddress);
+      console.log('%c[main.js, findNvService]', 'color: gray;', 'Operation recorded; private details omitted.');
       return;
     }
 
-    console.log('%c[main.js, findNvService]', 'color: gray;',
-      'Updating host address from', existingAddress, 'to', returnedDiscoveredHost.address);
+    console.log('%c[main.js, findNvService]', 'color: gray;', 'Operation recorded; private details omitted.');
     existingHost.address = returnedDiscoveredHost.address;
     if (typeof existingHost.updateExternalAddressIP4 === 'function') {
       existingHost.updateExternalAddressIP4();
@@ -109,7 +107,7 @@ function startSubnetScanner() {
         fetch('http://' + ip + ':47989/serverinfo', controller ? { signal: controller.signal } : {})
           .then(function(response) {
             if (!scan.stopped && response.ok) {
-              console.log('%c[main.js, startSubnetScanner]', 'color: green;', 'Found host:', ip);
+              console.log('%c[main.js, startSubnetScanner]', 'color: gray;', 'Operation recorded; private details omitted.');
               findNvService('ipv4:' + ip, scan);
             }
           })
@@ -122,7 +120,6 @@ function startSubnetScanner() {
     }
   } catch (error) {
     stopSubnetScanner();
-    console.error('%c[main.js, startSubnetScanner]', 'color: red;',
-      'Subnet scanner failed:', error);
+    console.error('%c[main.js, startSubnetScanner]', 'color: gray;', 'Operation failed; private details omitted.');
   }
 }

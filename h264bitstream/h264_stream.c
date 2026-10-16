@@ -217,6 +217,12 @@ int read_nal_unit(h264_stream_t* h, uint8_t* buf, int size)
         case NAL_UNIT_TYPE_SPS: 
             read_seq_parameter_set_rbsp(h->sps, b);
             read_rbsp_trailing_bits(b);
+            if (bs_overrun(b) || h->sps->seq_parameter_set_id < 0 ||
+                h->sps->seq_parameter_set_id >= 32) {
+                bs_free(b);
+                free(rbsp_buf);
+                return -1;
+            }
             
             if( 1 )
             {
@@ -375,6 +381,7 @@ void read_seq_parameter_set_rbsp(sps_t* sps, bs_t* b)
     /* reserved_zero_2bits */ bs_skip_u(b, 2);
     sps->level_idc = bs_read_u8(b);
     sps->seq_parameter_set_id = bs_read_ue(b);
+    if (b->error || sps->seq_parameter_set_id > 31) { b->error = 1; return; }
 
     if( sps->profile_idc == 100 || sps->profile_idc == 110 ||
         sps->profile_idc == 122 || sps->profile_idc == 244 ||
@@ -385,12 +392,14 @@ void read_seq_parameter_set_rbsp(sps_t* sps, bs_t* b)
        )
     {
         sps->chroma_format_idc = bs_read_ue(b);
+    if (b->error || sps->chroma_format_idc > 3) { b->error = 1; return; }
         if( sps->chroma_format_idc == 3 )
         {
             sps->residual_colour_transform_flag = bs_read_u1(b);
         }
         sps->bit_depth_luma_minus8 = bs_read_ue(b);
         sps->bit_depth_chroma_minus8 = bs_read_ue(b);
+    if (b->error || sps->bit_depth_luma_minus8 > 6 || sps->bit_depth_chroma_minus8 > 6) { b->error = 1; return; }
         sps->qpprime_y_zero_transform_bypass_flag = bs_read_u1(b);
         sps->seq_scaling_matrix_present_flag = bs_read_u1(b);
         if( sps->seq_scaling_matrix_present_flag )
@@ -416,9 +425,11 @@ void read_seq_parameter_set_rbsp(sps_t* sps, bs_t* b)
     }
     sps->log2_max_frame_num_minus4 = bs_read_ue(b);
     sps->pic_order_cnt_type = bs_read_ue(b);
+    if (b->error || sps->log2_max_frame_num_minus4 > 12 || sps->pic_order_cnt_type > 2) { b->error = 1; return; }
     if( sps->pic_order_cnt_type == 0 )
     {
         sps->log2_max_pic_order_cnt_lsb_minus4 = bs_read_ue(b);
+    if (b->error || sps->log2_max_pic_order_cnt_lsb_minus4 > 12) { b->error = 1; return; }
     }
     else if( sps->pic_order_cnt_type == 1 )
     {
@@ -426,12 +437,14 @@ void read_seq_parameter_set_rbsp(sps_t* sps, bs_t* b)
         sps->offset_for_non_ref_pic = bs_read_se(b);
         sps->offset_for_top_to_bottom_field = bs_read_se(b);
         sps->num_ref_frames_in_pic_order_cnt_cycle = bs_read_ue(b);
+    if (b->error || sps->num_ref_frames_in_pic_order_cnt_cycle > 255) { b->error = 1; return; }
         for( i = 0; i < sps->num_ref_frames_in_pic_order_cnt_cycle; i++ )
         {
             sps->offset_for_ref_frame[ i ] = bs_read_se(b);
         }
     }
     sps->num_ref_frames = bs_read_ue(b);
+    if (b->error || sps->num_ref_frames > 16) { b->error = 1; return; }
     sps->gaps_in_frame_num_value_allowed_flag = bs_read_u1(b);
     sps->pic_width_in_mbs_minus1 = bs_read_ue(b);
     sps->pic_height_in_map_units_minus1 = bs_read_ue(b);
@@ -475,6 +488,7 @@ void read_scaling_list(bs_t* b, int* scalingList, int sizeOfScalingList, int* us
             }
 
             delta_scale = bs_read_se(b);
+    if (b->error || delta_scale < -128 || delta_scale > 127) { b->error = 1; return; }
 
             if( 1 )
             {
@@ -671,6 +685,7 @@ void read_vui_parameters(sps_t* sps, bs_t* b)
 void read_hrd_parameters(hrd_t* hrd, bs_t* b)
 {
     hrd->cpb_cnt_minus1 = bs_read_ue(b);
+    if (b->error || hrd->cpb_cnt_minus1 > 31) { b->error = 1; return; }
     hrd->bit_rate_scale = bs_read_u(b, 4);
     hrd->cpb_size_scale = bs_read_u(b, 4);
     for( int SchedSelIdx = 0; SchedSelIdx <= hrd->cpb_cnt_minus1; SchedSelIdx++ )

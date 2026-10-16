@@ -26,7 +26,7 @@ struct Source {
  std::optional<samsung::wasm::ElementaryVideoTrack> AddTrack(samsung::wasm::ElementaryVideoTrackConfig c) {
   attempts.push_back(c);if(rejects-->0)return {};return samsung::wasm::ElementaryVideoTrack{};
  }
- void Open(std::function<void(EmssOperationResult)> cb){cb(EmssOperationResult::kSuccess);}
+ bool Open(std::function<void(EmssOperationResult)> cb){cb(EmssOperationResult::kSuccess);return true;}
 };
 struct Element {void SetSrc(Source*){};void Play(std::function<void(EmssOperationResult)> cb){cb(EmssOperationResult::kSuccess);}};
 class MoonlightInstance {
@@ -35,7 +35,8 @@ public:
  Element m_MediaElement;std::atomic<bool> m_ConnectionCancelled{false},m_VideoStarted{true};
  EmssReadyState m_EmssReadyState=EmssReadyState::kClosed;
  std::condition_variable m_EmssStateChanged,m_EmssVideoStateChanged;
- samsung::wasm::ElementaryVideoTrack m_VideoTrack;int m_VideoTrackListener=0;bool waitResult=true;
+ std::shared_ptr<mlsession::CloseTicket> m_OpenTicket;
+ samsung::wasm::ElementaryVideoTrack m_VideoTrack;std::unique_ptr<int> m_VideoTrackListener;bool waitResult=true;
  bool WaitFor(std::condition_variable*,std::function<bool()>){return waitResult;}
  int StartupVidDecSetup(int,int,int,int,void*,int);
 };
@@ -72,8 +73,8 @@ int main(){
 const tmp=fs.mkdtempSync(path.join(require('os').tmpdir(),'moonlight-codec-test-'));
 try {
  const file=path.join(tmp,'test.cpp'),bin=path.join(tmp,'test');
- fs.writeFileSync(file,'#include <memory>\n'+fixture+source.slice(begin,end)+tests);
- cp.execFileSync('g++',['-std=c++17','-O1','-g','-pthread','-fsanitize=address,undefined','-fno-omit-frame-pointer','-Imoonlight-common-c/src',file,'-o',bin],{stdio:'inherit'});
+ fs.writeFileSync(file,'#include <memory>\n#include "session_lifecycle.hpp"\n'+fixture+source.slice(begin,end)+tests);
+ cp.execFileSync('g++',['-std=c++17','-O1','-g','-pthread','-fsanitize=address,undefined','-fno-omit-frame-pointer','-Iwasm','-Imoonlight-common-c/src',file,'-o',bin],{stdio:'inherit'});
  cp.execFileSync(bin,[],{stdio:'inherit',timeout:5000});
 }finally{fs.rmSync(tmp,{recursive:true,force:true});}
 console.log('codec_configuration_test: real H264/HEVC/AV1 setup matrix, HDR profiles, dimensions/FPS, fallback, rejection and cancellation OK');
