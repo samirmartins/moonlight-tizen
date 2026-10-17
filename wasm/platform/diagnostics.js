@@ -135,6 +135,7 @@ var SessionDiagnostics = (function() {
         ' · HDR ' + (document.getElementById('hdrModeSwitch').checked ? 'on' : 'off') +
         ' · GM ' + (document.getElementById('gameModeSwitch').checked ? 'on' : 'off')
     };
+    if (typeof setAudioTelemetryEnabled === 'function') setAudioTelemetryEnabled('diagnostics', true);
     Module.setDiagnostics(s.gen);
     readVariant(s);
   }
@@ -296,6 +297,7 @@ var SessionDiagnostics = (function() {
       var dropped = quality(s.video);
       if (dropped !== null && s.dropLast !== null && dropped >= s.dropLast) s.dropDelta += dropped - s.dropLast;
     }
+    if (typeof setAudioTelemetryEnabled === 'function') setAudioTelemetryEnabled('diagnostics', false);
     session = null; // Invalidate callbacks before cancelling or saving.
     Module.setDiagnostics(0);
     clearTimeout(s.timer);

@@ -143,10 +143,10 @@ function fixture(count = 4, coverUrl) {
     const baseline=cp.execFileSync('git',['show','v3.4.3:'+name],{encoding:'utf8'});
     assert.strictEqual(scope(name,fs.readFileSync(name,'utf8')),scope(name,baseline),name+' cover-only changes');
   }
-  assert.strictEqual(cp.execFileSync('git',['diff','v3.4.3','--','wasm/*.cpp','wasm/*.hpp',
+  require('./audio-telemetry-scope.cjs').assertFrozen('v3.4.3', ['wasm/*.cpp','wasm/*.hpp',
     'wasm/platform/audio.js','wasm/platform/audio-worklet.js','wasm/platform/gamepad.js',
     'wasm/platform/display.js','wasm/platform/diagnostics.js','wasm/platform/index.js',
     'wasm/platform/messages.js','wasm/platform/navigation.js','wasm/index.html','wasm/static/css',
-    'moonlight-common-c','CMakeLists.txt','res/config.xml'],{encoding:'utf8'}),'','gameplay and layout source remain unchanged');
+    'moonlight-common-c','CMakeLists.txt','res/config.xml']);
   console.log('library_cover_cache_test: warm return, node reuse, forced Refresh, filters, offline, host/app invalidation, bounded LRU, oversized art, cancellation and unchanged gameplay scope OK');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -52,6 +52,11 @@ and the original function identity when OFF. The editor/test loop is menu-only;
 sticks, rumble and native streaming algorithms are unchanged. Historical source
 guards allow only the explicit integration points, not arbitrary input changes.
 
+Optional audio telemetry: `audio_telemetry_test.js` compares Worklet/fallback
+Float32 output and drift control with v3.4.3 across rates/channels and ON/OFF
+transitions. OFF skips depth extrema; functional adaptation remains active.
+Source contracts allow only collection gates, not audio/video retuning.
+
 For documentation-only changes, check content, links and templates; a TV test
 or WGT rebuild is not required. For runtime changes, select the full suite and
 focused native/browser checks appropriate to the affected behavior.

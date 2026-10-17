@@ -38,12 +38,18 @@ class MoonlightPcmProcessor extends AudioWorkletProcessor {
     this.started = false;
     this.stableOutputFrames = 0;
     this.statsCountdown = 0;
+    this.noteDepth = this.ignoreDepth;
 
     this.port.onmessage = (event) => {
       var data = event.data || {};
       if (data.type === 'stop') {
         this.ready = false;
         this.started = false;
+        return;
+      }
+      // Collection changes arrive only on explicit consumer transitions.
+      if (data.type === 'telemetry') {
+        if (this.ready && data.generation === this.generation) this.setTelemetry(data.enabled);
         return;
       }
       if (data.type !== 'init' || !data.memory) {
@@ -64,6 +70,7 @@ class MoonlightPcmProcessor extends AudioWorkletProcessor {
         this.phase = 0.0;
         this.started = false;
         this.stableOutputFrames = 0;
+        this.setTelemetry(data.telemetry);
         this.ready = true;
       } catch (e) {
         this.ready = false;
@@ -71,6 +78,13 @@ class MoonlightPcmProcessor extends AudioWorkletProcessor {
       }
     };
   }
+
+  // Optional depth collection changes no PCM/servo/adaptation code.
+  ignoreDepth() {}
+  setTelemetry(enabled) {
+    this.noteDepth = enabled === true ? MoonlightPcmProcessor.prototype.noteDepth : this.ignoreDepth;
+  }
+  // End optional depth collection switch.
 
   clear(outputs, from) {
     for (var channel = 0; channel < outputs.length; channel++) {

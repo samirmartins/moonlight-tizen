@@ -81,11 +81,11 @@ assert.strictEqual(section(current, '  int framesElapsed =', '// Folds the inter
                    section(baseline, '  int framesElapsed =', '// Folds the interval since the previous append'),
                    'normal PTS rate window and servo correction must match 3.3.8');
 assert.match(current, /\.capabilities = CAPABILITY_DIRECT_SUBMIT \| CAPABILITY_SLICES_PER_FRAME\(1\)/);
-assert.strictEqual(cp.execFileSync('git', ['diff', 'v3.3.8', '--',
+require('./audio-telemetry-scope.cjs').assertFrozen('v3.3.8', [
   'wasm/auddec.cpp', 'wasm/audio_ring.hpp',
   'moonlight-common-c/src/VideoDepacketizer.c', 'moonlight-common-c/src/VideoStream.c',
   'wasm/platform/audio.js', 'wasm/platform/audio-worklet.js',
-  'wasm/platform/display.js'], {encoding: 'utf8'}), '');
+  'wasm/platform/display.js']);
 // JS rumble changes in 3.3.10 are covered by rumble_safety_test; input sampling
 // is separately protected by the approved input scope contract.
 
@@ -117,7 +117,7 @@ const frozen=['wasm/auddec.cpp','wasm/audio_ring.hpp','wasm/platform/audio.js','
   ':(exclude)moonlight-common-c/src/PlatformSockets.c',
   ':(exclude)moonlight-common-c/src/Platform.h',
   'wasm/platform/diagnostics.js','wasm/platform/display.js'];
-assert.strictEqual(cp.execFileSync('git',['diff','v3.3.10','--',...frozen],{encoding:'utf8'}),'');
+require('./audio-telemetry-scope.cjs').assertFrozen('v3.3.10', frozen);
 
 }
 
@@ -221,7 +221,7 @@ for (const file of files) {
   assert.strictEqual(withoutLogs(current(file)),withoutLogs(old(file)),file+' privacy-only logging');
  } else if (file === 'wasm/gamepad.cpp') {
   assert.strictEqual(withoutInputWake(current(file)), withoutInputWake(old(file)), file+' wake-only change');
- } else assert.strictEqual(require('./controller-mapping-scope.cjs').normalize(file,current(file)), old(file), file);
+ } else assert.strictEqual(require('./audio-telemetry-scope.cjs').normalize(file,require('./controller-mapping-scope.cjs').normalize(file,current(file))), require('./audio-telemetry-scope.cjs').normalize(file,old(file)), file);
 }
 const index = current('wasm/platform/index.js'), indexOld = old('wasm/platform/index.js');
 assert.strictEqual(withoutLogs(index.slice(0, index.indexOf('function restoreDefaultsSettingsValues()'))),

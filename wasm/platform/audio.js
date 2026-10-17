@@ -69,6 +69,30 @@ var _audLastUnderruns = 0;
 
 var _audStats = null;
 
+// Optional audio collection is switched by consumer lifecycle events only.
+// OFF keeps the existing depth call as a no-op: no per-quantum flag polling,
+// countdown updates, minimum/maximum atomics, messages or timers.
+var _audTelemetryMask = 0;
+var _audNoteFallbackDepth = _audIgnoreDepth;
+function _audIgnoreDepth() {}
+function setAudioTelemetryEnabled(consumer, enabled) {
+  var bit = consumer === 'overlay' ? 1 : consumer === 'diagnostics' ? 2 : 0;
+  if (!bit) return;
+  var wasEnabled = _audTelemetryMask !== 0;
+  _audTelemetryMask = enabled ? (_audTelemetryMask | bit) : (_audTelemetryMask & ~bit);
+  var collect = _audTelemetryMask !== 0;
+  if (collect === wasEnabled) return;
+  _audNoteFallbackDepth = collect ? _audCollectFallbackDepth : _audIgnoreDepth;
+  if (_audWorkletNode) {
+    try {
+      _audWorkletNode.port.postMessage({
+        type: 'telemetry', generation: _audGeneration, enabled: collect
+      });
+    } catch (e) { /* Optional stats must never interrupt sound. */ }
+  }
+}
+// End optional audio collection switch.
+
 function _audNowMs() {
   return (typeof performance !== 'undefined' && performance.now)
     ? performance.now() : Date.now();
@@ -261,7 +285,8 @@ function _audActivateWorklet(ctx, token) {
       capacityFrames: _audCapacityFrames,
       channels: _audChannels,
       sourceRate: _audSourceRate,
-      generation: _audGeneration
+      generation: _audGeneration,
+      telemetry: _audTelemetryMask !== 0
     });
     node.connect(ctx.destination);
     _audWorkletNode = node;
@@ -280,7 +305,7 @@ function _audClearOutput(outputBuffer, from) {
   }
 }
 
-function _audNoteFallbackDepth(depth) {
+function _audCollectFallbackDepth(depth) {
   if (--_audFallbackStatsCountdown > 0) {
     return;
   }
@@ -518,7 +543,6 @@ function publishPipelinePosition(positionMs) {
     return;
   }
 
-  _audRefreshStats();
   var underruns = Atomics.load(_audControl, _AUD_CTL_UNDERRUNS) >>> 0;
   if (underruns !== _audLastUnderruns) {
     _audLastUnderruns = underruns;
@@ -566,7 +590,6 @@ function publishPipelinePosition(positionMs) {
   var ppm = Math.round(_audClamp(
     correction, -_AUD_DRIFT_MAX_PPM, _AUD_DRIFT_MAX_PPM));
   Atomics.store(_audControl, _AUD_CTL_DRIFT_PPM, ppm);
-  _audRefreshStats();
 }
 
 // Called synchronously from the user gesture that starts a game. Loading the

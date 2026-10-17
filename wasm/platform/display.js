@@ -144,6 +144,7 @@ function _recordPresentationInterval(intervalMs) {
 
 function startVideoPresentationObserver(videoElement) {
   stopVideoPresentationObserver();
+  if (typeof setAudioTelemetryEnabled === 'function') setAudioTelemetryEnabled('overlay', true);
   _resetPresentationStats();
   _presentationVideo = videoElement || null;
   _presentationSupported = !!(
@@ -201,6 +202,7 @@ function startVideoPresentationObserver(videoElement) {
 }
 
 function stopVideoPresentationObserver() {
+  if (typeof setAudioTelemetryEnabled === 'function') setAudioTelemetryEnabled('overlay', false);
   _presentationGeneration++;
   if (_presentationVideo && _presentationRequest &&
       typeof _presentationVideo.cancelVideoFrameCallback === 'function') {
