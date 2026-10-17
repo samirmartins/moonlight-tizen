@@ -39,11 +39,14 @@ function normalize(file, source) {
   return source;
 }
 function assertFrozen(reference, paths) {
-  for (const file of paths.filter(file => files.includes(file))) {
+  const scoped = files.concat('wasm/platform/gamepad.js');
+  const publication = require('./gamepad-publication-scope.cjs').normalize;
+  for (const file of paths.filter(file => scoped.includes(file))) {
     const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
-    assert.strictEqual(normalize(file, fs.readFileSync(file,'utf8')), normalize(file, old), file+' optional telemetry only');
+    assert.strictEqual(publication(file, normalize(file, fs.readFileSync(file,'utf8'))),
+      publication(file, normalize(file, old)), file+' approved telemetry/publication changes only');
   }
-  const rest = paths.filter(file => !files.includes(file));
+  const rest = paths.filter(file => !scoped.includes(file));
   if (rest.length) assert.strictEqual(cp.execFileSync('git', ['diff', reference, '--', ...rest], {encoding:'utf8'}), '', 'unrelated inputs unchanged');
 }
 module.exports = {normalize, assertFrozen, files};

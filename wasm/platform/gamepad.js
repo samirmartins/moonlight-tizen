@@ -280,8 +280,18 @@ function _gpPublishIfChanged() {
   var heap = Module.HEAP32;
   var base = _gpSnapshotPtr >> 2;
   Atomics.add(heap, base, 1);
-  for (var word = 0; word < _gpWordCount; word++) {
-    Atomics.store(heap, base + 1 + word, _gpNextWords[word]);
+  if (i === 0) {
+    // Initial publication and stop still overwrite the complete payload.
+    for (var word = 0; word < _gpWordCount; word++) {
+      Atomics.store(heap, base + 1 + word, _gpNextWords[word]);
+    }
+  } else {
+    // The odd sequence protects changed fields exactly as a full publication.
+    for (var word = i; word < _gpWordCount; word++) {
+      if (_gpNextWords[word] !== _gpLastWords[word]) {
+        Atomics.store(heap, base + 1 + word, _gpNextWords[word]);
+      }
+    }
   }
   Atomics.add(heap, base, 1);
   _gpLastWords.set(_gpNextWords);

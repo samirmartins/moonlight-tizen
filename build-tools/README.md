@@ -57,6 +57,12 @@ Float32 output and drift control with v3.4.3 across rates/channels and ON/OFF
 transitions. OFF skips depth extrema; functional adaptation remains active.
 Source contracts allow only collection gates, not audio/video retuning.
 
+Gamepad publication: `gamepad_publication_test.js` compares exact shared words
+with v3.4.3, counts atomic stores and checks sequence wrap, hotplug, stop/restart
+and a contending reader worker. Only changed payload words are stored; initial
+publication and stop still overwrite the full payload. Sampling, mapping,
+notification and native seqlock behavior stay unchanged. This is not TV timing.
+
 For documentation-only changes, check content, links and templates; a TV test
 or WGT rebuild is not required. For runtime changes, select the full suite and
 focused native/browser checks appropriate to the affected behavior.
