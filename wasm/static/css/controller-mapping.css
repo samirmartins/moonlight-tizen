@@ -27,3 +27,9 @@
 #controllerMappingDialog #cm-status { min-height:2.6em; color:#80eee6; }
 #controllerMappingDialog footer { border-top:1px solid #3a526b; margin-top:12px; padding-top:12px; }
 @media(max-width:800px) { .cm-body { grid-template-columns:1fr; } .cm-visual { max-width:500px; margin:auto; } #controllerMappingDialog header { align-items:flex-start; } #controllerMappingDialog header button { max-width:36%; } }
+/* Controller test visuals only; the original CC0 atlas remains unchanged. */
+.cm-sprite, .cm-guide { position:absolute; pointer-events:none; visibility:hidden; }
+.cm-sprite { background-image:url('../res/controller-dualsense.png'); background-repeat:no-repeat; }
+.cm-guide { left:47.2%; top:64.5%; width:6.4%; height:7%; border:2px solid #00eef0; border-radius:6px; color:#00eef0; font-size:.65em; text-align:center; }
+.cm-sprite.cm-active, .cm-guide.cm-active { visibility:visible; }
+#controllerMappingDialog #cm-exit-hint { position:sticky; top:0; z-index:2; border:2px solid #54f0ec; border-radius:7px; padding:.6em .8em; background:#163c50; color:#fff; font-weight:bold; text-align:center; }

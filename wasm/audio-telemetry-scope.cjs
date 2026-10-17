@@ -52,6 +52,12 @@ function assertFrozen(reference, paths) {
     // independently tested overlay aggregation move, never a whole-file mask.
     const changed = cp.execFileSync('git', ['diff', '--name-only', reference, '--', ...rest], {encoding:'utf8'}).trim().split('\n').filter(Boolean);
     for (const file of changed) {
+      if (file === 'wasm/static/css/controller-mapping.css') {
+        const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
+        const visual = require('./controller-test-scope.cjs').normalize;
+        assert.strictEqual(visual(file, fs.readFileSync(file,'utf8')), visual(file, old), 'controller test styles only');
+        continue;
+      }
       // Permit only the approved packaging version bump; IDs, build options
       // and every other byte remain part of the frozen contract.
       if (file === 'CMakeLists.txt' || file === 'res/config.xml') {
