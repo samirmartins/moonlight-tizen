@@ -1,8 +1,9 @@
 'use strict';
-// Only the approved menu cover cache/rendering may differ from the baseline.
+// Normalize the separately tested selection path before cover-only exceptions.
 // The independent cover tests exercise the excluded implementation directly.
 const assert = require('assert');
 function normalize(file, source) {
+  source = require('./library-selection-scope.cjs').normalize(file, source);
   if (file === 'wasm/static/js/utils.js') return source.replace(
     "        if (typeof ConsoleLibrary !== 'undefined') ConsoleLibrary.invalidateCovers(this);\n", '');
   if (file !== 'wasm/platform/console-library.js') return source;

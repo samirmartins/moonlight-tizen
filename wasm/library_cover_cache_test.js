@@ -2,17 +2,23 @@
 // Exercise the production menu with DOM ownership and cancellable requests.
 const assert = require('assert'), fs = require('fs'), vm = require('vm'), cp = require('child_process');
 const file = 'wasm/platform/console-library.js', source = fs.readFileSync(file, 'utf8');
-function fixture(count = 4, coverUrl) {
+function fixture(count = 4, coverUrl, options = {}) {
   const all = [], nodes = new Map(), timers = new Map(), calls = [], io = {deletes:0};
   let timerId = 0, serial = 0;
+  const mutations = {classes:0,tabs:0};
   class Element {
     constructor(tag, root = false) {
       this.tag = tag; this.root = root; this.children = []; this.dataset = {}; this.style = {};
       this.id = ''; this.className = ''; this._text = ''; this.disabled = false;
-      this.classList = {add(){},remove(){},toggle(){}};
+      const classes = new Set();
+      this.classList = {add(value){classes.add(value);},remove(value){classes.delete(value);},
+        contains(value){return classes.has(value);},toggle(value,on){mutations.classes++;if(on)classes.add(value);else classes.delete(value);}};
       all.push(this);
     }
     get isConnected() { return this.root || !!(this.parent && this.parent.isConnected); }
+    get parentNode() { return this.parent || null; }
+    get tabIndex() { return this._tabIndex === undefined ? 0 : this._tabIndex; }
+    set tabIndex(value) { mutations.tabs++;this._tabIndex=value; }
     get textContent() { return this._text; }
     set textContent(value) { this.children.forEach(n => n.parent = null); this.children = []; this._text = value; }
     appendChild(node) {
@@ -37,7 +43,8 @@ function fixture(count = 4, coverUrl) {
   }
   const apps = Array.from({length:count}, (_, i) => ({id:i+1,title:'Game '+String(i+1).padStart(3,'0')}));
   const record = {apps, favorites:[], recent:[], focus:1};
-  let stored = JSON.stringify({preferred:'fixture-pc',hosts:{'fixture-pc':record}});
+  const storage = options.storage || new Map([['moonlight.console.v1', JSON.stringify({preferred:'fixture-pc',hosts:{'fixture-pc':record}})]]);
+  const writes=[];
   const host = {serverUid:'fixture-pc',hostname:'Fixture PC',online:true,paired:true,currentGame:0,_memCachedApplist:apps,
     connect(){return this.online ? Promise.resolve('fixture.invalid') : Promise.reject(Error('offline'));},
     getAppListWithCacheFlush(){return Promise.resolve(apps);},
@@ -50,7 +57,7 @@ function fixture(count = 4, coverUrl) {
     hosts:{'fixture-pc':host},Views:{Apps:{},AppsNav:{}},
     document:{hidden:false,getElementById(id){return nodes.get(id) || all.find(n=>n.id===id && n.isConnected) || node(id);},
       createElement(tag){return new Element(tag);},createDocumentFragment(){return new Element('fragment');},body:node('body')},
-    localStorage:{getItem(){return stored;},setItem(k,v){stored=v;}},
+    localStorage:{getItem(k){return storage.has(k)?storage.get(k):null;},removeItem(k){storage.delete(k);},setItem(k,v){writes.push({key:k,value:String(v)});if(options.fail&&options.fail(k))throw Error('Synthetic storage failure');storage.set(k,String(v));}},
     setTimeout(fn,ms){timers.set(++timerId,{fn,ms});return timerId;},clearTimeout(id){timers.delete(id);},
     $(){return {children(){return this;},show(){},hide(){}};},
     Navigation:{change(){},start(){},pop(){}},focusElement(){},getComputedStyle(){return {gridTemplateColumns:'1fr 1fr'};},
@@ -61,11 +68,11 @@ function fixture(count = 4, coverUrl) {
   c.window = c; vm.createContext(c);
   vm.runInContext(fs.readFileSync('wasm/platform/menu-tools.js','utf8').split('function openUtilityDialog')[0], c);
   vm.runInContext(fs.readFileSync('wasm/static/js/utils.js','utf8'), c);
-  vm.runInContext(source, c);
+  vm.runInContext(options.source || source, c);
   const flush = async()=>{for(let i=0;i<300;i++)await Promise.resolve();};
   async function open() { c.isInGame=false; await c.ConsoleLibrary.open(host); await flush(); }
   function suspend() { c.isInGame=true;c.ConsoleLibrary.suspend(); }
-  return {c,node,apps,host,calls,timers,io,flush,open,suspend,
+  return {c,node,apps,host,calls,timers,io,flush,open,suspend,storage,writes,mutations,
     card(id){return c.document.getElementById('game-container-'+id);},revision(){serial++;}};
 }
 (async()=>{

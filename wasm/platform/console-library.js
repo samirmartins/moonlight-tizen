@@ -13,6 +13,25 @@ var ConsoleLibrary = (function() {
     if (saved && typeof saved.preferred === 'string' && saved.hosts && typeof saved.hosts === 'object') prefs = saved;
   } catch (e) {} // A missing/corrupt/full store must never prevent playing.
 
+  // Compact focus persistence: merge before opening any PC, not just its owner.
+  // A single bounded record avoids serializing every cached app on each move.
+  var selectedCard = null;
+  try {
+    var savedFocus = JSON.parse(localStorage.getItem(key + '.focus'));
+    if (Array.isArray(savedFocus) && savedFocus.length === 2 &&
+        typeof savedFocus[0] === 'string' && id(savedFocus[1]) &&
+        savedFocus[0] !== '__proto__' && savedFocus[0] !== 'constructor' && savedFocus[0] !== 'prototype' &&
+        Object.prototype.hasOwnProperty.call(prefs.hosts, savedFocus[0]) &&
+        prefs.hosts[savedFocus[0]] && typeof prefs.hosts[savedFocus[0]] === 'object') {
+      prefs.hosts[savedFocus[0]].focus = id(savedFocus[1]);
+    }
+  } catch (e) {} // Keep the legacy focus when compact storage is unavailable.
+  function saveFocus() {
+    try { localStorage.setItem(key + '.focus', JSON.stringify([String(host.serverUid), record().focus])); }
+    catch (e) { save(); } // Keep the last good focus if every write fails.
+  }
+  // End compact focus persistence.
+
   function el(id) { return document.getElementById(id); }
   function id(value) { var n = Number(value); return Number.isInteger(n) && n > 0 && n <= 0xffffffff ? n : 0; }
   function cleanApps(list) {
@@ -81,7 +100,13 @@ var ConsoleLibrary = (function() {
     currentRecord = r;
     return r;
   }
-  function save() { try { localStorage.setItem(key, JSON.stringify(prefs)); } catch (e) {} }
+  function save() {
+    try {
+      localStorage.setItem(key, JSON.stringify(prefs));
+      // Only retire the compact override after every host's focus is saved.
+      localStorage.removeItem(key + '.focus');
+    } catch (e) {}
+  }
   function valid(token) { return active && !isInGame && !document.hidden && token === epoch && host && hosts[host.serverUid] === host; }
   function status(text) { el('libraryStatus').textContent = text; }
   function cancel() {
@@ -108,6 +133,7 @@ var ConsoleLibrary = (function() {
     preparedAudio = false;
     hide();
     el('game-grid').textContent = '';
+    selectedCard = null;
   }
   function pause() {
     cancel();
@@ -150,15 +176,18 @@ var ConsoleLibrary = (function() {
     el('libraryRefresh').disabled = busy || launchPending;
     el('libraryCancel').hidden = !busy;
     el('quitRunningAppBtn').style.display = host.online && Number(host.currentGame) > 0 ? '' : 'none';
-    Array.from(el('game-grid').children).forEach(function(card) {
-      var chosen = Number(card.dataset.appId) === selected;
-      card.classList.toggle('hovered', chosen);
-      card.tabIndex = chosen ? 0 : -1;
-    });
+    var card = el('game-container-' + selected);
+    if (card && card.parentNode !== el('game-grid')) card = null;
+    if (selectedCard !== card) {
+      if (selectedCard) { selectedCard.classList.toggle('hovered', false); selectedCard.tabIndex = -1; }
+      selectedCard = card;
+    }
+    if (card && !card.classList.contains('hovered')) card.classList.toggle('hovered', true);
+    if (card && card.tabIndex !== 0) card.tabIndex = 0;
   }
   function select(appId) {
     if (!active || isInGame || !id(appId) || id(appId) === selected) return;
-    selected = id(appId); record().focus = selected; save(); updateSelection();
+    selected = id(appId); record().focus = selected; saveFocus(); updateSelection();
   }
   function list() {
     var r = record(), descending = el('sortAppsListSwitch').checked;
@@ -188,6 +217,7 @@ var ConsoleLibrary = (function() {
       if (!card) {
         card = document.createElement('button');
         card.type = 'button'; card.id = 'game-container-' + app.id;
+        card.tabIndex = -1;
         card.className = 'game-container console-card'; card.dataset.appId = app.id;
         image = document.createElement('img'); image.alt = '';
         label = document.createElement('span'); label.className = 'console-card-title';
@@ -305,7 +335,8 @@ var ConsoleLibrary = (function() {
   }
   function launch(appId, audioReady) {
     var chosenHost = host;
-    var r = record(); r.focus = appId;
+    var r = record();
+    if (r.focus !== appId) { r.focus = appId; saveFocus(); }
     r.recent = [appId].concat(r.recent.filter(function(old) { return old !== appId; })).slice(0,20);
     save(); preparedAudio = false; cancel(); updateSelection();
     launchPending = true;

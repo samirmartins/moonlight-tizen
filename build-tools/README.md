@@ -69,6 +69,12 @@ It compares messages/history with v3.4.3 across codecs, rates and independent
 consumer transitions. Diagnostic-only collection skips display aggregation;
 window cadence, diagnostic payloads and overlay reactivation remain unchanged.
 
+Library selection: `library_selection_test.js` compares the complete selected-card
+state with the prior implementation and counts writes/mutations. It covers
+immediate focus persistence, restart, legacy/corrupt storage, quota failures,
+multiple PCs, filters, launch and suspension. Compact focus is merged before
+opening a PC and retired only after a successful full-preferences write.
+
 For documentation-only changes, check content, links and templates; a TV test
 or WGT rebuild is not required. For runtime changes, select the full suite and
 focused native/browser checks appropriate to the affected behavior.

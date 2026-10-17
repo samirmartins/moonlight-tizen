@@ -12,13 +12,14 @@ function fixture(options={}) {
  const apps=[{id:1,title:'Playnite'},{id:2,title:'Example Game'}];
  const record={apps,favorites:[],recent:[],focus:2,...options.record};
  let stored=JSON.stringify({preferred:'fixture-pc',hosts:{'fixture-pc':record}});
+ const storage=new Map([['moonlight.console.v1',stored]]);
  const host={serverUid:'fixture-pc',hostname:'Fixture PC',online:options.online!==false,paired:options.paired!==false,currentGame:options.current||0,macAddress:options.noMac?'':'12:34:56:78:9A:BC',_memCachedApplist:apps,
   connect(){calls.connect++; if(options.delayed)return new Promise(r=>host.resolve=r);return host.online?Promise.resolve('fixture.invalid'):Promise.reject(Error('offline'));},
   getAppListWithCacheFlush(){calls.list++;return Promise.resolve(options.missing?[apps[1]]:apps);},
   getBoxArt(){return Promise.resolve('fixture');},
   sendWOL(){calls.wake++;if(options.wakeDelayed)return new Promise(r=>host.resolveWake=r);if(options.wakeFailure)return Promise.reject(Error('send failed'));if(!options.stayOffline)host.online=true;return Promise.resolve();}};
  const c={console:{log(){},warn(){},error(){}},Promise,hosts:{'fixture-pc':host},isInGame:false,isDialogOpen:false,Views:{Apps:{},AppsNav:{}},
-  localStorage:{getItem(){return stored;},setItem(k,v){stored=v;}},
+  localStorage:{getItem(k){return storage.has(k)?storage.get(k):null;},removeItem(k){storage.delete(k);},setItem(k,v){storage.set(k,v);if(k==='moonlight.console.v1')stored=v;}},
   setTimeout(fn,ms){timers.set(++timerId,{fn,ms});return timerId;},clearTimeout(id){timers.delete(id);},
   document:{getElementById:node,body:node('body'),createDocumentFragment(){return node('fragment-'+nodes.size);},createElement(){return node('created-'+nodes.size);}},
   $(){return {children(){return this;},show(){},hide(){}};},
