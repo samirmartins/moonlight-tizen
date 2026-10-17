@@ -23,7 +23,7 @@ Dependencies: Node.js 22, GCC/G++, FFmpeg with libx264, OpenSSL development head
 and Git/GNU timeout. Native fixtures use ASan/UBSan.
 The runner checks completion markers, rejects unhandled rejections, bounds each
 process and cleans temporary files, including failed runs.
-The current comparisons require tags `v3.3.8`, `v3.3.10`, `v3.4.0`, `v3.4.1`, `v3.4.2` and `v3.4.3`;
+The current comparisons require tags `v3.3.8`, `v3.3.10`, `v3.4.0`, `v3.4.1`, `v3.4.2`, `v3.4.3` and `v3.4.4`;
 use a full checkout. CI uses `fetch-depth: 0` and read-only permissions, without
 signing secrets. These tests do not compile the Samsung target or prove TV performance.
 
@@ -80,7 +80,13 @@ snapshots with the prior implementation, including hotplug, layout changes,
 restart, legacy polling and synchronous/reentrant listeners. Stable layouts
 reuse snapshot arrays/buttons; unchanged polls do not create a changes array.
 Emitted payloads remain independent. The 16 ms interval and all streaming and
-rumble code remain frozen; allocation counts are not physical TV measurements.
+rumble policy remain frozen; allocation counts are not physical TV measurements.
+
+Controller test mode: `controller_test_mode_test.js` checks physical artwork
+highlights, confirm/back isolation, a continuous three-second Circle/B hold,
+release protection, hotplug and cleanup. `rumble_work_test.js` compares exact
+actuator traces with v3.4.4 and counts shared reads for zero to four controllers;
+only inactive-slot work changes. These checks do not measure TV latency or CPU.
 
 For documentation-only changes, check content, links and templates; a TV test
 or WGT rebuild is not required. For runtime changes, select the full suite and

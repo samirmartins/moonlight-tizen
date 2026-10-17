@@ -64,8 +64,9 @@ function assertFrozen(reference, paths) {
         const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
         const current = fs.readFileSync(file, 'utf8');
         const normalizeVersion = source => file === 'CMakeLists.txt'
-          ? source.replace('project(MoonlightWasm VERSION 3.4.4)', 'project(MoonlightWasm VERSION 3.4.3)')
-          : source.replace(' version="3.4.4"', ' version="3.4.3"');
+          ? source.replace('project(MoonlightWasm VERSION 3.4.5)', 'project(MoonlightWasm VERSION 3.4.3)')
+            .replace('project(MoonlightWasm VERSION 3.4.4)', 'project(MoonlightWasm VERSION 3.4.3)')
+          : source.replace(' version="3.4.5"', ' version="3.4.3"').replace(' version="3.4.4"', ' version="3.4.3"');
         assert.strictEqual(normalizeVersion(current), normalizeVersion(old), 'approved version bump only');
         continue;
       }
