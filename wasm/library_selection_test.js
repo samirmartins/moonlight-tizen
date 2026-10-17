@@ -80,9 +80,8 @@ function choose(f,id){f.card(id).onfocus();}
  full=false;await filled.open();assert(!filled.storage.has(focusKey),'later successful refresh retires a stale compact override');
  const refreshed=fixture(4,{storage:new Map(filled.storage)});await refreshed.open();assert.deepStrictEqual(selected(refreshed),[3]);
  const blocked=fixture(4,{fail:()=>true});await blocked.open();choose(blocked,2);blocked.c.ConsoleLibrary.accept();assert(blocked.c.isInGame);
- const nativeDiff=cp.execFileSync('git',['diff','97c158e','--','wasm/*.cpp','wasm/*.hpp','wasm/platform/audio.js','wasm/platform/audio-worklet.js',
+ require('./audio-telemetry-scope.cjs').assertFrozen('97c158e',['wasm/*.cpp','wasm/*.hpp','wasm/platform/audio.js','wasm/platform/audio-worklet.js',
    'wasm/platform/gamepad.js','wasm/platform/display.js','wasm/platform/diagnostics.js','wasm/platform/index.js','wasm/platform/messages.js',
-   'wasm/platform/navigation.js','wasm/index.html','wasm/static/css','moonlight-common-c','CMakeLists.txt','res/config.xml'],{encoding:'utf8'});
- assert.strictEqual(nativeDiff,'','all streaming and UI layout inputs unchanged');
+   'wasm/platform/navigation.js','wasm/index.html','wasm/static/css','moonlight-common-c','CMakeLists.txt','res/config.xml']);
  console.log('library_selection_test: 500 exact selections; classes/tabs 60000 -> 1000 each; stored chars '+fullBytes+' -> '+compactBytes+'; immediate restart, legacy/corrupt/quota, multi-PC, filters, launch, suspend and scope OK');
 })().catch(error=>{console.error(error);process.exitCode=1;});

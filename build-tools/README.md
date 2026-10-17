@@ -75,6 +75,13 @@ immediate focus persistence, restart, legacy/corrupt storage, quota failures,
 multiple PCs, filters, launch and suspension. Compact focus is merged before
 opening a PC and retired only after a successful full-preferences write.
 
+Menu controller: `controller_menu_test.js` compares events, order and private
+snapshots with the prior implementation, including hotplug, layout changes,
+restart, legacy polling and synchronous/reentrant listeners. Stable layouts
+reuse snapshot arrays/buttons; unchanged polls do not create a changes array.
+Emitted payloads remain independent. The 16 ms interval and all streaming and
+rumble code remain frozen; allocation counts are not physical TV measurements.
+
 For documentation-only changes, check content, links and templates; a TV test
 or WGT rebuild is not required. For runtime changes, select the full suite and
 focused native/browser checks appropriate to the affected behavior.

@@ -21,22 +21,34 @@ const Controller = (function() {
         this.axes = newAxes.slice();
         return;
       }
-      const changes = [];
+      let changes = null;
       for (let i = 0; i < newButtons.length; ++i) {
         if (this.buttons[i].pressed !== newButtons[i].pressed) {
+          if (!changes) changes = [];
           changes.push({ type: 'button', index: i, pressed: newButtons[i].pressed });
         }
       }
       for (let i = 0; i < newAxes.length; i++) {
         if (this.axes[i] !== newAxes[i]) {
+          if (!changes) changes = [];
           changes.push({ type: 'axis', index: i, value: newAxes[i] });
         }
       }
-      if (changes.length) {
+      if (changes) {
         window.dispatchEvent(new CustomEvent('gamepadinputchanged', { detail: { changes } }));
+        // Event delivery is synchronous: a listener may change the layout.
+        if (this.buttons.length !== newButtons.length || this.axes.length !== newAxes.length) {
+          this.buttons = newButtons.map((button) => new Button(button));
+          this.axes = newAxes.slice();
+          return;
+        }
       }
-      this.buttons = newButtons.map((button) => new Button(button));
-      this.axes = newAxes.slice();
+      // Keep private snapshots stable; browser objects and emitted events stay separate.
+      for (let i = 0; i < newButtons.length; ++i) {
+        this.buttons[i].value = newButtons[i].value;
+        this.buttons[i].pressed = newButtons[i].pressed;
+      }
+      for (let i = 0; i < newAxes.length; i++) this.axes[i] = newAxes[i];
     }
   }
 
