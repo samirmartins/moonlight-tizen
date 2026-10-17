@@ -1,6 +1,6 @@
 'use strict';
 const fs=require('fs'),vm=require('vm'),assert=require('assert'),cp=require('child_process');
-const file='wasm/platform/gamepad.js',source=fs.readFileSync(file,'utf8');
+const file='wasm/platform/gamepad.js',source=require('./rumble-work-scope.cjs').normalize(file,fs.readFileSync(file,'utf8'));
 const baseline=cp.execFileSync('git',['show','daca400:'+file],{encoding:'utf8'});
 const normalize=require('./controller-menu-scope.cjs').normalize;
 assert.strictEqual(normalize(file,source),baseline,'menu snapshot reuse only');

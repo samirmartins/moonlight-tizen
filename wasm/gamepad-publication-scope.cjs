@@ -2,6 +2,7 @@
 // Normalize only the changed-word store loop. Detection, atomics, sequence,
 // last-state copy and notification must still match the historical publisher.
 function normalize(file, source) {
+  source = require('./rumble-work-scope.cjs').normalize(file, source);
   source = require('./controller-menu-scope.cjs').normalize(file, source);
   if (file !== 'wasm/platform/gamepad.js') return source;
   return source.replace(

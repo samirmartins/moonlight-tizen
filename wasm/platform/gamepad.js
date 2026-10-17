@@ -463,9 +463,11 @@ function _rumbleNeedsPump(now) {
   var heap = Module.HEAP32;
   var base = _rumblePtr >> 2;
   for (var slot = 0; slot < _RUMBLE_MAX_PADS; slot++) {
+    var pad = _gpLogicalPads && _gpLogicalPads[slot];
+    if (!pad) { continue; }
     var packed = Atomics.load(heap, base + slot);
     if (_rumbleDue(slot, packed, now) &&
-        _gpGetActuator(_gpLogicalPads && _gpLogicalPads[slot])) { return true; }
+        _gpGetActuator(pad)) { return true; }
   }
   return false;
 }
@@ -484,10 +486,12 @@ function _rumblePump() {
   var heap = Module.HEAP32;
   var base = _rumblePtr >> 2;
   for (var slot = 0; slot < _RUMBLE_MAX_PADS; slot++) {
+    var pad = _gpLogicalPads && _gpLogicalPads[slot];
+    if (!pad) { continue; }
     var packed = Atomics.load(heap, base + slot);
     if (!_rumbleDue(slot, packed, now)) { continue; }
 
-    var actuator = _gpGetActuator(_gpLogicalPads && _gpLogicalPads[slot]);
+    var actuator = _gpGetActuator(pad);
     if (!actuator) { continue; }
     if (packed !== 0 && !_rumbleCanStart(slot, now)) {
       // Keep the state pending and retry no faster than the existing 10 Hz
