@@ -22,6 +22,52 @@ var ConsoleLibrary = (function() {
       seen[app.id] = true; return true;
     }).map(function(app) { return { id: id(app.id), title: app.title }; });
   }
+  // Menu cover reuse: bounded URL strings only, never detached image nodes.
+  var coverHost = null, renderedHost = null, coverBytes = 0;
+  var coverCache = new Map();
+  var maxCoverEntries = 64, maxCoverBytes = 4 * 1024 * 1024;
+  function forgetCover(appId) {
+    var cached = coverCache.get(appId);
+    if (cached) { coverBytes -= cached.bytes; coverCache.delete(appId); }
+  }
+  function invalidateCovers(pc) {
+    if (coverHost !== pc) return;
+    // An old in-flight decode must not refill the explicitly cleared cache.
+    if (coverScope) coverScope.cancel();
+    coverScope = null;
+    coverCache.clear(); coverBytes = 0; renderedHost = null;
+  }
+  function prepareCovers() {
+    if (coverHost !== host) {
+      coverCache.clear(); coverBytes = 0; renderedHost = null; coverHost = host;
+    }
+    // A removed/renamed app must not resurrect an old cover on a later visit.
+    var titles = new Map();
+    apps.forEach(function(app) { titles.set(app.id, app.title); });
+    coverCache.forEach(function(cached, appId) {
+      if (titles.get(appId) !== cached.title) forgetCover(appId);
+    });
+  }
+  function cachedCover(app) {
+    var cached = coverCache.get(app.id);
+    if (!cached || cached.title !== app.title) return null;
+    coverCache.delete(app.id); coverCache.set(app.id, cached);
+    return cached.url;
+  }
+  function rememberCover(app, url) {
+    if (typeof url !== 'string' || !url) return;
+    var bytes = (url.length + app.title.length) * 2;
+    forgetCover(app.id);
+    // Large images can still be displayed; they must not defeat the budget.
+    if (bytes > maxCoverBytes) return;
+    while (coverCache.size &&
+           (coverCache.size >= maxCoverEntries || coverBytes + bytes > maxCoverBytes)) {
+      forgetCover(coverCache.keys().next().value);
+    }
+    coverCache.set(app.id, { title: app.title, url: url, bytes: bytes });
+    coverBytes += bytes;
+  }
+  // End menu cover reuse.
   function record() {
     var uid = String(host.serverUid);
     if (uid === '__proto__' || uid === 'constructor' || uid === 'prototype') throw new Error('Invalid PC identifier');
@@ -131,22 +177,48 @@ var ConsoleLibrary = (function() {
   function render(forceCovers) {
     if (!active || isInGame) return;
     var r = record(), items = list(), grid = el('game-grid'), token = epoch, fragment = document.createDocumentFragment();
+    prepareCovers();
+    var previous = new Map(), cards = [], queue = [];
+    if (renderedHost === host) {
+      Array.from(grid.children).forEach(function(card) { previous.set(Number(card.dataset.appId), card); });
+    }
     if (!items.some(function(app) { return app.id === selected; })) selected = items.length ? items[0].id : 0;
     items.forEach(function(app) {
-      var card = document.createElement('button');
-      card.type = 'button'; card.id = 'game-container-' + app.id;
-      card.className = 'game-container console-card'; card.dataset.appId = app.id;
+      var card = previous.get(app.id), image, label, badge;
+      if (!card) {
+        card = document.createElement('button');
+        card.type = 'button'; card.id = 'game-container-' + app.id;
+        card.className = 'game-container console-card'; card.dataset.appId = app.id;
+        image = document.createElement('img'); image.alt = '';
+        label = document.createElement('span'); label.className = 'console-card-title';
+        badge = document.createElement('span'); badge.className = 'console-card-badge';
+        card.appendChild(image); card.appendChild(label); card.appendChild(badge);
+        card.onclick = function() { select(app.id); play(app.id); };
+        card.onfocus = function() { select(app.id); };
+      } else {
+        image = card.querySelector('img');
+        label = card.querySelector('.console-card-title');
+        badge = card.querySelector('.console-card-badge');
+      }
       card.setAttribute('aria-label', app.title);
-      var image = document.createElement('img'); image.alt = ''; image.src = 'static/res/placeholder_error.svg';
-      var label = document.createElement('span'); label.className = 'console-card-title'; label.textContent = app.title;
-      var badge = document.createElement('span'); badge.className = 'console-card-badge';
-      badge.textContent = host.online && Number(host.currentGame) === app.id ? 'Resume' : r.favorites.indexOf(app.id) !== -1 ? '★' : '';
-      card.appendChild(image); card.appendChild(label); card.appendChild(badge);
-      card.onclick = function() { select(app.id); play(app.id); };
-      card.onfocus = function() { select(app.id); };
-      fragment.appendChild(card);
+      if (label.textContent !== app.title) label.textContent = app.title;
+      var badgeText = host.online && Number(host.currentGame) === app.id ? 'Resume' : r.favorites.indexOf(app.id) !== -1 ? '★' : '';
+      if (badge.textContent !== badgeText) badge.textContent = badgeText;
+      if (card._mlCoverTitle !== app.title) {
+        var url = cachedCover(app);
+        image.src = url || 'static/res/placeholder_error.svg';
+        card._mlCoverTitle = url ? app.title : null;
+      }
+      if (forceCovers === true || card._mlCoverTitle !== app.title) queue.push(app);
+      cards.push(card);
     });
-    grid.textContent = ''; grid.appendChild(fragment);
+    // Status-only refreshes retain the exact cards/images and their decoding.
+    var unchanged = grid.children.length === cards.length && cards.every(function(card, index) { return grid.children[index] === card; });
+    if (!unchanged) {
+      cards.forEach(function(card) { fragment.appendChild(card); });
+      grid.textContent = ''; grid.appendChild(fragment);
+    }
+    renderedHost = host;
     el('libraryEmpty').hidden = items.length !== 0;
     el('libraryEmpty').textContent = apps.length ? 'No games in this section. Choose All games.' : host.online ? 'Add games in Sunshine, then Refresh.' : 'Wake the PC to load your library.';
     ['All','Favorites','Recent'].forEach(function(name) {
@@ -156,12 +228,16 @@ var ConsoleLibrary = (function() {
     // Two covers at a time; all requests belong to the current menu visit.
     if (coverScope) coverScope.cancel();
     coverScope = createMenuRequestScope();
-    var queue = items.slice(), currentScope = coverScope;
+    var currentScope = coverScope;
     function next() {
       if (!valid(token) || !currentScope || !currentScope.active || !queue.length) return;
       var app = queue.shift(), card = el('game-container-' + app.id);
       host.getBoxArt(app.id, currentScope, !hostReady(), forceCovers === true).then(function(url) {
-        if (valid(token) && currentScope.active && card && card.isConnected) card.querySelector('img').src = url;
+        if (valid(token) && currentScope.active && card && card.isConnected) {
+          rememberCover(app, url);
+          card.querySelector('img').src = url;
+          card._mlCoverTitle = app.title;
+        }
       }, function() {}).then(next);
     }
     next(); next();
@@ -323,6 +399,7 @@ var ConsoleLibrary = (function() {
     if (pc) open(pc); // Merely opening Moonlight never wakes or launches a PC.
   }
   return {
+    invalidateCovers: invalidateCovers,
     pause: pause, resume: resume,
     open: open, ready: ready, hide: hide, suspend: suspend, visible: function() { return active; },
     move: move, focusCards: focusCards, focusNav: focusNav,

@@ -660,6 +660,7 @@ NvHTTP.prototype = {
       // Delete the cached box art directory from the storage
       try {
         tizen.filesystem.deleteDirectory(boxArtDir);
+        if (typeof ConsoleLibrary !== 'undefined') ConsoleLibrary.invalidateCovers(this);
         console.log('%c[utils.js, clearBoxArt]', 'color: gray;', 'Operation recorded; private details omitted.');
         resolve();
       } catch (error) {

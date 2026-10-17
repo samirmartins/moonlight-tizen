@@ -7,9 +7,10 @@ const normalizeWake=vm.runInNewContext('('+contracts.slice(contracts.indexOf('fu
 const legacy=require('./controller-mapping-scope.cjs').legacy;
 const old=f=>legacy(f,cp.execFileSync('git',['show','v3.4.1:'+f],{encoding:'utf8'}));
 const lifecycle=require('./app-lifecycle-scope.cjs').normalize;
+const covers=require('./library-cover-scope.cjs').normalize;
 for(const f of ['wasm/platform/index.js','wasm/platform/messages.js','wasm/platform/common.js',
  'wasm/static/js/utils.js','wasm/static/js/mdns-browser/main.js']){
- assert.strictEqual(normalize(fs.readFileSync(f,'utf8')),normalize(old(f)),f+' only logging/start rejection');
+ assert.strictEqual(normalize(covers(f,fs.readFileSync(f,'utf8'))),normalize(covers(f,old(f))),f+' only logging/start rejection/cover invalidation');
 }
 for(const f of ['wasm/auddec.cpp','wasm/audio_ring.hpp','wasm/platform/audio.js','wasm/platform/audio-worklet.js',
  'wasm/platform/gamepad.js','wasm/gamepad.cpp','wasm/input.cpp','wasm/video_timing.hpp','wasm/video_telemetry.hpp',

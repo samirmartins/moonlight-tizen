@@ -23,7 +23,7 @@ Dependencies: Node.js 22, GCC/G++, FFmpeg with libx264, OpenSSL development head
 and Git/GNU timeout. Native fixtures use ASan/UBSan.
 The runner checks completion markers, rejects unhandled rejections, bounds each
 process and cleans temporary files, including failed runs.
-The current comparisons require tags `v3.3.8`, `v3.3.10`, `v3.4.0`, `v3.4.1` and `v3.4.2`;
+The current comparisons require tags `v3.3.8`, `v3.3.10`, `v3.4.0`, `v3.4.1`, `v3.4.2` and `v3.4.3`;
 use a full checkout. CI uses `fetch-depth: 0` and read-only permissions, without
 signing secrets. These tests do not compile the Samsung target or prove TV performance.
 
