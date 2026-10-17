@@ -7,6 +7,22 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.4.4
+
+### Improved
+- Reuses cover art through a bounded in-memory cache when returning from games,
+  retaining unchanged library cards; Refresh still renews displayed covers
+- Saves library selection with smaller immediate writes and updates only the
+  previous and newly selected cards, preserving favorites, recent games and focus
+- Reuses controller snapshots in menus instead of recreating objects every poll,
+  preserving navigation timing and independent input events
+- Publishes only changed controller snapshot words while preserving coherent
+  reads, exact input values and complete initial/stop snapshots
+- Collects optional audio depth statistics only while an overlay or diagnosis
+  needs them, preserving audio samples, adaptive buffering and synchronization
+- Skips overlay-only native aggregation during diagnostic-only sessions,
+  preserving report values, update frequency and overlay history
+
 ## v3.4.3
 
 ### Added
