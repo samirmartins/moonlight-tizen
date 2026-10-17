@@ -63,6 +63,12 @@ and a contending reader worker. Only changed payload words are stored; initial
 publication and stop still overwrite the full payload. Sampling, mapping,
 notification and native seqlock behavior stay unchanged. This is not TV timing.
 
+Overlay aggregation: `overlay_aggregation_test.js` compiles the production
+collection prefix and both formatters with deterministic adapters and ASan/UBSan.
+It compares messages/history with v3.4.3 across codecs, rates and independent
+consumer transitions. Diagnostic-only collection skips display aggregation;
+window cadence, diagnostic payloads and overlay reactivation remain unchanged.
+
 For documentation-only changes, check content, links and templates; a TV test
 or WGT rebuild is not required. For runtime changes, select the full suite and
 focused native/browser checks appropriate to the affected behavior.

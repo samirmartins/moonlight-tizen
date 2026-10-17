@@ -95,7 +95,7 @@ require('./audio-telemetry-scope.cjs').assertFrozen('v3.3.8', [
 'use strict';
 const fs=require('fs'),cp=require('child_process'),assert=require('assert');
 const baseline=cp.execFileSync('git',['show','v3.3.10:wasm/wasmplayer.cpp'],{encoding:'utf8'});
-const current=fs.readFileSync('wasm/wasmplayer.cpp','utf8');
+const current=require('./overlay-aggregation-scope.cjs').normalize('wasm/wasmplayer.cpp',fs.readFileSync('wasm/wasmplayer.cpp','utf8'));
 function between(s,a,b) { const start=s.indexOf(a),end=s.indexOf(b,start);assert(start>=0&&end>start);return s.slice(start,end); }
 assert.strictEqual(between(current,'    } else if (videoFormat & (VIDEO_FORMAT_H265','    bool trackAdded'),
   between(baseline,'    } else if (videoFormat & (VIDEO_FORMAT_H265','    bool trackAdded'));
@@ -159,7 +159,7 @@ function maskMethod(source, marker) {
  while (depth) { const c = source[end++]; if (c === '{') depth++; else if (c === '}') depth--; assert(end <= source.length); }
  return source.slice(0, start) + marker + ' [tested separately]' + source.slice(end);
 }
-let player = current('wasm/wasmplayer.cpp'), baseline = old('wasm/wasmplayer.cpp');
+let player = require('./overlay-aggregation-scope.cjs').normalize('wasm/wasmplayer.cpp', current('wasm/wasmplayer.cpp')), baseline = old('wasm/wasmplayer.cpp');
 for (const marker of [
  'void MoonlightInstance::SourceListener::OnPipelineError(', 'bool MoonlightInstance::WaitFor(',
  'MoonlightInstance::SourceListener::SourceListener(', 'MoonlightInstance::VideoTrackListener::VideoTrackListener(',

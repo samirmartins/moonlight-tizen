@@ -1087,23 +1087,23 @@ int MoonlightInstance::VidDecSubmitDecodeUnitImpl(PDECODE_UNIT decodeUnit) {
       m_LastFrameNumber = decodeUnit->frameNumber;
     }
 
-    // Flip performance stats window every two seconds. None of this runs
-    // while the overlay is hidden.
+    // Flip the shared collection window every two seconds while either
+    // the overlay or session diagnostics is enabled.
     if (m_ActiveWndVideoStats.measurementStartTimestamp + kStatsUpdateMs < statsNowMs) {
-      // Create a container to hold aggregated stats for display
-      VIDEO_STATS lastTwoWndStats = {};
-      // Bitrate uses the current window rather than assuming it is exactly one
-      // second long.
       const uint32_t windowMs =
         statsNowMs - m_ActiveWndVideoStats.measurementStartTimestamp;
-      lastTwoWndStats.receivedBitrate = windowMs != 0
-        ? static_cast<float>((total_bytes * 8.0) / 1000.0 / windowMs)
-        : 0.0f;
-      // Add last window and current window to the aggregated stats
-      AddVideoStats(m_LastWndVideoStats, lastTwoWndStats);
-      AddVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
-      // Convert the aggregated stats to a display string
       if (g_Instance->m_OverlayStatsEnabled.load(std::memory_order_relaxed)) {
+        // Create a container to hold aggregated stats for display
+        VIDEO_STATS lastTwoWndStats = {};
+        // Bitrate uses the current window rather than assuming it is exactly one
+        // second long.
+        lastTwoWndStats.receivedBitrate = windowMs != 0
+          ? static_cast<float>((total_bytes * 8.0) / 1000.0 / windowMs)
+          : 0.0f;
+        // Add last window and current window to the aggregated stats
+        AddVideoStats(m_LastWndVideoStats, lastTwoWndStats);
+        AddVideoStats(m_ActiveWndVideoStats, lastTwoWndStats);
+        // Convert the aggregated stats to a display string
         FormatVideoStats(lastTwoWndStats, s_StatString.data(), s_StatString.length());
       // Send the formatted stats string to the JS frontend for overlay display.
       // This must not be the synchronous variant: it would block the decoder

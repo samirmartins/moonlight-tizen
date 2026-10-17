@@ -47,6 +47,16 @@ function assertFrozen(reference, paths) {
       publication(file, normalize(file, old)), file+' approved telemetry/publication changes only');
   }
   const rest = paths.filter(file => !scoped.includes(file));
-  if (rest.length) assert.strictEqual(cp.execFileSync('git', ['diff', reference, '--', ...rest], {encoding:'utf8'}), '', 'unrelated inputs unchanged');
+  if (rest.length) {
+    // Git pathspecs may include all native sources. Permit only the exact,
+    // independently tested overlay aggregation move, never a whole-file mask.
+    const changed = cp.execFileSync('git', ['diff', '--name-only', reference, '--', ...rest], {encoding:'utf8'}).trim().split('\n').filter(Boolean);
+    for (const file of changed) {
+      assert.strictEqual(file, 'wasm/wasmplayer.cpp', 'unrelated inputs unchanged');
+      const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
+      const overlay = require('./overlay-aggregation-scope.cjs').normalize;
+      assert.strictEqual(overlay(file, fs.readFileSync(file,'utf8')), overlay(file, old), 'overlay aggregation move only');
+    }
+  }
 }
 module.exports = {normalize, assertFrozen, files};
