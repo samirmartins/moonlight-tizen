@@ -52,6 +52,17 @@ function assertFrozen(reference, paths) {
     // independently tested overlay aggregation move, never a whole-file mask.
     const changed = cp.execFileSync('git', ['diff', '--name-only', reference, '--', ...rest], {encoding:'utf8'}).trim().split('\n').filter(Boolean);
     for (const file of changed) {
+      // Permit only the approved packaging version bump; IDs, build options
+      // and every other byte remain part of the frozen contract.
+      if (file === 'CMakeLists.txt' || file === 'res/config.xml') {
+        const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
+        const current = fs.readFileSync(file, 'utf8');
+        const normalizeVersion = source => file === 'CMakeLists.txt'
+          ? source.replace('project(MoonlightWasm VERSION 3.4.4)', 'project(MoonlightWasm VERSION 3.4.3)')
+          : source.replace(' version="3.4.4"', ' version="3.4.3"');
+        assert.strictEqual(normalizeVersion(current), normalizeVersion(old), 'approved version bump only');
+        continue;
+      }
       assert.strictEqual(file, 'wasm/wasmplayer.cpp', 'unrelated inputs unchanged');
       const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
       const overlay = require('./overlay-aggregation-scope.cjs').normalize;
