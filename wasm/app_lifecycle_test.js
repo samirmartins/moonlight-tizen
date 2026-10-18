@@ -141,13 +141,12 @@ function realLauncher(f,stage,resume=false,source=launcher) {
   expectedArgs.splice(16,2); // Only the two explicitly retired flip arguments.
   assert.strictEqual(JSON.stringify(sent.args),JSON.stringify(expectedArgs),'native stream payload equals base except retired flip arguments');
  }
- // Prepared Wake & play must not issue a second metadata request after its
- // cancellable readiness loop ends. Manual Play/Resume above remain unchanged.
+ // Wake reuses gesture-prepared audio and the original manual-launch validation.
  for(const resume of [false,true]) {
   f=fixture();const r=realLauncher(f,'none',resume);let info=0;
-  f.host.refreshServerInfo=()=>{info++;return Promise.reject(Error('must not be called'));};
-  f.c.startGame(f.host,2,true,true);await f.flush();
-  assert.strictEqual(info,0);assert(r.calls.includes(resume?'resume':'launch'));
+  f.host.refreshServerInfo=()=>{info++;return Promise.resolve();};
+  f.c.startGame(f.host,2,true);await f.flush();
+  assert.strictEqual(info,1);assert(r.calls.includes(resume?'resume':'launch'));
   assert(r.calls.some(x=>x.kind==='startRequest'));assert(!r.calls.includes('audio'));
  }
  // Exact exceptions only: freeze all existing paths outside the approved

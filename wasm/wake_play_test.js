@@ -38,10 +38,31 @@ function setup() {
   assert(f.requests.some(s=>s.includes('/serverinfo?')));assert(!f.node('libraryCancel').hidden);
   f.phase='on';await tick(f,2000);
   assert.strictEqual(f.launches.length,1);assert.strictEqual(f.launches[0][1],1);
-  assert.strictEqual(f.launches[0][2],true);assert.strictEqual(f.launches[0][3],true);
+  assert.strictEqual(f.launches[0][2],true);assert.strictEqual(f.launches[0].length,3,'same manual launcher signature');
   assert.strictEqual(f.host._memCachedApplist[0].title,'Fresh game','old cache cannot replace new list');
   assert.strictEqual(f.wakes,1);assert.strictEqual(f.audio,1);assert.strictEqual(f.closed,0);
   assert.strictEqual(f.timers.size,0,'ready immediately; no wait to 120 s and no gameplay polling');
+  // Library retries change their epoch, but must retain the same bounded user
+  // intent across many offline rounds without resending WoL or resetting time.
+  f=setup();await f.open();f.node('libraryPlay').click();await f.flush();
+  const deadline=[...f.timers].find(([,t])=>t.ms===120000)[0];
+  for(let i=0;i<12;i++)await tick(f,2000);
+  assert(f.timers.has(deadline));assert.strictEqual(f.wakes,1);assert.strictEqual(f.audio,1);
+  f.phase='on';await tick(f,2000);assert.strictEqual(f.launches.length,1);assert.strictEqual(f.timers.size,0);
+  // Leaving for settings/another PC clears intent; a late old reply cannot
+  // take over the new view or launch against the wrong host.
+  for(const leave of ['settings','other PC']) {
+    f=setup();await f.open();f.phase='on';f.listGate=deferred();
+    f.node('libraryPlay').click();await f.flush();
+    if(leave==='settings')f.c.ConsoleLibrary.settings();
+    else {
+      const other={...f.host,serverUid:'other-fixture',online:true,_authenticatedOnline:true,connect:()=>Promise.resolve(),
+        getAppListWithCacheFlush:()=>Promise.resolve([{id:1,title:'Other PC app'}])};
+      f.c.hosts[other.serverUid]=other;await f.c.ConsoleLibrary.open(other);
+    }
+    f.listGate.resolve('fresh list');await f.flush();assert(!f.launches.length);assert.strictEqual(f.timers.size,0);
+    f.suspend();
+  }
   // Delayed WoL delivery is not charged to the boot budget.
   f=setup();await f.open();f.wakeGate=deferred();f.node('libraryPlay').click();await f.flush();
   assert(![...f.timers.values()].some(t=>t.ms===120000));
@@ -85,5 +106,10 @@ function setup() {
     const old=cp.execFileSync('git',['show','f5ccf2a:'+file],{encoding:'utf8'});
     assert.strictEqual(normalize(file,fs.readFileSync(file,'utf8')),old,file+' isolated wake changes');
   }
-  console.log('wake_play_test: staged boot/readiness, fresh lists, immediate single launch, post-send 120s bound, per-round cancellation, late replies, missing/empty app and pin failure OK');
+  const library=fs.readFileSync('wasm/platform/console-library.js','utf8');
+  const wake=library.slice(library.indexOf('  function play('),library.indexOf('  function bind('));
+  assert(!wake.includes('connect(')&&!wake.includes('function check('),'wake has no private discovery loop');
+  assert(wake.includes('refresh(false,true)'),'normal library refresh owns discovery');
+  assert.strictEqual(fs.readFileSync('wasm/platform/index.js','utf8'),cp.execFileSync('git',['show','f5ccf2a:wasm/platform/index.js'],{encoding:'utf8'}),'manual launcher restored exactly');
+  console.log('wake_play_test: normal library discovery owns wake intent, staged readiness, fresh lists, immediate single manual launch, 120s bound, cancellation, late replies, missing app and pin failure OK');
 })().catch(error=>{console.error(error);process.exitCode=1;});

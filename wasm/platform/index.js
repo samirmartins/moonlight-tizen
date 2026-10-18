@@ -1815,7 +1815,7 @@ function prepareStreamAudio() {
 
 }
 
-function startGame(host, appID, audioPrepared, serverInfoReady) {
+function startGame(host, appID, audioPrepared) {
   // Invalidate only continuations from before a Smart Hub transition.
   const lifecycleEpoch = typeof AppLifecycle !== 'undefined' ? AppLifecycle.epoch() : 0;
   const launchCurrent = function() { return typeof AppLifecycle === 'undefined' || AppLifecycle.current(lifecycleEpoch); };
@@ -1831,9 +1831,7 @@ function startGame(host, appID, audioPrepared, serverInfoReady) {
   startAudioScheduler();
 
   // Refresh the server info, because the user might have quit the game
-  // Wake & play already verified fresh metadata in its cancellable boot loop.
-  // All other callers retain the original server-info refresh.
-  (serverInfoReady === true ? Promise.resolve() : host.refreshServerInfo()).then(function(ret) {
+  host.refreshServerInfo().then(function(ret) {
     if (!launchCurrent()) return;
     host.getAppById(appID).then(function(appToStart) {
       if (!launchCurrent()) return;

@@ -1,24 +1,22 @@
 'use strict';
-// Exact exceptions for the independently tested Wake & play preparation.
-// Manual launch, streaming payloads and every other library path stay frozen.
+// Exact exceptions for the independently tested library-driven wake intent.
+// Unknown edits remain visible; the manual launcher has no wake-only branch.
 const cp=require('child_process'),crypto=require('crypto');
+const sections=[
+  ['  function cancel','  function hide(','be42b806aa9600f75b6e5535edd36fe5c00c8a945ad179e8860af55150a7eeaa'],
+  ['  function refresh(','  function focusCards(','d138d68f87bff5a09d9a0d21892612a3ca2bc12e95fe59fb65e46a138b143185'],
+  ['  function play(','  function bind(','373f17e5425b557d0c6a14061faccc309be2b7cd362063f26cf47d47467b5f57']
+];
 function normalize(file,source) {
-  if(file==='wasm/platform/index.js')return source
-    .replace('function startGame(host, appID, audioPrepared, serverInfoReady) {',
-      'function startGame(host, appID, audioPrepared) {')
-    .replace('  // Wake & play already verified fresh metadata in its cancellable boot loop.\n'+
-      '  // All other callers retain the original server-info refresh.\n'+
-      '  (serverInfoReady === true ? Promise.resolve() : host.refreshServerInfo()).then(function(ret) {',
-      '  host.refreshServerInfo().then(function(ret) {');
   if(file!=='wasm/platform/console-library.js')return source;
-  source=source.replace('  function launch(appId, audioReady, serverInfoReady) {','  function launch(appId, audioReady) {')
-    .replace('    startGame(chosenHost,appId,audioReady,serverInfoReady);','    startGame(chosenHost,appId,audioReady);');
-  const begin='  function play(appId) {',end='  function bind() {';
-  const a=source.indexOf(begin),b=source.indexOf(end,a);
-  if(a>=0&&b>a&&crypto.createHash('sha256').update(source.slice(a,b)).digest('hex')==='1185deb779b25e286536cec93bfa5ae90c5f6bc0abb44d3df27babddcd37ed34') {
-    const old=cp.execFileSync('git',['show','f5ccf2a:'+file],{encoding:'utf8'});
-    source=source.slice(0,a)+old.slice(old.indexOf(begin),old.indexOf(end,old.indexOf(begin)))+source.slice(b);
+  const old=cp.execFileSync('git',['show','f5ccf2a:'+file],{encoding:'utf8'});
+  for(const [begin,end,hash] of sections) {
+    const a=source.indexOf(begin),b=source.indexOf(end,a);
+    if(a>=0&&b>a&&crypto.createHash('sha256').update(source.slice(a,b)).digest('hex')===hash) {
+      const x=old.indexOf(begin),y=old.indexOf(end,x);
+      source=source.slice(0,a)+old.slice(x,y)+source.slice(b);
+    }
   }
-  return source;
+  return source.replace('  var wakeIntent = null;\n','');
 }
 module.exports={normalize};
