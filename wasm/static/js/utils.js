@@ -187,8 +187,12 @@ NvHTTP.prototype = {
         throw error;
       });
     }
-    this._authenticatedOnline = false;
-    return read(this.ppkstr != null);
+    // Keep the last verified status while checking. Cancellation must not turn
+    // a healthy PC into an offline/WoL target; a real failed check still does.
+    return read(this.ppkstr != null).catch(function(error) {
+      if (scope.active) self._authenticatedOnline = false;
+      throw error;
+    });
   },
 
   connect: function(scope) {

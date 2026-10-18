@@ -62,6 +62,22 @@ const flush=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};
   assert(urls.every(url=>url.startsWith('https:')),'legacy refresh must also retain pinned HTTPS');
   httpsReady=true;
   await host.connect(c.createMenuRequestScope());assert(host._authenticatedOnline);assert(updates>=1);
+  // A pending or cancelled visible-menu probe is not evidence that a paired
+  // PC went offline. Only an active failed probe invalidates its verification.
+  let rejectProbe;
+  c.sendMessage=()=>new Promise((resolve,reject)=>{rejectProbe=reject;});
+  let probeScope=c.createMenuRequestScope();
+  const cancelledProbe=host.refreshServerInfoScoped(host.address,probeScope).catch(()=>{});
+  assert.strictEqual(host._authenticatedOnline,true,'checking does not erase a verified PC');
+  probeScope.cancel();rejectProbe(Error('Late cancelled probe'));await cancelledProbe;
+  assert.strictEqual(host._authenticatedOnline,true,'cancel does not advertise a healthy PC as offline');
+  probeScope=c.createMenuRequestScope();
+  const failedProbe=host.refreshServerInfoScoped(host.address,probeScope).catch(()=>{});
+  rejectProbe(Error('Active failed probe'));await failedProbe;
+  assert.strictEqual(host._authenticatedOnline,false,'a real failed check clears verification');
+  assert.strictEqual(host.paired,true,'network failure never erases pairing');
+  c.sendMessage=()=>Promise.resolve(good);await host.connect(c.createMenuRequestScope());
+  assert.strictEqual(host._authenticatedOnline,true,'the next successful query restores verified status');
   // Reject loopback candidates without losing a real LAN fallback.
   host.address='127.0.0.1';host.localAddress='::1';host.userEnteredAddress='fixture.invalid';
   host.externalIP='::ffff:127.0.0.1';host.hostname='localhost';

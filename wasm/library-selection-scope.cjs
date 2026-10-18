@@ -14,6 +14,7 @@ const next="    var card = el('game-container-' + selected);\n"+
   "    if (card && !card.classList.contains('hovered')) card.classList.toggle('hovered', true);\n"+
   '    if (card && card.tabIndex !== 0) card.tabIndex = 0;';
 function normalize(file,source) {
+  source=require('./menu-recovery-scope.cjs').normalize(file,source);
   if(file!=='wasm/platform/console-library.js')return source;
   const begin='\n  // Compact focus persistence:',end='  // End compact focus persistence.\n';
   if(source.includes(begin)) {

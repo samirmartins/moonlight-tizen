@@ -3,6 +3,7 @@
 // The independent cover tests exercise the excluded implementation directly.
 const assert = require('assert');
 function normalize(file, source) {
+  source = require('./menu-recovery-scope.cjs').normalize(file, source);
   source = require('./library-selection-scope.cjs').normalize(file, source);
   if (file === 'wasm/static/js/utils.js') return source.replace(
     "        if (typeof ConsoleLibrary !== 'undefined') ConsoleLibrary.invalidateCovers(this);\n", '');

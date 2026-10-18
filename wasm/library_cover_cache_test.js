@@ -53,7 +53,8 @@ function fixture(count = 4, coverUrl, options = {}) {
       if (host.delay) return new Promise(resolve => host.delay.push(resolve));
       return Promise.resolve(coverUrl ? coverUrl(appId) : 'data:image/png;base64,fixture-'+appId+'-'+serial);
     }};
-  const c = {console:{log(){},warn(){},error(){}},Promise,Blob,navigator:{},isInGame:false,isDialogOpen:false,
+  const c = {console:{log(){},warn(){},error(){}},Promise,Blob,
+    atob:typeof atob==='function'?atob:undefined,btoa:typeof btoa==='function'?btoa:undefined,navigator:{},isInGame:false,isDialogOpen:false,
     hosts:{'fixture-pc':host},Views:{Apps:{},AppsNav:{}},
     document:{hidden:false,getElementById(id){return nodes.get(id) || all.find(n=>n.id===id && n.isConnected) || node(id);},
       createElement(tag){return new Element(tag);},createDocumentFragment(){return new Element('fragment');},body:node('body')},
@@ -117,10 +118,10 @@ function fixture(count = 4, coverUrl, options = {}) {
   assert(many.calls.length>before,'more than 64 entries must be evicted');
   assert(many.calls.length-before<=10,'all retained cache hits are seeded before misses can evict them');
   many.suspend();
-  const big=fixture(4,id=>'data:image/png;base64,'+String(id).repeat(900000)); await big.open();
+  const big=fixture(4,id=>'https://fixture.invalid/'+String(id).repeat(900000)); await big.open();
   before=big.calls.length; big.suspend(); await big.open();
   assert(big.calls.length>before,'string-byte budget evicts covers independently of count'); big.suspend();
-  const huge=fixture(1,()=> 'data:image/png;base64,'+'x'.repeat(2200000)); await huge.open();
+  const huge=fixture(1,()=> 'https://fixture.invalid/'+'x'.repeat(2200000)); await huge.open();
   assert(huge.card(1).querySelector('img').src.length>2200000,'oversized cover is still displayed');
   before=huge.calls.length; huge.suspend(); await huge.open(); assert(huge.calls.length>before,'oversized cover is not retained'); huge.suspend();
   // Late/cancelled work must not refill memory or mutate the streaming DOM.

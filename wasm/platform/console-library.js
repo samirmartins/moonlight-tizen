@@ -41,7 +41,7 @@ var ConsoleLibrary = (function() {
       seen[app.id] = true; return true;
     }).map(function(app) { return { id: id(app.id), title: app.title }; });
   }
-  // Menu cover reuse: bounded URL strings only, never detached image nodes.
+  // Menu cover reuse: bounded compressed bytes/URLs, never detached image nodes.
   var coverHost = null, renderedHost = null, coverBytes = 0;
   var coverCache = new Map();
   var maxCoverEntries = 64, maxCoverBytes = 4 * 1024 * 1024;
@@ -71,11 +71,31 @@ var ConsoleLibrary = (function() {
     var cached = coverCache.get(app.id);
     if (!cached || cached.title !== app.title) return null;
     coverCache.delete(app.id); coverCache.set(app.id, cached);
+    if (cached.data) {
+      var parts = [];
+      for (var i = 0; i < cached.data.length; i += 8192)
+        parts.push(String.fromCharCode.apply(null, cached.data.subarray(i, i + 8192)));
+      return 'data:image/png;base64,' + btoa(parts.join(''));
+    }
     return cached.url;
   }
   function rememberCover(app, url) {
     if (typeof url !== 'string' || !url) return;
     var bytes = (url.length + app.title.length) * 2;
+    var data = null;
+    // Retain PNG bytes rather than UTF-16 base64: the same 4 MiB budget holds
+    // more covers. Rebuild URLs only in the visible menu, never during a game.
+    if (url.indexOf('data:image/png;base64,') === 0 && typeof atob === 'function' && typeof btoa === 'function') {
+      var payload = url.slice(22);
+      var size = payload.length * 3 / 4 - (payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0);
+      if (size + app.title.length * 2 > maxCoverBytes) { forgetCover(app.id); return; }
+      try {
+        var binary = atob(payload);
+        data = new Uint8Array(binary.length);
+        for (var i = 0; i < binary.length; i++) data[i] = binary.charCodeAt(i);
+        bytes = data.byteLength + app.title.length * 2;
+      } catch (e) { data = null; } // Keep the string fallback for other URL formats.
+    }
     forgetCover(app.id);
     // Large images can still be displayed; they must not defeat the budget.
     if (bytes > maxCoverBytes) return;
@@ -83,7 +103,7 @@ var ConsoleLibrary = (function() {
            (coverCache.size >= maxCoverEntries || coverBytes + bytes > maxCoverBytes)) {
       forgetCover(coverCache.keys().next().value);
     }
-    coverCache.set(app.id, { title: app.title, url: url, bytes: bytes });
+    coverCache.set(app.id, { title: app.title, url: data ? null : url, data: data, bytes: bytes });
     coverBytes += bytes;
   }
   // End menu cover reuse.
@@ -203,7 +223,7 @@ var ConsoleLibrary = (function() {
       return descending ? -order : order;
     });
   }
-  function render(forceCovers) {
+  function render(forceCovers, deferCovers) {
     if (!active || isInGame) return;
     var r = record(), items = list(), grid = el('game-grid'), token = epoch, fragment = document.createDocumentFragment();
     prepareCovers();
@@ -255,6 +275,9 @@ var ConsoleLibrary = (function() {
       el('library'+name).setAttribute('aria-pressed', filter === name.toLowerCase());
     });
     updateSelection();
+    // Opening the library must not enqueue cover IO just before refresh()
+    // cancels it. Cached art is already visible; check the PC before misses.
+    if (deferCovers) return;
     // Two covers at a time; all requests belong to the current menu visit.
     if (coverScope) coverScope.cancel();
     coverScope = createMenuRequestScope();
@@ -418,7 +441,7 @@ var ConsoleLibrary = (function() {
     save(); bind();
     showAppsMode(); decorate();
     el('game-grid').style.display = 'grid'; $('#wasmSpinner').hide();
-    scope = createMenuRequestScope(); render();
+    scope = createMenuRequestScope(); render(false, true);
     Navigation.change(Views.Apps); Navigation.start(); focusCards();
     return refresh();
   }

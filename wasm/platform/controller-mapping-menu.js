@@ -205,7 +205,7 @@ var ControllerMappingMenu = (function() {
     el('cm-exit-hint').hidden = false;
     el('cm-exit-hint').textContent = 'Hold Circle / B for 3 seconds to finish the test.';
     el('cm-test').textContent = 'Finish test'; render(); focus('cm-test');
-    setStatus('Press buttons / move sticks. Short Cross / A and Circle / B presses only test input.');
+    setStatus('Press buttons or move sticks.');
     function tick(time) {
       if (!testing) return;
       if (document.hidden || isInGame) { close(); return; }
@@ -232,9 +232,10 @@ var ControllerMappingMenu = (function() {
         lastSample = sample;
         for (var n=0;n<19;n++) el('cm-row-'+n).classList.toggle('cm-pressed',pressed.includes(n));
         paintArt(pressed);
-        el('cm-axes').textContent = pad ? 'Axes '+axes.join(' / ')+' · L2/R2 '+triggers.join(' / ') : 'No controller detected. Connect one and press a button.';
+        el('cm-axes').textContent = pad ? 'Axes '+axes.join('/')+' · L2/R2 '+triggers.join('/') : 'Connect a controller.';
         el('cm-detail').textContent = pressed.length ? 'Physical: '+pressed.map(function(n) { return names[n]; }).join(', ')+
-          ' · Game: '+pressed.map(function(n) { return n < 17 ? names[preview[n]] : 'mouse (unchanged)'; }).join(', ') : 'Press any standard button. Preview uses the custom layout when ON, otherwise the original controls.';
+          ' · Game: '+pressed.map(function(n) { return n < 17 ? names[preview[n]] : 'mouse (unchanged)'; }).join(', ') : 'Press a button to see its mapping.';
+        el('cm-detail').title = el('cm-detail').textContent;
       }
       raf = requestAnimationFrame(tick);
     }
