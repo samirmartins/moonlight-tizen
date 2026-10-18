@@ -52,6 +52,12 @@ function assertFrozen(reference, paths) {
     // independently tested overlay aggregation move, never a whole-file mask.
     const changed = cp.execFileSync('git', ['diff', '--name-only', reference, '--', ...rest], {encoding:'utf8'}).trim().split('\n').filter(Boolean);
     for (const file of changed) {
+      if (file === 'wasm/platform/index.js') {
+        const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
+        const defaults = require('./rumble-default-scope.cjs').normalize;
+        assert.strictEqual(defaults(file, fs.readFileSync(file,'utf8')), defaults(file, old), 'rumble default only');
+        continue;
+      }
       if (file === 'wasm/static/css/controller-mapping.css') {
         const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
         const visual = require('./controller-test-scope.cjs').normalize;

@@ -1,13 +1,37 @@
 'use strict';
 // Removal of legacy flip switches must not shift any remaining stream argument
 // or change the standard native button map used by the optional JS remapper.
-const assert=require('assert'),fs=require('fs'),cp=require('child_process'),os=require('os'),path=require('path');
+const assert=require('assert'),fs=require('fs'),cp=require('child_process'),os=require('os'),path=require('path'),vm=require('vm');
 const read=file=>fs.readFileSync(file,'utf8');
 const runtime=['wasm/gamepad.cpp','wasm/main.cpp','wasm/moonlight_wasm.hpp',
  'wasm/platform/index.js','wasm/platform/messages.js','wasm/platform/navigation.js',
  'wasm/platform/controller-mapping-menu.js','wasm/index.html','wasm/static/css/style.css'];
 for(const file of runtime) assert(!/flipABfaceButtons|flipXYfaceButtons|buttonMasksAB|buttonMasksXY/.test(read(file)),file+' has no legacy flip path');
 const index=read('wasm/platform/index.js'),main=read('wasm/main.cpp'),header=read('wasm/moonlight_wasm.hpp');
+// Exercise the production preference branch, not a duplicate default rule.
+const preferenceStart=index.indexOf("  getData('rumbleFeedback', function(previousValue) {");
+const preferenceEnd=index.indexOf('\n  });',preferenceStart)+'\n  });'.length;
+assert(preferenceStart>0&&preferenceEnd>preferenceStart);
+for(const [saved,expected] of [[undefined,true],[null,true],[false,false],[true,true]]) {
+ let state=null;
+ vm.runInNewContext(index.slice(preferenceStart,preferenceEnd),{
+  getData(key,callback){assert.strictEqual(key,'rumbleFeedback');callback({rumbleFeedback:saved});},
+  document:{querySelector(selector){assert.strictEqual(selector,'#rumbleFeedbackBtn');return {MaterialSwitch:{on(){state=true;},off(){state=false;}}};}}
+ });
+ assert.strictEqual(state,expected,'new default or stored rumble preference');
+}
+const resetStart=index.indexOf('  const defaultRumbleFeedback =');
+const resetEnd=index.indexOf("  storeData('rumbleFeedback', defaultRumbleFeedback, null);",resetStart)+"  storeData('rumbleFeedback', defaultRumbleFeedback, null);".length;
+let resetState,resetValue;
+vm.runInNewContext(index.slice(resetStart,resetEnd),{
+ document:{querySelector(){return {MaterialSwitch:{on(){resetState=true;},off(){resetState=false;}}};}},
+ storeData(key,value){assert.strictEqual(key,'rumbleFeedback');resetValue=value;}
+});
+assert.strictEqual(resetState,true);assert.strictEqual(resetValue,true,'explicit reset saves the new ON default');
+const normalizeDefaults=require('./rumble-default-scope.cjs').normalize;
+const oldIndex=cp.execFileSync('git',['show','v3.4.4:wasm/platform/index.js'],{encoding:'utf8'});
+assert.strictEqual(normalizeDefaults('wasm/platform/index.js',index),oldIndex,'all non-default index code unchanged');
+assert.notStrictEqual(normalizeDefaults('wasm/platform/index.js',index.replace('previousValue.rumbleFeedback == false','previousValue.rumbleFeedback == true')),oldIndex,'saved-choice changes rejected');
 const expected=['host.address','host.httpPort','streamWidth','streamHeight','frameRate','bitrate.toString()',
  'rikey','rikeyid.toString()','host.appVersion','host.gfeVersion',"$root.find('sessionUrl0').text().trim()",
  'host.serverCodecModeSupport','framePacing','optimizeGames','rumbleFeedback','mouseEmulation',

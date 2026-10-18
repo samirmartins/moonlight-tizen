@@ -2640,11 +2640,9 @@ function restoreDefaultsSettingsValues() {
   document.querySelector('#optimizeGamesBtn').MaterialSwitch.on();
   storeData('optimizeGames', defaultOptimizeGames, null);
 
-  // Keep the conservative default across Tizen/controller implementations. When
-  // disabled, haptics are not advertised to the host; when enabled, updates use
-  // the coalesced post-frame path rather than competing with frame delivery.
-  const defaultRumbleFeedback = false;
-  document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.off();
+  // Default ON for new preferences and explicit resets; preserve saved choices.
+  const defaultRumbleFeedback = true;
+  document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.on();
   storeData('rumbleFeedback', defaultRumbleFeedback, null);
 
   // Conservative default: Start keeps its normal controller meaning unless the
@@ -2873,7 +2871,7 @@ function loadUserDataCb() {
   console.log('%c[index.js, loadUserDataCb]', 'color: green;', 'Load stored rumbleFeedback preferences.');
   getData('rumbleFeedback', function(previousValue) {
     if (previousValue.rumbleFeedback == null) {
-      document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.off(); // Set the default state
+      document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.on(); // Set the default state
     } else if (previousValue.rumbleFeedback == false) {
       document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.off();
     } else {

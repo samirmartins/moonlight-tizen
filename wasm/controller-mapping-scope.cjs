@@ -35,6 +35,7 @@ function legacy(file, source) {
  return source;
 }
 function launch(source) {
+ source = require('./rumble-default-scope.cjs').normalize('wasm/platform/index.js', source);
  return legacy('wasm/platform/index.js', source)
   .replace("  $('#controllerMappingBtn').on('click', function() { ControllerMappingMenu.open(); });\n", '')
   .replace("  const customMapping = typeof ControllerMapping !== 'undefined' && ControllerMapping.prepareSession();\n", '')
