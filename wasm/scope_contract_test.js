@@ -221,6 +221,8 @@ for (const file of files) {
   assert.strictEqual(withoutLogs(current(file)),withoutLogs(old(file)),file+' privacy-only logging');
  } else if (file === 'wasm/gamepad.cpp') {
   assert.strictEqual(withoutInputWake(current(file)), withoutInputWake(old(file)), file+' wake-only change');
+ } else if (file === 'wasm/platform/menu-tools.js') {
+  assert.strictEqual(require('./library-availability-scope.cjs').normalize(file,current(file)), old(file), file+' availability-probe opt-in only');
  } else assert.strictEqual(require('./audio-telemetry-scope.cjs').normalize(file,require('./controller-mapping-scope.cjs').normalize(file,current(file))), require('./audio-telemetry-scope.cjs').normalize(file,old(file)), file);
 }
 const index = current('wasm/platform/index.js'), indexOld = old('wasm/platform/index.js');

@@ -112,6 +112,7 @@ function NvHTTP(address, clientUid, userEnteredAddress = '', macAddress) {
   this._pollCount = 0;
   this._consecutivePollFailures = 0;
   this._pollCompletionCallbacks = [];
+  Object.defineProperty(this, '_availabilityCursor', { value: 0, writable: true });
   this.paired = false;
   this.online = false;
   this.numofapps = 0;
@@ -186,14 +187,17 @@ NvHTTP.prototype = {
         }
       }, function(error) {
         // A stored pin must never be downgraded to HTTP, including during boot.
-        if (scope.active && secure && error == -100) self.paired = false;
+        if (scope.active && secure && error == -100) {
+          self.paired = false; self._authenticatedOnline = false;
+          scope.availableApps = null;
+        }
         throw error;
       });
     }
     // Keep the last verified status while checking. Cancellation must not turn
     // a healthy PC into an offline/WoL target; a real failed check still does.
     return read(this.ppkstr != null).catch(function(error) {
-      if (scope.active) self._authenticatedOnline = false;
+      if (scope.active && (!scope.availableApps || scope.availableApps.host !== self)) self._authenticatedOnline = false;
       throw error;
     });
   },
@@ -344,6 +348,13 @@ NvHTTP.prototype = {
     addCandidate(localSuffix);
     addCandidate(this.externalIP);
 
+    var appProbe = scope && scope.useAppListProbe && this.ppkstr;
+    if (appProbe && candidates.length > 2) {
+      // Retry the last working address every round. Rotate one fallback rather
+      // than spending an entire boot cycle on every stale LAN/WAN address.
+      var fallback = 1 + this._availabilityCursor++ % (candidates.length - 1);
+      candidates = [candidates[0], candidates[fallback]];
+    }
     var tryNext = function(index) {
       if (scope && !scope.active) return;
       if (index >= candidates.length) {
@@ -352,7 +363,8 @@ NvHTTP.prototype = {
         return;
       }
       var addr = candidates[index];
-      this.refreshServerInfoAtAddress(addr, scope).then(function() {
+      var probe = appProbe ? this._probeAppListAtAddress(addr, scope) : this.refreshServerInfoAtAddress(addr, scope);
+      probe.then(function() {
         if (scope && !scope.active) return;
         onSuccess(addr);
       }.bind(this), function() {
@@ -409,6 +421,9 @@ NvHTTP.prototype = {
       // If we received a UUID that isn't the one we expected, fail
       return false;
     }
+    // An incomplete boot-time response cannot erase an established pairing or
+    // partially overwrite connection metadata. The menu will retry it later.
+    if (this.ppkstr && $root.find('PairStatus').text().trim() !== '1') return false;
 
     // Server info contains private host identifiers; do not dump the XML.
 
@@ -432,8 +447,10 @@ NvHTTP.prototype = {
 
     // This is an extension which is not present in GFE. It is present for Sunshine to be able
     // to support dynamic HTTP WAN ports without requiring the user to manually enter the port.
-    this.externalPort = parseInt($root.find('ExternalPort').text().trim(), 10);
-    this.httpsPort = parseInt($root.find('HttpsPort').text().trim(), 10);
+    var externalPort = $root.find('ExternalPort').text().trim();
+    var httpsPort = $root.find('HttpsPort').text().trim();
+    if (/^\d{1,5}$/.test(externalPort) && Number(externalPort) > 0 && Number(externalPort) <= 65535) this.externalPort = Number(externalPort);
+    if (/^\d{1,5}$/.test(httpsPort) && Number(httpsPort) > 0 && Number(httpsPort) <= 65535) this.httpsPort = Number(httpsPort);
 
     // This is not present in newer GFE versions
     var externIP = $root.find('ExternalIP').text().trim();
@@ -526,6 +543,38 @@ NvHTTP.prototype = {
     });
   },
 
+  // App-list availability: new pinned HTTPS data only, never the stored list.
+  _parseAppList: function(xml) {
+    var root = this._parseXML(xml).find('root');
+    if (root.length !== 1 || root.attr('status_code') !== '200') throw new Error('Invalid or unauthorized app list');
+    var elements = root[0].getElementsByTagName('App'), apps = [], seen = new Set();
+    for (var i = 0; i < elements.length; i++) {
+      var ids = elements[i].getElementsByTagName('ID');
+      var titles = elements[i].getElementsByTagName('AppTitle');
+      if (ids.length !== 1 || titles.length !== 1) throw new Error('Incomplete app list');
+      var text = ids[0].textContent.trim(), id = Number(text);
+      if (!/^\d+$/.test(text) || !Number.isInteger(id) || id <= 0 || id > 0xffffffff || seen.has(id)) throw new Error('Invalid app identifier');
+      seen.add(id); apps.push({ id: id, title: titles[0].textContent.trim() });
+    }
+    return apps; // A valid, empty root is an online PC with no configured games.
+  },
+  _probeAppListAtAddress: function(address, scope) {
+    var self = this;
+    if (!scope.active || isInGame || !this.ppkstr) return Promise.reject(new Error('Availability check cancelled'));
+    var port = Number(this.httpsPort);
+    if (!Number.isInteger(port) || port <= 0 || port > 65535) return Promise.reject(new Error('Invalid HTTPS port'));
+    var url = 'https://' + formatAddressForUrl(address) + ':' + port + '/applist?' + this._buildUidStr();
+    scope.availableApps = null;
+    return scope.request(function() {
+      return sendMessage('openUrlScoped', [url, self.ppkstr, false, 3000]);
+    }, 3500).then(function(xml) {
+      if (!scope.active || isInGame) throw new Error('Availability check cancelled');
+      var apps = self._parseAppList(xml);
+      scope.availableApps = { host: self, apps: apps };
+      self.paired = true; self._authenticatedOnline = true;
+    });
+  },
+  // End app-list availability.
   getAppListWithCacheFlush: function(scope) {
     var request = scope
       ? scope.request(() => sendMessage('openUrlScoped', [
@@ -541,25 +590,7 @@ NvHTTP.prototype = {
     );
     return request.then(function(ret) {
       if (scope && !scope.active) throw new Error('Menu request cancelled');
-      $xml = this._parseXML(ret);
-      $root = $xml.find('root');
-
-      if ($root.attr('status_code') != 200) {
-        // TODO: Bubble up an error here
-        console.error('%c[utils.js, getAppListWithCacheFlush]', 'color: gray;', 'Operation failed; private details omitted.');
-        return [];
-      }
-
-      var rootElement = $xml.find('root')[0];
-      var appElements = rootElement.getElementsByTagName('App');
-      var appList = [];
-
-      for (var i = 0, len = appElements.length; i < len; i++) {
-        appList.push({
-          id: parseInt(appElements[i].getElementsByTagName('ID')[0].innerHTML.trim(), 10),
-          title: appElements[i].getElementsByTagName('AppTitle')[0].innerHTML.trim(),
-        });
-      }
+      var appList = this._parseAppList(ret);
 
       this._memCachedApplist = appList;
       console.log('%c[utils.js, getAppListWithCacheFlush]', 'color: gray;', 'App list requested successfully.');

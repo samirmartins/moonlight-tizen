@@ -24,23 +24,23 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
   // A missing discovery callback is bounded independently of artwork.
   f=fixture();f.host.connect=()=>new Promise(()=>{});
   opening=f.c.ConsoleLibrary.open(f.host);await f.flush();
-  const timeout=[...f.timers].find(([,t])=>t.ms===11000);assert(timeout);
+  const timeout=[...f.timers].find(([,t])=>t.ms===8000);assert(timeout);
   f.timers.delete(timeout[0]);timeout[1].fn();await opening;
   assert.match(f.node('libraryStatus').textContent,/not responding/);
   assert(!f.node('libraryRefresh').disabled);f.suspend();assert.strictEqual(f.timers.size,0);
   // Slow disk decoding cannot consume the retry while Refresh is pending.
   f=fixture();f.host.delay=[];f.host.connect=()=>Promise.reject(Error('timeout'));
   opening=f.c.ConsoleLibrary.open(f.host);await f.flush();
-  assert(![...f.timers.values()].some(t=>t.ms===3000));
+  assert(![...f.timers.values()].some(t=>t.ms===2000));
   for(let i=0;i<2;i++){f.host.delay.splice(0).forEach(resolve=>resolve('data:image/png;base64,fixture'));await f.flush();}
-  await opening;assert([...f.timers.values()].some(t=>t.ms===3000));f.suspend();assert.strictEqual(f.timers.size,0);
+  await opening;assert([...f.timers.values()].some(t=>t.ms===2000));f.suspend();assert.strictEqual(f.timers.size,0);
   // A failed quick probe cannot establish that the PC is powered off. Keep a
   // full-deadline retry so slower responses can still restore verified status.
   f=fixture();scopes=[];connections=0;f.host.online=false;
   f.host.connect=scope=>{scopes.push(scope);connections++;return connections===1?Promise.reject(Error('quick timeout')):Promise.resolve('fixture.invalid');};
   await f.open();assert.match(f.node('libraryStatus').textContent,/not responding/);
   assert(!/offline|powered off/i.test(f.node('libraryStatus').textContent));
-  const entry=[...f.timers].find(([,t])=>t.ms===3000);assert(entry);
+  const entry=[...f.timers].find(([,t])=>t.ms===2000);assert(entry);
   f.timers.delete(entry[0]);f.host.online=true;entry[1].fn();await f.flush();
   assert.strictEqual(scopes[1].serverInfoTimeoutMs,4500);assert.match(f.node('libraryStatus').textContent,/PC online/);
   f.suspend();assert.strictEqual(f.timers.size,0);

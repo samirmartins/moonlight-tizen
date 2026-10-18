@@ -295,6 +295,7 @@ var ConsoleLibrary = (function() {
     return Promise.all([next(), next()]);
   }
   function connect(current, token) {
+    current.useAppListProbe = true;
     return host.connect(current).then(function(address) {
       if (!valid(token) || !current.active) throw new Error('Menu request cancelled');
       return address;
@@ -315,22 +316,26 @@ var ConsoleLibrary = (function() {
     // Disk-only artwork is independent of network discovery, including a cold
     // menu/offline PC. Never queue downloads in front of the status request.
     var cached = render(false, true);
-    // Bound discovery independently of the app list: up to five sequential
-    // addresses plus UI dispatch slack. A slow list is not an offline PC.
+    // Pinned PCs use at most two fresh app-list attempts per round; serverinfo
+    // is complementary, never a prerequisite for recognizing an online PC.
     refreshPending = current.request(function() {
       return connect(current,token);
-    }, thorough ? 26000 : 11000).then(function() {
+    }, 8000).then(function() {
         reached = true;
         if (!hostReady()) throw new Error('Sunshine is still starting.');
         if (!host.paired) throw new Error('Pair this PC from PCs to access its library.');
         checking = false;
         status('PC online · updating games…'); updateSelection();
-        return host.getAppListWithCacheFlush(current);
+        var fresh = current.availableApps;
+        return fresh && fresh.host === host ? fresh.apps : host.getAppListWithCacheFlush(current);
     }).then(function(value) {
       if (!valid(token)) return;
       apps = cleanApps(value); record().apps = apps; host._memCachedApplist = apps;
       save(); checking = false; status('PC online · ' + apps.length + ' games');
-      return cached.then(function() {
+      var metadata = current.availableApps && typeof host.refreshServerInfoScoped === 'function'
+        ? host.refreshServerInfoScoped(host.address, current).catch(function() {}) : Promise.resolve();
+      return Promise.all([cached, metadata]).then(function() {
+        if (!hostReady()) { retryCheck = true; status('Sunshine not verified · retrying…'); }
         if (valid(token)) return render(refreshCovers);
       });
     }, function(error) {
@@ -343,14 +348,14 @@ var ConsoleLibrary = (function() {
       // firewall or network failure. Do not claim to have measured its power.
       status(!reached ? 'PC not responding · retrying…' : !host.paired ? 'Pair this PC from PCs.' : 'PC online · library unavailable');
       // Only the visible menu retries; suspend/settings/stream cancel the scope.
-      retryCheck = !host.online || (host.paired && host._authenticatedOnline === false);
+      retryCheck = true;
       return cached;
     }).then(function() {
       if (!valid(token)) return;
       refreshPending = null; refreshCovers = false; updateSelection();
       // Arm only after local reads finish: otherwise a slow cache can consume
       // the retry while the single-flight guard still owns the failed check.
-      if (retryCheck) retry = setTimeout(function() { if (valid(token)) refresh(false, true); }, 3000);
+      if (retryCheck) retry = setTimeout(function() { if (valid(token)) refresh(false, true); }, 2000);
     });
     updateSelection();
     return refreshPending;

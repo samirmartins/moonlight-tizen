@@ -36,6 +36,12 @@ const flush=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};
   assert.strictEqual(await host.pair('0000'),true);
   assert.strictEqual(host.macAddress,'12:34:56:78:9A:BC');assert(saves>=1);
   assert(host.paired&&host._authenticatedOnline);assert.strictEqual(timers.size,0);
+  for(const value of ['', '0', '-1', '65536', 'NaN', '47984junk']) {
+    assert.strictEqual(host._parseServerInfo(good.replace('<HttpsPort>47984</HttpsPort>','<HttpsPort>'+value+'</HttpsPort>'),true),true);
+    assert.strictEqual(host.httpsPort,47984,'incomplete/invalid metadata retains verified HTTPS port');
+  }
+  assert.strictEqual(host._parseServerInfo(placeholder,true),false,'incomplete paired boot response is rejected before mutation');
+  assert(host.paired&&host._authenticatedOnline,'boot response cannot erase established authorization');
   const saved=saves, before=host.hostname;
   assert.strictEqual(host._parseServerInfo(placeholder.replace('<hostname>fixture</hostname>','<hostname>untrusted</hostname>'),false),false);
   assert.strictEqual(host.hostname,before,'HTTP must not overwrite pinned host metadata');
