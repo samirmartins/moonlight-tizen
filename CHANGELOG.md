@@ -7,6 +7,20 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.4.5
+
+### Improved
+- Highlights physical controller inputs in cyan during button testing, with
+  stable single-line feedback that does not shift the layout
+- Exits button testing by holding Circle/B for three continuous seconds;
+  short confirm/back presses remain test inputs without closing the editor
+- Enables rumble by default for new preferences and Restore defaults while
+  preserving saved choices; skips rumble-state reads for empty controller slots
+- Retains compressed PNG cover bytes within the existing cache budget,
+  allowing more covers to be reused without changing their image quality
+- Checks the PC before starting missing-cover requests and preserves its last
+  authenticated status while a menu check is pending or cancelled
+
 ## v3.4.4
 
 ### Improved
