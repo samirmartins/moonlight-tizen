@@ -10,6 +10,7 @@ const after='  // Default ON for new preferences and explicit resets; preserve s
   '  const defaultRumbleFeedback = true;\n'+
   "  document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.on();";
 function normalize(file,source) {
+  source=require('./wake-play-scope.cjs').normalize(file,source);
   if(file!=='wasm/platform/index.js')return source;
   return source.replace(after,before).replace(
     "    if (previousValue.rumbleFeedback == null) {\n      document.querySelector('#rumbleFeedbackBtn').MaterialSwitch.on(); // Set the default state",

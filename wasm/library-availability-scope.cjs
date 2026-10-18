@@ -17,6 +17,7 @@ const sections={
   ]
 };
 function normalize(file,source) {
+  source=require('./wake-play-scope.cjs').normalize(file,source);
   if(file==='wasm/platform/menu-tools.js')return source.replace('    scope.useAppListProbe = true;\n','');
   if(!sections[file])return source;
   const old=cp.execFileSync('git',['show','v3.4.5:'+file],{encoding:'utf8'});

@@ -381,7 +381,7 @@ var ConsoleLibrary = (function() {
     if (at === -1) r.favorites.push(selected); else r.favorites.splice(at,1);
     save(); render();
   }
-  function launch(appId, audioReady) {
+  function launch(appId, audioReady, serverInfoReady) {
     var chosenHost = host;
     var r = record();
     if (r.focus !== appId) { r.focus = appId; saveFocus(); }
@@ -392,7 +392,7 @@ var ConsoleLibrary = (function() {
     launchTimer = setTimeout(function() { launchPending = false; launchTimer = 0; },2000);
     // Online launch is synchronous with the click; wake launch reuses the
     // context prepared by that same click, preserving Tizen's autoplay gesture.
-    startGame(chosenHost,appId,audioReady);
+    startGame(chosenHost,appId,audioReady,serverInfoReady);
   }
   function play(appId) {
     if (!active || isInGame || busy || launchPending || !apps.some(function(app) { return app.id === id(appId); })) return;
@@ -411,22 +411,47 @@ var ConsoleLibrary = (function() {
     status('Waking PC…'); updateSelection();
     Navigation.change(Views.AppsNav); navIndex = controls().indexOf('libraryCancel'); focusNav(0);
     function failed(text) { if (!valid(token)) return; cancel(); scope = createMenuRequestScope(); status(text); updateSelection(); focusCards(); }
-    deadline = setTimeout(function() { failed('PC not ready after 60 s. Check Sunshine, then try again.'); },60000);
     function check() {
       if (!valid(token) || !current.active) return;
-      connect(current,token).then(function() {
+      // Isolate each boot attempt so a missing/late reply cannot overlap the
+      // next attempt, mutate its readiness or launch after cancellation.
+      var attempt = createMenuRequestScope();
+      var operation = attempt.request(function() { return connect(attempt,token); },8000).then(function() {
+        if (!valid(token) || !current.active || !attempt.active) throw new Error('Wake cancelled');
+        if (!host.paired || !hostReady()) throw new Error('Sunshine not verified');
+        // A responding app list is not yet a complete launch preparation.
+        // Retry boot-time metadata failures here, before stopping the wake loop.
+        return host.refreshServerInfo(attempt);
+      }).then(function() {
+        if (!valid(token) || !current.active || !attempt.active || !host.paired || !hostReady())
+          throw new Error('Sunshine not ready');
+        return attempt.availableApps && attempt.availableApps.host === host
+          ? attempt.availableApps.apps : host.getAppListWithCacheFlush(attempt);
+      });
+      operation.cancel = function() { attempt.cancel(); };
+      current.request(function() { return operation; },14000).then(function(value) {
         if (!valid(token) || !current.active) return;
-        if (host.paired && host.ppkstr && host._authenticatedOnline === false) {
-          retry = setTimeout(check,3000); return;
+        attempt.cancel();
+        var fresh = cleanApps(value);
+        if (!fresh.some(function(app) { return app.id === appId; })) {
+          status('PC online · waiting for selected app…');
+          retry = setTimeout(check,2000); return;
         }
+        apps = fresh; record().apps = apps; host._memCachedApplist = apps;
+        // Reuse only the metadata verified in this attempt. Manual Play keeps
+        // its original refresh; no duplicate launch commands are retried.
+        launch(appId,true,true);
+      },function() {
+        attempt.cancel();
+        if (!valid(token) || !current.active) return;
         if (!host.paired) { failed('PC needs pairing. Open PCs.'); return; }
-        host._memCachedApplist = apps;
-        launch(appId,true);
-      },function() { if (valid(token) && current.active) retry = setTimeout(check,3000); });
+        retry = setTimeout(check,2000);
+      });
     }
     current.request(function() { return host.sendWOL(); },8000).then(function() {
       if (!valid(token) || !current.active) return;
-      status('Wake packet sent · waiting for Sunshine…'); check();
+      deadline = setTimeout(function() { failed('PC not ready after 120 s. Check Sunshine, then try again.'); },120000);
+      status('Wake packet sent · waiting for Sunshine (up to 120 s)…'); check();
     },function() { failed('Could not send Wake-on-LAN. Check PC settings.'); });
   }
   function bind() {
