@@ -6,7 +6,7 @@ const normalize=require('./library-selection-scope.cjs').normalize;
 assert.strictEqual(normalize(file,source),baseline,'selection-only runtime changes');
 for(const [a,b] of [["card.parentNode !== el('game-grid')","card.parentNode === el('game-grid')"],
  ["el('game-grid').textContent = '';\n    selectedCard = null;","el('game-grid').textContent = '';\n    selectedCard = {};"],['save(); bind();','bind();'],
- ['current.request(function() { return host.sendWOL(); }','current.request(function() { return host.connect(); }']]) {
+ ['intent.scope.request(function() { return intent.host.sendWOL(); }','intent.scope.request(function() { return intent.host.connect(); }']]) {
  assert(source.includes(a));assert.notStrictEqual(normalize(file,source.replace(a,b)),baseline,'unexpected neighboring change rejected');
 }
 const fixture=(n=4,options={})=>require('./library_cover_cache_test.js').fixture(n,undefined,options);
