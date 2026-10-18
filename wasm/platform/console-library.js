@@ -301,7 +301,6 @@ var ConsoleLibrary = (function() {
     return Promise.all([next(), next()]);
   }
   function connect(current, token) {
-    current.useAppListProbe = true;
     return host.connect(current).then(function(address) {
       if (!valid(token) || !current.active) throw new Error('Menu request cancelled');
       return address;
@@ -316,8 +315,6 @@ var ConsoleLibrary = (function() {
     cancel(!!wakeIntent); scope = createMenuRequestScope();
     var current = scope, token = epoch, reached = false, retryCheck = false;
     var waking = !!(wakeIntent && wakeIntent.sent);
-    var metadataReady = true;
-    current.serverInfoTimeoutMs = thorough ? 4500 : 1500;
     refreshCovers = forceCovers === true;
     checking = true;
     status(thorough ? 'PC not responding · checking again…' : 'Checking PC…'); updateSelection();
@@ -327,29 +324,25 @@ var ConsoleLibrary = (function() {
     // Artwork is presentation, not readiness. During wake, neither a stalled
     // disk read nor cover downloads may hold the next authenticated probe.
     if (waking) cached.catch(function() {});
-    // Pinned PCs use at most two fresh app-list attempts per round; serverinfo
-    // is complementary, never a prerequisite for recognizing an online PC.
+    // Startup, Refresh and Wake use the same fresh serverinfo connection.
     refreshPending = current.request(function() {
       return connect(current,token);
-    }, 8000).then(function() {
+    }, 26000).then(function() {
         reached = true;
         if (!hostReady()) throw new Error('Sunshine is still starting.');
         if (!host.paired) throw new Error('Pair this PC from PCs to access its library.');
         checking = false;
         status('PC online · updating games…'); updateSelection();
-        var fresh = current.availableApps;
-        return fresh && fresh.host === host ? fresh.apps : host.getAppListWithCacheFlush(current);
+        return host.getAppListWithCacheFlush(current);
     }).then(function(value) {
       if (!valid(token)) return;
       apps = cleanApps(value); record().apps = apps; host._memCachedApplist = apps;
       save(); checking = false; status('PC online · ' + apps.length + ' games');
-      var metadata = current.availableApps && typeof host.refreshServerInfoScoped === 'function'
-        ? host.refreshServerInfoScoped(host.address, current).catch(function() { metadataReady = false; }) : Promise.resolve();
-      return (waking ? metadata : Promise.all([cached, metadata])).then(function() {
+      return (waking ? Promise.resolve() : cached).then(function() {
         if (!hostReady()) { retryCheck = true; status('Sunshine not verified · retrying…'); }
         // Wake stores only an intent. This ordinary library refresh owns all
         // discovery and hands off once to the same launcher as manual Play.
-        if (valid(token) && wakeIntent && wakeIntent.sent && hostReady() && host.paired && metadataReady &&
+        if (valid(token) && wakeIntent && wakeIntent.sent && hostReady() && host.paired &&
             apps.some(function(app) { return app.id === wakeIntent.appId; })) {
           var intent = wakeIntent; wakeIntent = null; intent.scope.cancel();
           launch(intent.appId,true); return;
@@ -374,7 +367,7 @@ var ConsoleLibrary = (function() {
       if (wakeIntent && wakeIntent.sent) {
         if (!host.paired) { wakeIntent.fail('PC needs pairing. Open PCs.'); return; }
         retryCheck = true;
-        status(hostReady() && metadataReady && !apps.some(function(app) { return app.id === wakeIntent.appId; })
+        status(hostReady() && !apps.some(function(app) { return app.id === wakeIntent.appId; })
           ? 'PC online · waiting for selected app · retrying…' : 'Waiting for Sunshine · retrying…');
       }
       // Normal Refresh retains its artwork barrier. Wake reaches this point

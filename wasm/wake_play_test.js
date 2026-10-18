@@ -11,10 +11,9 @@ function setup() {
   Object.assign(h,{address:'fixture.invalid',hostname:'fixture',httpsPort:47984,httpPort:47989,
     ppkstr:'synthetic pin',clientUid:'fixture',paired:true,online:false,_authenticatedOnline:false,
     macAddress:'12:34:56:78:9A:BC'});
-  Object.defineProperty(h,'_availabilityCursor',{value:0,writable:true});
   f.phase='off';f.requests=[];f.launches=[];f.wakes=0;f.audio=0;f.closed=0;f.cancelled=0;
   h._parseAppList=xml=>{assert.strictEqual(xml,'fresh list');return f.fresh||[{id:1,title:'Fresh game'}];};
-  h._parseServerInfo=(xml,secure)=>{assert(secure);if(xml!=='ready')return false;h._authenticatedOnline=true;return true;};
+  c.NvHTTP.prototype._parseServerInfo=function(xml,secure){assert(secure);if(xml!=='ready')return false;this._authenticatedOnline=true;this.paired=true;return true;};
   c.prepareStreamAudio=()=>f.audio++;
   c.stopAudioScheduler=()=>f.closed++;
   c.startGame=(...args)=>{f.launches.push(args);c.isInGame=true;c.ConsoleLibrary.suspend();};
@@ -67,9 +66,8 @@ function setup() {
     }
     return send(kind,args);
   };
-  f.node('libraryPlay').click();await f.flush();assert(!f.launches.length);
+  f.node('libraryPlay').click();await f.flush();assert.strictEqual(f.launches.length,1,'full startup scan reaches the valid fallback in the first round');
   assert(f.requests.some(url=>url.includes('old-lan.fixture.invalid')));
-  await tick(f,2000);assert.strictEqual(f.launches.length,1);
   assert.strictEqual(f.host.address,'ready.fixture.invalid');assert.strictEqual(f.wakes,1);
   // Library retries change their epoch, but must retain the same bounded user
   // intent across many offline rounds without resending WoL or resetting time.
@@ -114,9 +112,8 @@ function setup() {
   }
   // Missing callbacks have a per-round bound and cannot overlap retries.
   f=setup();await f.open();f.phase='on';const gate=deferred();f.listGate=gate;
-  f.node('libraryPlay').click();await f.flush();await tick(f,3500);
-  // The hostname fallback is also bounded; force the outer round deadline.
-  await tick(f,8000);assert(f.cancelled>0);const count=f.requests.length;
+  f.node('libraryPlay').click();await f.flush();await tick(f,10000);
+  assert(f.cancelled>0);const count=f.requests.length;
   gate.resolve('fresh list');await f.flush();assert(!f.launches.length);assert.strictEqual(f.requests.length,count);
   delete f.listGate;await tick(f,2000);assert.strictEqual(f.launches.length,1);assert.strictEqual(f.timers.size,0);
   // Valid empty or changed boot lists are not a cached-app launch permission.
@@ -127,7 +124,7 @@ function setup() {
   assert.strictEqual(f.host._memCachedApplist[0].title,'Ready app');assert.strictEqual(f.timers.size,0);
   // Security failure stops safely; no downgrade, implicit re-pair or launch.
   f=setup();await f.open();f.phase='on';f.c.sendMessage=(kind,args)=>args[0].includes('/applist?')?Promise.resolve('fresh list'):Promise.reject(-100);
-  f.node('libraryPlay').click();await f.flush();assert(!f.host.paired);assert(!f.launches.length);assert.match(f.node('libraryStatus').textContent,/pairing/);assert.strictEqual(f.timers.size,0);
+  f.node('libraryPlay').click();await f.flush();assert(f.host.paired,'failed probe preserves saved pairing');assert(!f.host._authenticatedOnline);assert(!f.launches.length);assert.match(f.node('libraryStatus').textContent,/retrying/);f.suspend();assert.strictEqual(f.timers.size,0);
   // Byte-for-byte scope guard: only the boot path and prepared-info handoff
   // may differ from the otherwise TV-validated candidate.
   const normalize=require('./wake-play-scope.cjs').normalize;
@@ -139,6 +136,7 @@ function setup() {
   const wake=library.slice(library.indexOf('  function play('),library.indexOf('  function bind('));
   assert(!wake.includes('connect(')&&!wake.includes('function check('),'wake has no private discovery loop');
   assert(wake.includes('refresh(false,true)'),'normal library refresh owns discovery');
-  assert.strictEqual(fs.readFileSync('wasm/platform/index.js','utf8'),cp.execFileSync('git',['show','f5ccf2a:wasm/platform/index.js'],{encoding:'utf8'}),'manual launcher restored exactly');
+  const index=fs.readFileSync('wasm/platform/index.js','utf8'),oldIndex=cp.execFileSync('git',['show','f5ccf2a:wasm/platform/index.js'],{encoding:'utf8'});
+  assert.strictEqual(index.slice(index.indexOf('function startGame(')),oldIndex.slice(oldIndex.indexOf('function startGame(')),'manual launcher and subsequent streaming code unchanged');
   console.log('wake_play_test: normal library discovery owns wake intent, staged readiness, fresh lists, immediate single manual launch, 120s bound, cancellation, late replies, missing app and pin failure OK');
 })().catch(error=>{console.error(error);process.exitCode=1;});

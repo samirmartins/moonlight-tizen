@@ -36,7 +36,7 @@ function deferred() { let resolve, reject; const promise = new Promise((a, b) =>
   pending.resolve('late');
   assert.match(await request, /cancelled/);
   const refresh = deferred();
-  const host = { serverUid: 'one', online: true, refreshServerInfo: () => refresh.promise,
+  const host = { serverUid: 'one', online: true, connect: () => refresh.promise,
     pollServer(cb) { cb(host); }, _pollCompletionCallbacks: [] };
   c.hosts.one = host;
   c.beginBackgroundPollingOfHost(host);
@@ -45,7 +45,7 @@ function deferred() { let resolve, reject; const promise = new Promise((a, b) =>
   await flush();
   assert.strictEqual(timers.size, 0, 'late initial refresh cannot restart polling');
   assert.strictEqual(updates, 0);
-  host.refreshServerInfo = () => Promise.resolve();
+  host.connect = () => Promise.resolve();
   c.beginBackgroundPollingOfHost(host); await flush();
   assert.strictEqual(timers.size, 1);
   c.beginBackgroundPollingOfHost(host); await flush();
@@ -73,7 +73,7 @@ function deferred() { let resolve, reject; const promise = new Promise((a, b) =>
   host.macAddress = '12:34:56:78:9A:BC';
   host.sendWOL = () => wake.promise;
   host.selectServerAddress = (success, failure) => failure(new Error('offline'));
-  host.connect = scope => c.NvHTTP.prototype.connect.call(host,scope);
+  host.connect = () => Promise.reject(new Error('offline'));
   c.WakeHost.open(host);
   element('wakeSend').onclick();
   assert.strictEqual(timers.size, 2);
@@ -83,15 +83,17 @@ function deferred() { let resolve, reject; const promise = new Promise((a, b) =>
   assert.strictEqual(timers.size, 0, 'cancel wake clears retry/deadline');
   host.online = false;
   host._consecutivePollFailures = 9;
-  host.refreshServerInfo = () => Promise.resolve();
+  host.connect = () => Promise.resolve();
   c.beginBackgroundPollingOfHost(host); await flush();
   assert.strictEqual(host.online, true, 'successful initial refresh immediately marks PC online');
   assert.strictEqual(host._consecutivePollFailures, 0);
   c.stopPollingHosts();
   host.online = false;
   host.sendWOL = () => Promise.resolve();
+  host.connect = () => Promise.reject(new Error('offline'));
   c.WakeHost.open(host);
   element('wakeSend').onclick(); await flush();
+  host.connect = () => Promise.resolve();
   const [deadlineId, deadlineFn] = [...timers][0];
   timers.delete(deadlineId); deadlineFn(); await flush();
   assert.strictEqual(host.online, true, 'wake deadline resumes normal host discovery');

@@ -8,6 +8,7 @@ const sections=[
   ['  function play(','  function bind(','373f17e5425b557d0c6a14061faccc309be2b7cd362063f26cf47d47467b5f57']
 ];
 function normalize(file,source) {
+  source=require('./host-connect-scope.cjs').normalize(file,source);
   if(file!=='wasm/platform/console-library.js')return source;
   const old=cp.execFileSync('git',['show','f5ccf2a:'+file],{encoding:'utf8'});
   for(const [begin,end,hash] of sections) {

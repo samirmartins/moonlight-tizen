@@ -116,7 +116,6 @@ var WakeHost = (function() {
     if (scope || isInGame || !save()) return;
     endBackgroundPollingOfHost(host);
     scope = createMenuRequestScope();
-    scope.useAppListProbe = true;
     var current = scope;
     var valid = function() { return opened && current.active && scope === current && !isInGame; };
     document.getElementById('wakeSend').disabled = true;

@@ -284,7 +284,7 @@ function beginBackgroundPollingOfHost(host) {
       host.pollServer(function() { update(); schedule(); }, scope);
     }, 5000);
   };
-  host.refreshServerInfo(scope).then(function() {
+  host.connect(scope).then(function() {
     if (!current()) return;
     host.online = true;
     host._consecutivePollFailures = 0;

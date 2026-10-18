@@ -8,7 +8,7 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
   let f=fixture(), gate=deferred(), connections=0, scopes=[];
   f.host.connect=scope=>{connections++;scopes.push(scope);return gate.promise;};
   let opening=f.c.ConsoleLibrary.open(f.host);await f.flush();
-  assert.strictEqual(connections,1);assert.strictEqual(scopes[0].serverInfoTimeoutMs,1500);
+  assert.strictEqual(connections,1);assert.strictEqual(scopes[0].useAppListProbe,undefined);
   assert.strictEqual(f.calls.length,4);assert(f.calls.every(call=>call.offline===true));
   for(const app of f.apps)assert(f.card(app.id).querySelector('img').src.startsWith('data:image/'));
   assert.match(f.node('libraryStatus').textContent,/Checking/);
@@ -24,7 +24,7 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
   // A missing discovery callback is bounded independently of artwork.
   f=fixture();f.host.connect=()=>new Promise(()=>{});
   opening=f.c.ConsoleLibrary.open(f.host);await f.flush();
-  const timeout=[...f.timers].find(([,t])=>t.ms===8000);assert(timeout);
+  const timeout=[...f.timers].find(([,t])=>t.ms===26000);assert(timeout);
   f.timers.delete(timeout[0]);timeout[1].fn();await opening;
   assert.match(f.node('libraryStatus').textContent,/not responding/);
   assert(!f.node('libraryRefresh').disabled);f.suspend();assert.strictEqual(f.timers.size,0);
@@ -42,7 +42,7 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
   assert(!/offline|powered off/i.test(f.node('libraryStatus').textContent));
   const entry=[...f.timers].find(([,t])=>t.ms===2000);assert(entry);
   f.timers.delete(entry[0]);f.host.online=true;entry[1].fn();await f.flush();
-  assert.strictEqual(scopes[1].serverInfoTimeoutMs,4500);assert.match(f.node('libraryStatus').textContent,/PC online/);
+  assert.strictEqual(scopes[1].useAppListProbe,undefined);assert.match(f.node('libraryStatus').textContent,/PC online/);
   f.suspend();assert.strictEqual(f.timers.size,0);
   // App-list failure after authenticated contact never becomes PC offline.
   f=fixture();f.host.getAppListWithCacheFlush=()=>Promise.reject(Error('slow app list'));
@@ -64,11 +64,11 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
   vm.runInContext(fs.readFileSync('wasm/static/js/utils.js','utf8'),c);
   const host=new c.NvHTTP('old.fixture.invalid','fixture');host.ppkstr='synthetic pin';host.hostname='new-fixture';
   host.serverUid='fixture';host.localAddress='lan.fixture.invalid';host.externalIP='wan.fixture.invalid';host.httpsPort=47984;host.httpPort=47989;
-  host._parseServerInfo=(xml,secure)=>{assert.strictEqual(secure,true);if(xml!=='verified fixture')return false;host._authenticatedOnline=true;return true;};
+  c.NvHTTP.prototype._parseServerInfo=function(xml,secure){assert.strictEqual(secure,true);if(xml!=='verified fixture')return false;this._authenticatedOnline=true;return true;};
   c.sendMessage=(name,args)=>{requests.push({name,args});return args[0].includes('new-fixture.local')?Promise.resolve('verified fixture'):Promise.reject(Error('unavailable'));};
   let scope=c.createMenuRequestScope();scope.serverInfoTimeoutMs=1500;
   assert.strictEqual(await host.connect(scope),'new-fixture.local');
-  assert.strictEqual(requests.length,3);assert(requests.every(r=>r.name==='openUrlScoped'&&r.args[0].startsWith('https://')&&r.args[1]===host.ppkstr&&r.args[3]===1500));
+  assert.strictEqual(requests.length,3);assert(requests.every(r=>r.name==='openUrlScoped'&&r.args[0].startsWith('https://')&&r.args[1]===host.ppkstr&&r.args[3]===4500));
   assert(!requests.some(r=>r.args[0].includes('wan.fixture.invalid')));assert.strictEqual(timers.size,0);
   requests=[];scope=c.createMenuRequestScope();await host.connect(scope);
   assert(requests.every(r=>r.args[3]===4500));assert.strictEqual(timers.size,0);

@@ -112,7 +112,6 @@ function NvHTTP(address, clientUid, userEnteredAddress = '', macAddress) {
   this._pollCount = 0;
   this._consecutivePollFailures = 0;
   this._pollCompletionCallbacks = [];
-  Object.defineProperty(this, '_availabilityCursor', { value: 0, writable: true });
   this.paired = false;
   this.online = false;
   this.numofapps = 0;
@@ -171,9 +170,7 @@ NvHTTP.prototype = {
   refreshServerInfoScoped: function(address, scope) {
     var self = this;
     var base = formatAddressForUrl(address);
-    // A quick visible-menu pass is provisional; normal checks retain the full
-    // deadline. Authentication, identity validation and HTTPS pinning are unchanged.
-    var timeout = scope.serverInfoTimeoutMs === 1500 ? 1500 : 4500;
+    var timeout = 4500;
     function read(secure) {
       if (!scope.active) return Promise.reject(new Error('Menu request cancelled'));
       var url = (secure ? 'https://' : 'http://') + base + ':' +
@@ -189,7 +186,6 @@ NvHTTP.prototype = {
         // A stored pin must never be downgraded to HTTP, including during boot.
         if (scope.active && secure && error == -100) {
           self.paired = false; self._authenticatedOnline = false;
-          scope.availableApps = null;
         }
         throw error;
       });
@@ -197,24 +193,66 @@ NvHTTP.prototype = {
     // Keep the last verified status while checking. Cancellation must not turn
     // a healthy PC into an offline/WoL target; a real failed check still does.
     return read(this.ppkstr != null).catch(function(error) {
-      if (scope.active && (!scope.availableApps || scope.availableApps.host !== self)) self._authenticatedOnline = false;
+      if (scope.active) self._authenticatedOnline = false;
       throw error;
     });
   },
 
   connect: function(scope) {
     var self = this;
-    return new Promise(function(resolve, reject) {
-      self.selectServerAddress(resolve, reject, scope);
-    }).then(function(address) {
-      if (scope && !scope.active) throw new Error('Menu request cancelled');
+    if (isInGame || (scope && !scope.active)) return Promise.reject(new Error('Connection cancelled'));
+    if (self._connectionAttempt) self._connectionAttempt.cancel();
+    // Recreate the startup client for every attempt, not its credentials or
+    // saved UI/cache. No poll callbacks or failed-request state are inherited.
+    var probe = new NvHTTP(self.address, self.clientUid, self.userEnteredAddress, self.macAddress);
+    ['hostname', 'localAddress', 'externalIP', 'httpPort', 'httpsPort', 'externalPort',
+      'serverUid', 'ppkstr', 'paired', 'isNvidiaServerSoftware'].forEach(function(key) {
+      if (self[key] !== undefined) probe[key] = self[key];
+    });
+    var fresh = createMenuRequestScope(), rejectAttempt;
+    var owner = { cancel: function() {
+      fresh.cancel();
+      if (rejectAttempt) rejectAttempt(new Error('Connection cancelled'));
+    } };
+    // Runtime ownership must never enter persisted host records.
+    Object.defineProperty(self, '_connectionAttempt', { value: owner, writable: true, configurable: true });
+    var current = function() {
+      return self._connectionAttempt === owner && fresh.active && !isInGame && (!scope || scope.active);
+    };
+    var operation = new Promise(function(resolve, reject) {
+      rejectAttempt = reject;
+      probe.selectServerAddress(resolve, function() { reject(new Error('PC did not respond')); }, fresh);
+    });
+    operation.cancel = owner.cancel;
+    // Five deduplicated candidates, each bounded to 4.5 s plus callback grace.
+    // A stale first IP must not consume the whole round before hostname lookup.
+    var parent = scope || createMenuRequestScope();
+    var result = parent.request(function() { return operation; }, 26000).then(function(address) {
+      if (!current()) throw new Error('Connection cancelled');
+      var previousMac = self.macAddress;
+      ['hostname', 'localAddress', 'externalIP', 'macAddress', 'httpPort', 'httpsPort', 'externalPort',
+        'serverUid', 'paired', '_authenticatedOnline', 'currentGame', 'appVersion', 'gfeVersion',
+        'serverMajorVersion', 'serverCodecModeSupport', 'serverState', 'isNvidiaServerSoftware',
+        'gputype', 'numofapps', 'supportedDisplayModes'].forEach(function(key) { self[key] = probe[key]; });
       self.address = address;
       self._baseUrlHttp = 'http://' + formatAddressForUrl(address) + ':' + self.httpPort;
       self._baseUrlHttps = 'https://' + formatAddressForUrl(address) + ':' + self.httpsPort;
       self.online = true; self._consecutivePollFailures = 0;
+      if (previousMac !== self.macAddress && typeof updateMacAddress === 'function') updateMacAddress(self);
       if (typeof updateHostStatusIndicator === 'function') updateHostStatusIndicator(self);
       return address;
+    }, function(error) {
+      if (self._connectionAttempt === owner && !isInGame && (!scope || scope.active) &&
+          error && error.message !== 'Connection cancelled') self._authenticatedOnline = false;
+      throw error;
     });
+    result = result.then(function(value) { cleanup(); return value; }, function(error) { cleanup(); throw error; });
+    function cleanup() {
+      fresh.cancel();
+      if (self._connectionAttempt === owner) self._connectionAttempt = null;
+    }
+    result.cancel = owner.cancel;
+    return result;
   },
 
   getUid: function() {
@@ -284,13 +322,8 @@ NvHTTP.prototype = {
       return;
     }
 
-    this.selectServerAddress(function(successfulAddress) {
+    this.connect(scope).then(function() {
       if (isInGame || (scope && !scope.active)) return;
-      // Successfully determined server address. Update base URL
-      var urlAddr = formatAddressForUrl(successfulAddress);
-      this.address = successfulAddress;
-      this._baseUrlHttps = 'https://' + urlAddr + ':' + this.httpsPort;
-      this._baseUrlHttp = 'http://' + urlAddr + ':' + this.httpPort;
 
       // Poll for updated mac address only on first successful server info poll
       if (this.paired && this._pollCount === 0) {
@@ -323,7 +356,7 @@ NvHTTP.prototype = {
       while ((completion = completions.pop())) {
         completion(this);
       }
-    }.bind(this), scope);
+    }.bind(this));
   },
 
   // Initially pings the server to try and figure out if it's routable by any means
@@ -348,13 +381,6 @@ NvHTTP.prototype = {
     addCandidate(localSuffix);
     addCandidate(this.externalIP);
 
-    var appProbe = scope && scope.useAppListProbe && this.ppkstr;
-    if (appProbe && candidates.length > 2) {
-      // Retry the last working address every round. Rotate one fallback rather
-      // than spending an entire boot cycle on every stale LAN/WAN address.
-      var fallback = 1 + this._availabilityCursor++ % (candidates.length - 1);
-      candidates = [candidates[0], candidates[fallback]];
-    }
     var tryNext = function(index) {
       if (scope && !scope.active) return;
       if (index >= candidates.length) {
@@ -363,7 +389,7 @@ NvHTTP.prototype = {
         return;
       }
       var addr = candidates[index];
-      var probe = appProbe ? this._probeAppListAtAddress(addr, scope) : this.refreshServerInfoAtAddress(addr, scope);
+      var probe = this.refreshServerInfoAtAddress(addr, scope);
       probe.then(function() {
         if (scope && !scope.active) return;
         onSuccess(addr);
@@ -543,7 +569,7 @@ NvHTTP.prototype = {
     });
   },
 
-  // App-list availability: new pinned HTTPS data only, never the stored list.
+  // App-list availability: validate fresh library data after connecting.
   _parseAppList: function(xml) {
     var root = this._parseXML(xml).find('root');
     if (root.length !== 1 || root.attr('status_code') !== '200') throw new Error('Invalid or unauthorized app list');
@@ -557,22 +583,6 @@ NvHTTP.prototype = {
       seen.add(id); apps.push({ id: id, title: titles[0].textContent.trim() });
     }
     return apps; // A valid, empty root is an online PC with no configured games.
-  },
-  _probeAppListAtAddress: function(address, scope) {
-    var self = this;
-    if (!scope.active || isInGame || !this.ppkstr) return Promise.reject(new Error('Availability check cancelled'));
-    var port = Number(this.httpsPort);
-    if (!Number.isInteger(port) || port <= 0 || port > 65535) return Promise.reject(new Error('Invalid HTTPS port'));
-    var url = 'https://' + formatAddressForUrl(address) + ':' + port + '/applist?' + this._buildUidStr();
-    scope.availableApps = null;
-    return scope.request(function() {
-      return sendMessage('openUrlScoped', [url, self.ppkstr, false, 3000]);
-    }, 3500).then(function(xml) {
-      if (!scope.active || isInGame) throw new Error('Availability check cancelled');
-      var apps = self._parseAppList(xml);
-      scope.availableApps = { host: self, apps: apps };
-      self.paired = true; self._authenticatedOnline = true;
-    });
   },
   // End app-list availability.
   getAppListWithCacheFlush: function(scope) {

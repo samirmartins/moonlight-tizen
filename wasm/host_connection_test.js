@@ -19,6 +19,7 @@ function xmlQuery(xml,tag='root') { return {
   html(){return this.text();},each(){},attr(){return '200';}
 }; }
 const host=new c.NvHTTP('fixture.invalid','fixture');host.serverUid='fixture';
+c.$=xml=>xmlQuery(xml);c.$.parseXML=xml=>xml;
 host.httpPort=47989;host.httpsPort=47984;host._baseUrlHttp='http://fixture.invalid:47989';host._baseUrlHttps='https://fixture.invalid:47984';
 host._parseXML=xml=>xmlQuery(xml);c.hosts.fixture=host;
 const info=(mac,paired)=>'<root status_code="200"><uniqueid>fixture</uniqueid><hostname>fixture</hostname><LocalIP>192.0.2.1</LocalIP><HttpsPort>47984</HttpsPort><appversion>7.1</appversion><PairStatus>'+paired+'</PairStatus><mac>'+mac+'</mac><state>SUNSHINE_SERVER_FREE</state></root>';
@@ -88,11 +89,10 @@ const flush=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};
   host.address='127.0.0.1';host.localAddress='::1';host.userEnteredAddress='fixture.invalid';
   host.externalIP='::ffff:127.0.0.1';host.hostname='localhost';
   let candidates=[];
-  const read=host.refreshServerInfoAtAddress;
-  host.refreshServerInfoAtAddress=function(address){candidates.push(address);return Promise.resolve();};
+  c.sendMessage=(name,args)=>{candidates.push(new URL(args[0]).hostname);return Promise.resolve(good);};
   await host.connect(c.createMenuRequestScope());
   assert.deepStrictEqual(candidates,['fixture.invalid']);
-  host.refreshServerInfoAtAddress=read;host.hostname='fixture';
+  host.hostname='fixture';
   for(const address of ['127.1.2.3','[::1]','0:0:0:0:0:0:0:1','LOCALHOST.','x.localhost']) assert(c.isLoopbackHost(address));
   assert(!c.isLoopbackHost('192.0.2.1'));assert(!c.isLoopbackHost('fixture.invalid'));
   // WOL dialog keeps checking until pinned HTTPS is authenticated, not just HTTP.
