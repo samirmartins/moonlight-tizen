@@ -4,7 +4,7 @@
 const cp=require('child_process'),crypto=require('crypto');
 const sections=[
   ['  function cancel','  function hide(','be42b806aa9600f75b6e5535edd36fe5c00c8a945ad179e8860af55150a7eeaa'],
-  ['  function refresh(','  function focusCards(','d138d68f87bff5a09d9a0d21892612a3ca2bc12e95fe59fb65e46a138b143185'],
+  ['  function refresh(','  function focusCards(','5ab9b33d4a5748856872c72e2fb832accd07a229afe230dcd90e6e6ac8acfecc'],
   ['  function play(','  function bind(','373f17e5425b557d0c6a14061faccc309be2b7cd362063f26cf47d47467b5f57']
 ];
 function normalize(file,source) {

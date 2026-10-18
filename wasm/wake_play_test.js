@@ -42,6 +42,35 @@ function setup() {
   assert.strictEqual(f.host._memCachedApplist[0].title,'Fresh game','old cache cannot replace new list');
   assert.strictEqual(f.wakes,1);assert.strictEqual(f.audio,1);assert.strictEqual(f.closed,0);
   assert.strictEqual(f.timers.size,0,'ready immediately; no wait to 120 s and no gameplay polling');
+  // A slow/unresolved disk cover must never stop the next discovery round or
+  // block handoff after valid network replies. This reproduces the prior gate.
+  for(const phase of ['off','list']) {
+    f=setup();await f.open();f.c.ConsoleLibrary.invalidateCovers(f.host);f.host.delay=[];f.phase=phase;
+    f.node('libraryPlay').click();await f.flush();
+    assert(f.host.delay.length>0,'cover fixture must remain unresolved');
+    assert([...f.timers.values()].some(t=>t.ms===2000),'pending cover cannot prevent wake retry');
+    assert.match(f.node('libraryStatus').textContent,/retrying/,'wake retries must be visible');
+    f.phase='on';await tick(f,2000);
+    assert.strictEqual(f.launches.length,1,'ready PC launches before disk cover resolves');
+    assert.strictEqual(f.timers.size,0);const requests=f.requests.length;
+    f.host.delay.splice(0).forEach(resolve=>resolve('data:image/png;base64,late-cover'));await f.flush();
+    assert.strictEqual(f.requests.length,requests);assert.strictEqual(f.node('game-grid').children.length,0);
+  }
+  // An unreachable saved address/first fallback is followed by a different
+  // fallback on retry; do not discard candidates or accept cached online state.
+  f=setup();await f.open();f.host.localAddress='old-lan.fixture.invalid';
+  f.host.userEnteredAddress='ready.fixture.invalid';f.phase='on';
+  const send=f.c.sendMessage;
+  f.c.sendMessage=(kind,args)=>{
+    if(!args[0].startsWith('https://ready.fixture.invalid:')){
+      f.requests.push(args[0]);return Promise.reject(Error('stale address'));
+    }
+    return send(kind,args);
+  };
+  f.node('libraryPlay').click();await f.flush();assert(!f.launches.length);
+  assert(f.requests.some(url=>url.includes('old-lan.fixture.invalid')));
+  await tick(f,2000);assert.strictEqual(f.launches.length,1);
+  assert.strictEqual(f.host.address,'ready.fixture.invalid');assert.strictEqual(f.wakes,1);
   // Library retries change their epoch, but must retain the same bounded user
   // intent across many offline rounds without resending WoL or resetting time.
   f=setup();await f.open();f.node('libraryPlay').click();await f.flush();
