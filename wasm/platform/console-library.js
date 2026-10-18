@@ -8,6 +8,7 @@ var ConsoleLibrary = (function() {
   var runtimeReady = false, hostsReady = false, started = false, bound = false;
   var navIndex = 0, currentRecord = null;
   var launchPending = false, launchTimer = 0;
+  var refreshPending = null, refreshCovers = false;
   try {
     var saved = JSON.parse(localStorage.getItem(key));
     if (saved && typeof saved.preferred === 'string' && saved.hosts && typeof saved.hosts === 'object') prefs = saved;
@@ -137,6 +138,7 @@ var ConsoleLibrary = (function() {
     coverScope = null;
     clearTimeout(retry); clearTimeout(deadline);
     retry = deadline = 0; busy = checking = false;
+    refreshPending = null; refreshCovers = false;
     if (preparedAudio && !isInGame) stopAudioScheduler(true);
     preparedAudio = false;
   }
@@ -188,12 +190,12 @@ var ConsoleLibrary = (function() {
     var app = picked(), r = record();
     el('libraryTitle').textContent = app ? app.title : 'Your library';
     el('libraryPlay').textContent = hostReady() && app && Number(host.currentGame) === app.id ? 'Resume' : hostReady() ? 'Play' : 'Wake & play';
-    // A background check is never a lock on a user-initiated wake or refresh.
+    // Checking never locks Play/Wake. Repeated Refresh shares the current work.
     el('libraryPlay').disabled = !app || busy || launchPending;
     el('libraryFavorite').disabled = !app || busy;
     el('libraryFavorite').textContent = app && r.favorites.indexOf(app.id) !== -1 ? '★ Favorite' : '☆ Favorite';
     el('libraryFavorite').setAttribute('aria-pressed', !!app && r.favorites.indexOf(app.id) !== -1);
-    el('libraryRefresh').disabled = busy || launchPending;
+    el('libraryRefresh').disabled = busy || launchPending || !!refreshPending;
     el('libraryCancel').hidden = !busy;
     el('quitRunningAppBtn').style.display = host.online && Number(host.currentGame) > 0 ? '' : 'none';
     var card = el('game-container-' + selected);
@@ -223,7 +225,7 @@ var ConsoleLibrary = (function() {
       return descending ? -order : order;
     });
   }
-  function render(forceCovers, deferCovers) {
+  function render(forceCovers, cacheOnly) {
     if (!active || isInGame) return;
     var r = record(), items = list(), grid = el('game-grid'), token = epoch, fragment = document.createDocumentFragment();
     prepareCovers();
@@ -275,17 +277,14 @@ var ConsoleLibrary = (function() {
       el('library'+name).setAttribute('aria-pressed', filter === name.toLowerCase());
     });
     updateSelection();
-    // Opening the library must not enqueue cover IO just before refresh()
-    // cancels it. Cached art is already visible; check the PC before misses.
-    if (deferCovers) return;
     // Two covers at a time; all requests belong to the current menu visit.
     if (coverScope) coverScope.cancel();
     coverScope = createMenuRequestScope();
     var currentScope = coverScope;
     function next() {
-      if (!valid(token) || !currentScope || !currentScope.active || !queue.length) return;
+      if (!valid(token) || !currentScope || !currentScope.active || !queue.length) return Promise.resolve();
       var app = queue.shift(), card = el('game-container-' + app.id);
-      host.getBoxArt(app.id, currentScope, !hostReady(), forceCovers === true).then(function(url) {
+      return host.getBoxArt(app.id, currentScope, cacheOnly === true || !hostReady(), forceCovers === true).then(function(url) {
         if (valid(token) && currentScope.active && card && card.isConnected) {
           rememberCover(app, url);
           card.querySelector('img').src = url;
@@ -293,7 +292,7 @@ var ConsoleLibrary = (function() {
         }
       }, function() {}).then(next);
     }
-    next(); next();
+    return Promise.all([next(), next()]);
   }
   function connect(current, token) {
     return host.connect(current).then(function(address) {
@@ -301,39 +300,60 @@ var ConsoleLibrary = (function() {
       return address;
     });
   }
-  function refresh(forceCovers) {
+  function refresh(forceCovers, thorough) {
     if (!active || isInGame || busy) return Promise.resolve();
+    if (refreshPending) {
+      refreshCovers = refreshCovers || forceCovers === true;
+      return refreshPending;
+    }
     cancel(); scope = createMenuRequestScope();
-    var current = scope, token = epoch, reached = false;
-    checking = true; status('Checking PC…'); updateSelection();
-    // Total deadline includes all address attempts and the app list, not just
-    // each individual HTTP request. Manual actions may cancel it immediately.
-    return current.request(function() {
-      return connect(current,token).then(function() {
+    var current = scope, token = epoch, reached = false, retryCheck = false;
+    current.serverInfoTimeoutMs = thorough ? 4500 : 1500;
+    refreshCovers = forceCovers === true;
+    checking = true;
+    status(thorough ? 'PC not responding · checking again…' : 'Checking PC…'); updateSelection();
+    // Disk-only artwork is independent of network discovery, including a cold
+    // menu/offline PC. Never queue downloads in front of the status request.
+    var cached = render(false, true);
+    // Bound discovery independently of the app list: up to five sequential
+    // addresses plus UI dispatch slack. A slow list is not an offline PC.
+    refreshPending = current.request(function() {
+      return connect(current,token);
+    }, thorough ? 26000 : 11000).then(function() {
         reached = true;
         if (!hostReady()) throw new Error('Sunshine is still starting.');
         if (!host.paired) throw new Error('Pair this PC from PCs to access its library.');
         checking = false;
         status('PC online · updating games…'); updateSelection();
         return host.getAppListWithCacheFlush(current);
-      });
-    }, 12000).then(function(value) {
+    }).then(function(value) {
       if (!valid(token)) return;
       apps = cleanApps(value); record().apps = apps; host._memCachedApplist = apps;
-      save(); checking = false; status('PC online · ' + apps.length + ' games'); render(forceCovers);
+      save(); checking = false; status('PC online · ' + apps.length + ' games');
+      return cached.then(function() {
+        if (valid(token)) return render(refreshCovers);
+      });
     }, function(error) {
       if (!valid(token)) return;
       checking = false;
       current.cancel();
       // A reachable unpaired PC is different from an offline PC.
       if (!reached) host.online = false;
-      status(!host.online ? 'PC offline · select a game to wake it' : !host.paired ? 'Pair this PC from PCs.' : 'Library unavailable · Refresh to try again');
-      render();
+      // No response cannot distinguish a powered-off PC from a slow Sunshine,
+      // firewall or network failure. Do not claim to have measured its power.
+      status(!reached ? 'PC not responding · retrying…' : !host.paired ? 'Pair this PC from PCs.' : 'PC online · library unavailable');
       // Only the visible menu retries; suspend/settings/stream cancel the scope.
-      if (!host.online || (host.paired && host._authenticatedOnline === false)) {
-        retry = setTimeout(function() { if (valid(token)) refresh(); }, 5000);
-      }
+      retryCheck = !host.online || (host.paired && host._authenticatedOnline === false);
+      return cached;
+    }).then(function() {
+      if (!valid(token)) return;
+      refreshPending = null; refreshCovers = false; updateSelection();
+      // Arm only after local reads finish: otherwise a slow cache can consume
+      // the retry while the single-flight guard still owns the failed check.
+      if (retryCheck) retry = setTimeout(function() { if (valid(token)) refresh(false, true); }, 3000);
     });
+    updateSelection();
+    return refreshPending;
   }
   function focusCards() {
     var cards = Array.from(el('game-grid').children);
@@ -441,9 +461,11 @@ var ConsoleLibrary = (function() {
     save(); bind();
     showAppsMode(); decorate();
     el('game-grid').style.display = 'grid'; $('#wasmSpinner').hide();
-    scope = createMenuRequestScope(); render(false, true);
+    // refresh() owns the single initial render/cache pass and its cancellation.
+    status('Checking PC…');
+    var opening = refresh();
     Navigation.change(Views.Apps); Navigation.start(); focusCards();
-    return refresh();
+    return opening;
   }
   function ready(part) {
     if (part === 'runtime') runtimeReady = true; else hostsReady = true;

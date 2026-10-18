@@ -17,6 +17,7 @@ function block(source) {
   return a>=0&&b>a?{a,b:b+end.length,text:source.slice(a,b+end.length)}:null;
 }
 function normalize(file,source) {
+  source=require('./library-availability-scope.cjs').normalize(file,source);
   if(file==='wasm/static/js/utils.js')return source.replace(verifiedStatus,
     '    this._authenticatedOnline = false;\n    return read(this.ppkstr != null);');
   if(file!==fileName)return source;

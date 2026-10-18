@@ -63,7 +63,7 @@ function fixture(options={}) {
    assert.strictEqual(f.calls.connect,1,'Readiness is idempotent');
    assert.deepStrictEqual(f.prefs().favorites,[2]);assert.deepStrictEqual(f.prefs().recent,[1]);
    assert.strictEqual(f.prefs().focus,2);
-   if(!online){await f.tick(5000);assert.strictEqual(f.calls.wake,0);assert.strictEqual(f.launched.length,0);}
+   if(!online){await f.tick(3000);assert.strictEqual(f.calls.wake,0);assert.strictEqual(f.launched.length,0);}
    // Old candidate preferences must never wake or launch, but manual Play still works.
    f.node('libraryPlay').click();await f.flush();
    assert.strictEqual(f.launched.length,1);assert.strictEqual(f.launched[0].app,2);

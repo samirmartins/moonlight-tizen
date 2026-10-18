@@ -1,15 +1,14 @@
 'use strict';
 // Exercise production menu ordering and bounded cover retention after a stream.
 const assert=require('assert'),fs=require('fs'),vm=require('vm');
-const harness={require,console,Blob,atob,btoa};vm.createContext(harness);
-vm.runInContext(fs.readFileSync('wasm/library_cover_cache_test.js','utf8').split('\n(async()=>{')[0]+'\nglobalThis.makeFixture=fixture;',harness);
-const fixture=(count,url,options)=>harness.makeFixture(count,url,options);
+const fixture=require('./library_cover_cache_test.js').fixture;
 const flush=async()=>{for(let i=0;i<350;i++)await Promise.resolve();};
 (async()=>{
   const ordered=fixture(4);let ready;
   ordered.host.connect=()=>new Promise(resolve=>{ready=resolve;});
   const opening=ordered.c.ConsoleLibrary.open(ordered.host);await flush();
-  assert.strictEqual(ordered.calls.length,0,'cold open must check PC before starting covers that would immediately be cancelled');
+  assert.strictEqual(ordered.calls.length,4,'cold open reads disk without waiting for the PC');
+  assert(ordered.calls.every(call=>call.offline===true),'no speculative network cover work');
   ready('fixture.invalid');await opening;await flush();
   assert.strictEqual(ordered.calls.length,4);ordered.suspend();
 
@@ -46,9 +45,9 @@ const flush=async()=>{for(let i=0;i<350;i++)await Promise.resolve();};
   const source=fs.readFileSync(file,'utf8'),oldSource=cp.execFileSync('git',['show','v3.4.4:'+file],{encoding:'utf8'});
   const normalize=require('./menu-recovery-scope.cjs').normalize;
   assert.strictEqual(normalize(file,source),oldSource,'only tested cache and PC-first changes against released library');
-  for(const [old,next] of [['4 * 1024 * 1024','8 * 1024 * 1024'],['if (deferCovers) return;','if (deferCovers) cancel();'],
+  for(const [old,next] of [['4 * 1024 * 1024','8 * 1024 * 1024'],['cacheOnly === true || !hostReady()','false'],
     ['return host.connect(current)','return host.connect()'],['if (!host.paired)','if (host.paired)']]) {
     assert(source.includes(old));assert.notStrictEqual(normalize(file,source.replace(old,next)),oldSource,'unknown neighboring changes are rejected');
   }
-  console.log('menu_recovery_test: PC-before-cover ordering, exact binary retention, count/byte bounds, forced renewal and transient recovery OK');
+  console.log('menu_recovery_test: disk-before-PC/network-after-PC ordering, exact binary retention, count/byte bounds, forced renewal and transient recovery OK');
 })().catch(error=>{console.error(error);process.exitCode=1;});

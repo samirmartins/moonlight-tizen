@@ -170,13 +170,16 @@ NvHTTP.prototype = {
   refreshServerInfoScoped: function(address, scope) {
     var self = this;
     var base = formatAddressForUrl(address);
+    // A quick visible-menu pass is provisional; normal checks retain the full
+    // deadline. Authentication, identity validation and HTTPS pinning are unchanged.
+    var timeout = scope.serverInfoTimeoutMs === 1500 ? 1500 : 4500;
     function read(secure) {
       if (!scope.active) return Promise.reject(new Error('Menu request cancelled'));
       var url = (secure ? 'https://' : 'http://') + base + ':' +
         (secure ? self.httpsPort : self.httpPort) + '/serverinfo?' + self._buildUidStr();
       return scope.request(function() {
-        return sendMessage('openUrlScoped', [url, self.ppkstr, false, 4500]);
-      }, 5000).then(function(xml) {
+        return sendMessage('openUrlScoped', [url, self.ppkstr, false, timeout]);
+      }, timeout + 500).then(function(xml) {
         if (!scope.active) throw new Error('Menu request cancelled');
         if (!self._parseServerInfo(xml, secure)) {
           throw new Error('Invalid server response');
@@ -338,8 +341,8 @@ NvHTTP.prototype = {
     addCandidate(this.userEnteredAddress);
     // Only append '.local' if the hostname doesn't already end with it
     var localSuffix = this.hostname.endsWith('.local') ? this.hostname : this.hostname + '.local';
-    addCandidate(this.externalIP);
     addCandidate(localSuffix);
+    addCandidate(this.externalIP);
 
     var tryNext = function(index) {
       if (scope && !scope.active) return;

@@ -9,9 +9,7 @@ for(const [a,b] of [["card.parentNode !== el('game-grid')","card.parentNode === 
  ['current.request(function() { return host.sendWOL(); }','current.request(function() { return host.connect(); }']]) {
  assert(source.includes(a));assert.notStrictEqual(normalize(file,source.replace(a,b)),baseline,'unexpected neighboring change rejected');
 }
-const harness={require,console,Blob};vm.createContext(harness);
-vm.runInContext(fs.readFileSync('wasm/library_cover_cache_test.js','utf8').split('\n(async()=>{')[0]+'\nglobalThis.makeFixture=fixture;',harness);
-const fixture=(n=4,options={})=>harness.makeFixture(n,undefined,options);
+const fixture=(n=4,options={})=>require('./library_cover_cache_test.js').fixture(n,undefined,options);
 const key='moonlight.console.v1',focusKey=key+'.focus';
 function selected(f){return Array.from(f.node('game-grid').children).filter(card=>card.tabIndex===0).map(card=>Number(card.dataset.appId));}
 function view(f){return JSON.stringify({title:f.node('libraryTitle').textContent,play:f.node('libraryPlay').textContent,

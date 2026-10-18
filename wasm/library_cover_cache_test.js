@@ -56,7 +56,7 @@ function fixture(count = 4, coverUrl, options = {}) {
   const c = {console:{log(){},warn(){},error(){}},Promise,Blob,
     atob:typeof atob==='function'?atob:undefined,btoa:typeof btoa==='function'?btoa:undefined,navigator:{},isInGame:false,isDialogOpen:false,
     hosts:{'fixture-pc':host},Views:{Apps:{},AppsNav:{}},
-    document:{hidden:false,getElementById(id){return nodes.get(id) || all.find(n=>n.id===id && n.isConnected) || node(id);},
+    document:{hidden:false,getElementById(id){return nodes.get(id) || all.find(n=>n.id===id && n.isConnected) || (id.startsWith('game-container-') ? null : node(id));},
       createElement(tag){return new Element(tag);},createDocumentFragment(){return new Element('fragment');},body:node('body')},
     localStorage:{getItem(k){return storage.has(k)?storage.get(k):null;},removeItem(k){storage.delete(k);},setItem(k,v){writes.push({key:k,value:String(v)});if(options.fail&&options.fail(k))throw Error('Synthetic storage failure');storage.set(k,String(v));}},
     setTimeout(fn,ms){timers.set(++timerId,{fn,ms});return timerId;},clearTimeout(id){timers.delete(id);},
@@ -76,7 +76,8 @@ function fixture(count = 4, coverUrl, options = {}) {
   return {c,node,apps,host,calls,timers,io,flush,open,suspend,storage,writes,mutations,
     card(id){return c.document.getElementById('game-container-'+id);},revision(){serial++;}};
 }
-(async()=>{
+module.exports = {fixture};
+if (require.main === module) (async()=>{
   const f = fixture(); await f.open();
   let before = f.calls.length;
   const cards = f.node('game-grid').children.slice(), images = cards.map(n=>n.querySelector('img'));
