@@ -7,6 +7,18 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.4.6
+
+### Improved
+- Loads locally cached covers while checking the PC, including when it is offline
+- Preserves the last valid library when game-list responses are malformed,
+  incomplete or unauthorized, while accepting valid empty libraries
+- Retains saved pairing and valid connection ports across transient or incomplete
+  host responses in the menu connection coordinator
+- Prevents cancelled or superseded menu requests from overwriting newer state
+- Expands regression coverage for offline covers, library validation, connection
+  metadata and cancellation
+
 ## v3.4.5
 
 ### Improved

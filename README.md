@@ -59,7 +59,7 @@ This fork focuses on smooth playback, low latency and full picture quality on Sa
 - Gamepad controls include optional rumble and saved button remapping with a visual editor and button test.
 - A controller-first library keeps favorites, recent games and the last PC ready to
   use, with Play, Resume and Wake & play in one screen.
-- Cached covers are reused when returning from games; Refresh renews displayed covers.
+- Cached covers appear while checking the PC, including offline, and are reused after games.
 
 ---
 
