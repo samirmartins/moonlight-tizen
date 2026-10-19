@@ -26,7 +26,8 @@ var AppLifecycle = (function() {
       }
       ++epoch;
       if (isInGame && api) returnHost = api;
-      restoreHostPolling = typeof hostPollScopes !== 'undefined' && Object.keys(hostPollScopes).length > 0;
+      restoreHostPolling = (typeof hostPollScopes !== 'undefined' && Object.keys(hostPollScopes).length > 0) ||
+        (typeof pairingPollingPause !== 'undefined' && !!pairingPollingPause);
       // Invalidate menu work and pending user-launch continuations before JS
       // is frozen. Native visibility handling owns idempotent stream teardown.
       clearTimeout(startupScanTimer);

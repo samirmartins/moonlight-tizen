@@ -12,6 +12,7 @@ const sections={
 };
 const cache=new Map();
 function normalize(file,source){
+ source=require('./pairing-polling-scope.cjs').normalize(file,source);
  for(const [begin,end,hash]of sections[file]||[]){
   const a=source.indexOf(begin),b=source.indexOf(end,a);
   if(a<0||b<=a||crypto.createHash('sha256').update(source.slice(a,b)).digest('hex')!==hash)continue;
