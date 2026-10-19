@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <curl/curl.h>
 #include <emscripten/threading.h>
+#include "host_discovery.hpp"
 
 namespace {
 void cancelMenuRequest(int callbackId) {
@@ -218,6 +219,21 @@ void MoonlightInstance::OpenUrlScoped(int callbackId, std::string url, std::stri
   });
 }
 
+void MoonlightInstance::DiscoverHosts(int callbackId, std::string localIp, std::string subnet,
+                                    std::string preferred, int port, uint32_t cursor) {
+  m_MenuHttp.submit(callbackId, 2, 2000, [this, localIp, subnet, preferred, port, cursor, callbackId](const mlhttp::Request& request) -> mlhttp::Result {
+    mlrediscovery::Network network;
+    if (m_Running.load() || port < 1 || port > 65535 || !network.parse(localIp, subnet)) return {false, "Discovery unavailable.", {}};
+    uint32_t previous = 0; mlrediscovery::ParseIp(preferred, previous);
+    const auto found = mlrediscovery::Discover(network, previous, static_cast<uint16_t>(port), cursor,
+      static_cast<uint16_t>(callbackId ? callbackId : 1), [&] { return request.active() && !m_Running.load(); });
+    return {request.active(), mlrediscovery::Json(found), {}};
+  }, [callbackId](mlhttp::Result result) {
+    auto* reply = new MenuReply{callbackId, false, std::move(result)};
+    emscripten_async_run_in_main_runtime_thread(EM_FUNC_SIG_VI, deliverMenuReply, reply);
+  });
+}
+
 MessageResult makeCert() {
   return g_Instance->MakeCert();
 }
@@ -244,5 +260,8 @@ EMSCRIPTEN_BINDINGS(http) {
   emscripten::function("httpInit", &httpInit);
   emscripten::function("openUrl", &openUrl);
   emscripten::function("openUrlScoped", &openUrlScoped);
+  emscripten::function("discoverHosts", +[](int id, std::string ip, std::string mask, std::string previous, int port, uint32_t cursor) {
+    g_Instance->DiscoverHosts(id, ip, mask, previous, port, cursor);
+  });
   emscripten::function("cancelMenuRequest", &cancelMenuRequest);
 }

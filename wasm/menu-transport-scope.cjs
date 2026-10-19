@@ -26,6 +26,7 @@ const sections={
 function old(file){if(!cache.has(file))cache.set(file,cp.execFileSync('git',['show',reference+':'+file],{encoding:'utf8'}));return cache.get(file);}
 function digest(s){return crypto.createHash('sha256').update(s).digest('hex');}
 function normalize(file,source){
+ source=require('./rediscovery-scope.cjs').normalize(file,source);
  for(const[begin,end,hash,oldBegin=begin]of sections[file]||[]){
   const a=source.indexOf(begin),b=source.indexOf(end,a);
   if(a<0||b<=a||digest(source.slice(a,b))!==hash)continue;
@@ -43,5 +44,10 @@ function normalize(file,source){
  return source;
 }
 const introduced={'wasm/menu_http.hpp':'e59c8bb6f2bbee40cc98e1d64b5f6ef53ed23866f79767e88fe5e3a1e4f6a646'};
-function assertIntroduced(file,source){assert.strictEqual(digest(source),introduced[file],file+' approved bounded menu transport only');}
+function assertIntroduced(file,source){
+ const discovery=require('./rediscovery-scope.cjs');
+ if(discovery.introduced[file])return discovery.assertIntroduced(file,source);
+ assert.strictEqual(digest(discovery.normalize(file,source)),introduced[file],file+' approved bounded menu transport only');
+}
+Object.assign(introduced,require('./rediscovery-scope.cjs').introduced);
 module.exports={normalize,introduced,assertIntroduced};

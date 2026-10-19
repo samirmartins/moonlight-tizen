@@ -20,6 +20,7 @@ const sections={
   ]
 };
 function normalize(file,source) {
+  source=require('./rediscovery-scope.cjs').normalize(file,source);
   if(!sections[file])return source;
   const old=cp.execFileSync('git',['show','ed86862:'+file],{encoding:'utf8'});
   for(const [begin,end,hash]of sections[file]) {

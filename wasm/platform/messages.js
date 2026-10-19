@@ -21,6 +21,7 @@ const AsyncFunctions = {
   // url, ppk, binaryResponse
   'openUrl': (...args) => Module.openUrl(...args),
   'openUrlScoped': (...args) => Module.openUrlScoped(...args),
+  'discoverHosts': (...args) => Module.discoverHosts(...args),
   // no parameters
   'STUN': (...args) => Module.stun(...args),
   // serverMajorVersion, address, httpPort, randomNumber
@@ -72,7 +73,7 @@ var sendMessage = function(method, params) {
       var pending = callbacks[pendingId];
       if (!pending) return;
       delete callbacks[pendingId];
-      if (method === 'openUrlScoped' && typeof Module.cancelMenuRequest === 'function') {
+      if ((method === 'openUrlScoped' || method === 'discoverHosts') && typeof Module.cancelMenuRequest === 'function') {
         Module.cancelMenuRequest(pendingId);
       }
       pending.reject(new Error('Menu request cancelled'));

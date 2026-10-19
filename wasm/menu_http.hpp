@@ -129,15 +129,14 @@ class Transport {
   using Done = std::function<void(Result)>;
   Resolver resolver;
   ~Transport() { stop(); }
-  void submit(int id, bool artwork, int timeoutMs, Work work, Done done) {
+  void submit(int id, int lane, int timeoutMs, Work work, Done done) {
     auto job = std::make_shared<Job>();
     job->request.id = id;
     job->request.deadline = Clock::now() + std::chrono::milliseconds(std::max(1, std::min(timeoutMs, 10000)));
     job->work = std::move(work); job->done = std::move(done);
-    const int lane = artwork ? 1 : 0;
     {
       std::unique_lock<std::mutex> lock(mutex_);
-      if (stopping_ || jobs_.size() >= 32 || jobs_.count(id)) {
+      if (stopping_ || lane < 0 || lane >= 3 || jobs_.size() >= 32 || jobs_.count(id)) {
         lock.unlock(); job->done({false, "Menu request unavailable.", {}}); return;
       }
       if (!timer_.joinable()) timer_ = std::thread([this] { expire(); });
@@ -162,7 +161,7 @@ class Transport {
       std::lock_guard<std::mutex> lock(mutex_);
       stopping_ = true;
       for (auto& item : jobs_) __atomic_store_n(&item.second->request.cancelled, 1, __ATOMIC_RELAXED);
-      jobs_.clear(); queues_[0].clear(); queues_[1].clear();
+      jobs_.clear(); for (auto& queue : queues_) queue.clear();
     }
     resolver.notify(); cv_.notify_all();
     for (auto& worker : workers_) if (worker.joinable()) worker.join();
@@ -213,7 +212,7 @@ class Transport {
   std::mutex mutex_; std::condition_variable cv_;
   bool stopping_ = false;
   std::unordered_map<int, std::shared_ptr<Job>> jobs_;
-  std::deque<std::shared_ptr<Job>> queues_[2];
-  std::thread workers_[2], timer_;
+  std::deque<std::shared_ptr<Job>> queues_[3];
+  std::thread workers_[3], timer_;
 };
 } // namespace mlhttp

@@ -69,6 +69,14 @@ int main(){
   work.release.set_value();t.stop();assert(expired.calls==1);
  }
  {
+  // Discovery cannot block metadata or artwork, nor be blocked by either.
+  mlhttp::Transport t;Gate metadata,art;Reply m,a,d;
+  t.submit(400,0,2000,[&](const auto&r){metadata.hold();return ok(r);},m.callback());metadata.wait();
+  t.submit(401,1,2000,[&](const auto&r){art.hold();return ok(r);},a.callback());art.wait();
+  t.submit(402,2,500,ok,d.callback());d.get(true);
+  metadata.release.set_value();art.release.set_value();m.get(true);a.get(true);t.stop();
+ }
+ {
   // A pending native DNS call is bounded to one worker. Cancellation wakes
   // callers, releases their ownership and does not require that call to end.
   Gate dns;std::atomic<int> lookups{0};std::promise<void> lookupFinished;

@@ -213,6 +213,7 @@ class MoonlightInstance {
   void OpenUrl(int callbackId, std::string url, std::string ppk, bool binaryResponse);
   void OpenUrlScoped(int callbackId, std::string url, std::string ppk, bool binaryResponse, int timeoutMs);
   void CancelMenuRequest(int callbackId) { m_MenuHttp.cancel(callbackId); }
+  void DiscoverHosts(int callbackId, std::string localIp, std::string subnet, std::string preferred, int port, uint32_t cursor);
 
   LoadResult LoadCert(const char* certStr, const char* keyStr);
 
