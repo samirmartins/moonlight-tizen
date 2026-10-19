@@ -163,6 +163,13 @@ function _gpControllerType(gamepad) {
   if (/playstation|dualsense|dualshock|sony/.test(id)) { return _GP_TYPE_PS; }
   if (/xbox|xinput|x-box|microsoft|360/.test(id)) { return _GP_TYPE_XBOX; }
   if (/nintendo|switch|joy-con|pro controller/.test(id)) { return _GP_TYPE_NINTENDO; }
+  // Fall back to browser vendor IDs without overriding existing name matches.
+  var vendor = /\bvendor:\s*([0-9a-f]{4})\b/.exec(id) || /^([0-9a-f]{4})-/.exec(id);
+  if (vendor) {
+    if (vendor[1] === '054c') { return _GP_TYPE_PS; }
+    if (vendor[1] === '045e') { return _GP_TYPE_XBOX; }
+    if (vendor[1] === '057e') { return _GP_TYPE_NINTENDO; }
+  }
   return _GP_TYPE_UNKNOWN;
 }
 
