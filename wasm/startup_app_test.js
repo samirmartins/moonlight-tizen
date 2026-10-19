@@ -31,6 +31,8 @@ function fixture(options={}) {
   startGame(h,app,audio){launched.push({app,audio});c.isInGame=true;c.ConsoleLibrary.suspend();},
   WakeHost:{open(){}},hostChosen(){},snackbarLog(){},exitAppDialog(){}};
  c.window=c;vm.createContext(c);vm.runInContext(fs.readFileSync('wasm/platform/menu-tools.js','utf8').split('function openUtilityDialog')[0],c);
+ vm.runInContext(fs.readFileSync('wasm/static/js/utils.js','utf8'),c);
+ host.loadLibrary=c.NvHTTP.prototype.loadLibrary;
  vm.runInContext(source,c);
  const flush=async()=>{for(let i=0;i<50;i++)await Promise.resolve();};
  async function tick(ms) {

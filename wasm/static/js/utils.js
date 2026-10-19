@@ -201,6 +201,7 @@ NvHTTP.prototype = {
   connect: function(scope) {
     var self = this;
     if (isInGame || (scope && !scope.active)) return Promise.reject(new Error('Connection cancelled'));
+    if (self._libraryAttempt && self._libraryAttempt.scope !== scope) self._libraryAttempt.cancel();
     if (self._connectionAttempt) self._connectionAttempt.cancel();
     // Recreate the startup client for every attempt, not its credentials or
     // saved UI/cache. No poll callbacks or failed-request state are inherited.
@@ -256,6 +257,41 @@ NvHTTP.prototype = {
       fresh.cancel();
       if (self._connectionAttempt === owner) self._connectionAttempt = null;
     }
+    result.cancel = owner.cancel;
+    return result;
+  },
+
+  // Connection and fresh library data belong to one cancellable menu attempt.
+  // A replacement connection must also retire an old in-flight app-list read.
+  loadLibrary: function(scope, onConnected) {
+    var self = this;
+    if (isInGame || (scope && !scope.active)) return Promise.reject(new Error('Connection cancelled'));
+    if (self._libraryAttempt) self._libraryAttempt.cancel();
+    var fresh = createMenuRequestScope();
+    var owner = { scope: fresh, cancel: function() { fresh.cancel(); } };
+    Object.defineProperty(self, '_libraryAttempt', { value: owner, writable: true, configurable: true });
+    function current() {
+      return self._libraryAttempt === owner && fresh.active && !isInGame && (!scope || scope.active);
+    }
+    var operation = fresh.request(function() { return self.connect(fresh); }, 26000).then(function() {
+      if (!current()) throw new Error('Connection cancelled');
+      if (onConnected) onConnected();
+      if (!self.online || !self.paired || (self.ppkstr && self._authenticatedOnline !== true)) {
+        throw new Error('PC library not authenticated');
+      }
+      return fresh.request(function() { return self.getAppListWithCacheFlush(fresh); }, 10000);
+    }).then(function(value) {
+      if (!current()) throw new Error('Connection cancelled');
+      return value;
+    });
+    operation.cancel = owner.cancel;
+    var parent = scope || createMenuRequestScope();
+    var result = parent.request(function() { return operation; }, 36000);
+    function cleanup() {
+      fresh.cancel();
+      if (self._libraryAttempt === owner) self._libraryAttempt = null;
+    }
+    result = result.then(function(value) { cleanup(); return value; }, function(error) { cleanup(); throw error; });
     result.cancel = owner.cancel;
     return result;
   },

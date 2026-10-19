@@ -16,6 +16,7 @@ const sections={
  ]
 };
 function normalize(file,source){
+ source=require('./readiness-scope.cjs').normalize(file,source);
  for(const [begin,end,hash,added]of sections[file]||[]){
   const a=source.indexOf(begin),b=source.indexOf(end,a);
   if(a<0||b<=a||digest(source.slice(a,b))!==hash)continue;

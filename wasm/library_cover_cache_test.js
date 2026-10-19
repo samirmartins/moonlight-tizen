@@ -69,6 +69,7 @@ function fixture(count = 4, coverUrl, options = {}) {
   c.window = c; vm.createContext(c);
   vm.runInContext(fs.readFileSync('wasm/platform/menu-tools.js','utf8').split('function openUtilityDialog')[0], c);
   vm.runInContext(fs.readFileSync('wasm/static/js/utils.js','utf8'), c);
+  host.loadLibrary = c.NvHTTP.prototype.loadLibrary;
   vm.runInContext(options.source || source, c);
   const flush = async()=>{for(let i=0;i<300;i++)await Promise.resolve();};
   async function open() { c.isInGame=false; await c.ConsoleLibrary.open(host); await flush(); }
