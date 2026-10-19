@@ -8,22 +8,34 @@
 #include <chrono>
 #include <mutex>
 #include <unordered_map>
+#include <curl/curl.h>
+#include <emscripten/threading.h>
 
 namespace {
-std::mutex menuRequestMutex;
-std::unordered_map<int, std::shared_ptr<int>> menuRequests;
 void cancelMenuRequest(int callbackId) {
-  std::lock_guard<std::mutex> lock(menuRequestMutex);
-  const auto it = menuRequests.find(callbackId);
-  if (it != menuRequests.end()) __atomic_store_n(it->second.get(), 1, __ATOMIC_RELAXED);
+  g_Instance->CancelMenuRequest(callbackId);
 }
-struct MenuRequestCleanup {
-  int id;
-  ~MenuRequestCleanup() {
-    std::lock_guard<std::mutex> lock(menuRequestMutex);
-    menuRequests.erase(id);
-  }
-};
+
+struct MenuReply { int id; bool binary; mlhttp::Result result; };
+void deliverMenuReply(void* opaque) {
+  std::unique_ptr<MenuReply> reply(static_cast<MenuReply*>(opaque));
+  if (reply->result.ok && reply->binary) PostPromiseMessage(reply->id, "resolve", reply->result.bytes);
+  else PostPromiseMessage(reply->id, reply->result.ok ? "resolve" : "reject", reply->result.text);
+}
+
+bool menuEndpoint(const std::string& url, std::string& host, std::string& port) {
+  std::unique_ptr<CURLU, decltype(&curl_url_cleanup)> endpoint(curl_url(), curl_url_cleanup);
+  if (!endpoint || curl_url_set(endpoint.get(), CURLUPART_URL, url.c_str(), 0)) return false;
+  char *scheme = nullptr, *name = nullptr, *service = nullptr, *user = nullptr;
+  const bool valid = !curl_url_get(endpoint.get(), CURLUPART_SCHEME, &scheme, 0) &&
+    (!strcmp(scheme, "http") || !strcmp(scheme, "https")) &&
+    !curl_url_get(endpoint.get(), CURLUPART_HOST, &name, 0) &&
+    !curl_url_get(endpoint.get(), CURLUPART_PORT, &service, CURLU_DEFAULT_PORT) &&
+    curl_url_get(endpoint.get(), CURLUPART_USER, &user, 0) == CURLUE_NO_USER;
+  if (valid) { host = name; port = service; }
+  curl_free(scheme); curl_free(name); curl_free(service); curl_free(user);
+  return valid && !host.empty();
+}
 }
 
 #include <mkcert.h>
@@ -163,38 +175,47 @@ void MoonlightInstance::OpenUrl(int callbackId, std::string url, std::string ppk
 void MoonlightInstance::OpenUrlScoped(int callbackId, std::string url, std::string ppk,
                                       bool binaryResponse, int timeoutMs) {
   // Only menu metadata/artwork uses this path; launch/resume/pair stay unchanged.
-  const auto cancelled = std::make_shared<int>(0);
-  const auto deadline = std::chrono::steady_clock::now() +
-    std::chrono::milliseconds(std::max(1, std::min(timeoutMs, 10000)));
-  {
-    std::lock_guard<std::mutex> lock(menuRequestMutex);
-    menuRequests[callbackId] = cancelled;
-  }
-  m_Dispatcher.post_job([this, callbackId, url, ppk, binaryResponse, cancelled, deadline]() {
-    MenuRequestCleanup cleanup{callbackId};
-    const auto remaining = std::chrono::duration_cast<std::chrono::milliseconds>(
-      deadline - std::chrono::steady_clock::now()).count();
-    if (remaining <= 0 || __atomic_load_n(cancelled.get(), __ATOMIC_RELAXED)) {
-      PostPromiseMessage(callbackId, "reject", "Menu request cancelled or expired.");
-      return;
+  m_MenuHttp.submit(callbackId, binaryResponse, timeoutMs,
+    [this, url, ppk, binaryResponse](const mlhttp::Request& request) -> mlhttp::Result {
+    std::string host, port, resolve;
+    std::vector<HTTP_ADDRESS_SCOPE> scopes;
+    if (!menuEndpoint(url, host, port)) return {false, "Invalid menu endpoint.", {}};
+    auto numeric = host;
+    if (numeric.front() == '[' && numeric.back() == ']') numeric = numeric.substr(1, numeric.size() - 2);
+    in_addr ipv4{}; in6_addr ipv6{};
+    if (inet_pton(AF_INET, numeric.c_str(), &ipv4) != 1 && inet_pton(AF_INET6, numeric.c_str(), &ipv6) != 1) {
+      auto addresses = m_MenuHttp.resolver.resolve(host, request);
+      if (addresses.empty() || !request.active()) return {false, "Menu endpoint resolution failed.", {}};
+      resolve = host + ":" + port + ":";
+      for (const auto& address : addresses) {
+        if (resolve.back() != ':') resolve += ',';
+        resolve += address.text.find(':') != std::string::npos ? "[" + address.text + "]" : address.text;
+        if (address.scope) {
+          HTTP_ADDRESS_SCOPE scoped{};
+          inet_pton(AF_INET6, address.text.c_str(), scoped.address);
+          scoped.scope = address.scope; scopes.push_back(scoped);
+        }
+      }
     }
+    const int remaining = request.remaining();
+    if (remaining <= 0) return {false, "Menu request cancelled or expired.", {}};
     std::unique_ptr<HTTP_DATA, decltype(&http_free_data)> data(http_create_data(), http_free_data);
-    if (!data) {
-      PostPromiseMessage(callbackId, "reject", "Error when creating data buffer.");
-      return;
-    }
-    const int err = http_request_bounded(url.c_str(), ppk.empty() ? nullptr : ppk.c_str(),
-                                        data.get(), static_cast<int>(remaining), cancelled.get());
-    if (err || __atomic_load_n(cancelled.get(), __ATOMIC_RELAXED)) {
-      PostPromiseMessage(callbackId, "reject", std::to_string(err ? err : GS_FAILED));
-    } else if (binaryResponse) {
-      std::vector<uint8_t> response(data->size);
-      if (data->size) memcpy(response.data(), data->memory, data->size);
-      PostPromiseMessage(callbackId, "resolve", response);
-    } else {
-      PostPromiseMessage(callbackId, "resolve", std::string(data->memory, data->size));
-    }
-  }, false);
+    if (!data) return {false, "Error when creating data buffer.", {}};
+    const int err = http_request_menu(url.c_str(), ppk.empty() ? nullptr : ppk.c_str(),
+                                      data.get(), remaining, &request.cancelled,
+                                      resolve.empty() ? nullptr : resolve.c_str(), scopes.data(), scopes.size());
+    if (err || !request.active()) return {false, std::to_string(err ? err : GS_FAILED), {}};
+    if (!binaryResponse) return {true, std::string(data->memory, data->size), {}};
+    std::vector<uint8_t> bytes(data->size);
+    if (data->size) memcpy(bytes.data(), data->memory, data->size);
+    return {true, {}, std::move(bytes)};
+  }, [callbackId, binaryResponse](mlhttp::Result result) {
+    // Own the payload until the browser consumes it. A busy UI must not hold a
+    // native lane or its deadline worker; the JS callback registry drops replies
+    // for cancelled requests. Legacy launch/pair replies remain unchanged.
+    auto* reply = new MenuReply{callbackId, binaryResponse, std::move(result)};
+    emscripten_async_run_in_main_runtime_thread(EM_FUNC_SIG_VI, deliverMenuReply, reply);
+  });
 }
 
 MessageResult makeCert() {

@@ -3,6 +3,7 @@
 // Normalize only the explicitly approved removal of the two legacy flip options.
 // Historical baselines remain fixed; unexpected neighboring changes stay visible.
 function legacy(file, source) {
+ source = require('./menu-transport-scope.cjs').normalize(file, source);
  source = source.replaceAll(', bool flipABfaceButtons, bool flipXYfaceButtons', '')
   .replaceAll(', flipABfaceButtons, flipXYfaceButtons', '');
  if (file === 'wasm/gamepad.cpp') {

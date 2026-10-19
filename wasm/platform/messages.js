@@ -71,10 +71,10 @@ var sendMessage = function(method, params) {
     promise.cancel = function() {
       var pending = callbacks[pendingId];
       if (!pending) return;
+      delete callbacks[pendingId];
       if (method === 'openUrlScoped' && typeof Module.cancelMenuRequest === 'function') {
         Module.cancelMenuRequest(pendingId);
       }
-      delete callbacks[pendingId];
       pending.reject(new Error('Menu request cancelled'));
     };
     return promise;

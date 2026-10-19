@@ -52,6 +52,13 @@ function assertFrozen(reference, paths) {
     // independently tested overlay aggregation move, never a whole-file mask.
     const changed = cp.execFileSync('git', ['diff', '--name-only', reference, '--', ...rest], {encoding:'utf8'}).trim().split('\n').filter(Boolean);
     for (const file of changed) {
+      const menu = require('./menu-transport-scope.cjs');
+      if (menu.introduced[file]) { menu.assertIntroduced(file, fs.readFileSync(file,'utf8')); continue; }
+      if (['wasm/http.cpp','wasm/main.cpp','wasm/moonlight_wasm.hpp','wasm/platform/messages.js'].includes(file)) {
+        const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
+        assert.strictEqual(menu.normalize(file,fs.readFileSync(file,'utf8')),menu.normalize(file,old),file+' bounded menu transport only');
+        continue;
+      }
       if (file === 'wasm/platform/index.js') {
         const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
         const defaults = require('./rumble-default-scope.cjs').normalize;

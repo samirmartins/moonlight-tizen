@@ -12,7 +12,7 @@ assert.match(callback, /emscripten_async_run_in_main_runtime_thread\(/);
 const baseline = cp.execFileSync('git', ['show', 'v3.4.2:wasm/connectionlistener.cpp'], {encoding: 'utf8'});
 assert.strictEqual(source.slice(0, start), baseline.slice(0, baseline.indexOf('void MoonlightInstance::ClConnectionStatusUpdate')));
 assert.strictEqual(source.slice(end), baseline.slice(baseline.indexOf('CONNECTION_LISTENER_CALLBACKS')));
-assert.strictEqual(fs.readFileSync('wasm/moonlight_wasm.hpp', 'utf8').replace(
+assert.strictEqual(require('./menu-transport-scope.cjs').normalize('wasm/moonlight_wasm.hpp',fs.readFileSync('wasm/moonlight_wasm.hpp', 'utf8')).replace(
   '  static void ApplyConnectionStatus(int connectionStatus, int generation);\n', ''),
   require('./controller-mapping-scope.cjs').legacy('wasm/moonlight_wasm.hpp',
     cp.execFileSync('git', ['show', 'v3.4.2:wasm/moonlight_wasm.hpp'], {encoding: 'utf8'})),

@@ -10,7 +10,8 @@ const lifecycle=require('./app-lifecycle-scope.cjs').normalize;
 const covers=require('./library-cover-scope.cjs').normalize;
 for(const f of ['wasm/platform/index.js','wasm/platform/messages.js','wasm/platform/common.js',
  'wasm/static/js/utils.js','wasm/static/js/mdns-browser/main.js']){
- assert.strictEqual(normalize(covers(f,fs.readFileSync(f,'utf8'))),normalize(covers(f,old(f))),f+' only logging/start rejection/cover invalidation');
+ const menu = require('./menu-transport-scope.cjs').normalize;
+ assert.strictEqual(normalize(covers(f,menu(f,fs.readFileSync(f,'utf8')))),normalize(covers(f,menu(f,old(f)))),f+' only logging/start rejection/cover invalidation/scoped cancellation');
 }
 for(const f of ['wasm/auddec.cpp','wasm/audio_ring.hpp','wasm/platform/audio.js','wasm/platform/audio-worklet.js',
  'wasm/platform/gamepad.js','wasm/gamepad.cpp','wasm/input.cpp','wasm/video_timing.hpp','wasm/video_telemetry.hpp',
