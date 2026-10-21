@@ -76,7 +76,7 @@ void MoonlightInstance::ApplyConnectionStatus(int connectionStatus, int generati
       PostToJs(std::string("NoWarningMsg: ") + std::string("Connection to PC has been improved."));
       break;
     case CONN_STATUS_POOR:
-      PostToJs(std::string("WarningMsg: ") + std::string("Slow connection to PC.\nReduce your bitrate!"));
+      PostToJs(std::string("WarningMsg: ") + std::string("Video stream unstable. Check connection or settings."));
       break;
     default:
       break;

@@ -9,6 +9,7 @@ const approved = {
   'moonlight-common-c/src/Limelight-internal.h': 'cc3315a072778a0f22287d37e7c4c9a36b1cf12e3de5ddbe10ebd0695f7754a8'
 };
 function normalize(file, source) {
+  source = require('./warning-text-scope.cjs').normalize(file, source);
   if (approved[file] && crypto.createHash('sha256').update(source).digest('hex') === approved[file])
     return cp.execFileSync('git', ['show', 'v3.4.7:' + file], {encoding: 'utf8'});
   return source;

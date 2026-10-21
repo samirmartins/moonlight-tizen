@@ -52,6 +52,19 @@ function assertFrozen(reference, paths) {
     // independently tested overlay aggregation move, never a whole-file mask.
     const changed = cp.execFileSync('git', ['diff', '--name-only', reference, '--', ...rest], {encoding:'utf8'}).trim().split('\n').filter(Boolean);
     for (const file of changed) {
+      // The wildcard above also matches this test-only adapter. The frozen
+      // CMake source list must keep it out of the application target.
+      if (file === 'wasm/video_recovery_fixture.cpp') {
+        assert(!fs.readFileSync('CMakeLists.txt', 'utf8').includes(file), 'recovery fixture is not linked into the app');
+        continue;
+      }
+      const wording = require('./warning-text-scope.cjs');
+      if (wording.files.includes(file)) {
+        const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
+        assert.strictEqual(wording.normalize(file, fs.readFileSync(file,'utf8')), old,
+          'approved warning literals only: '+file);
+        continue;
+      }
       const recovery = require('./video-recovery-scope.cjs');
       if (recovery.files.includes(file) && file !== 'wasm/wasmplayer.cpp') {
         const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});

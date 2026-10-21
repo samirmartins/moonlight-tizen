@@ -147,7 +147,7 @@ function handleMessage(msg) {
         snackbarLogLong('No video received from host. Check the host PC\'s firewall and port forwarding rules.');
         break;
       case -101: // ML_ERROR_NO_VIDEO_FRAME
-        snackbarLogLong('Your network connection isn\'t performing well. Reduce your video bitrate setting or try a faster connection.');
+        snackbarLogLong('Stream ended. Check connection or settings.');
         break;
       case -102: // ML_ERROR_UNEXPECTED_EARLY_TERMINATION
         snackbarLogLong('Something went wrong on your host PC when starting the stream. Restart your host PC and try again.');

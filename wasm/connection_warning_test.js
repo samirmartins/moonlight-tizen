@@ -1,7 +1,17 @@
 'use strict';
 // Compile the production dispatcher and delivery guard; the frontend is drained explicitly.
-const fs = require('fs'), cp = require('child_process'), path = require('path'), assert = require('assert');
+const fs = require('fs'), cp = require('child_process'), path = require('path'), assert = require('assert'), vm = require('vm');
 const source = fs.readFileSync('wasm/connectionlistener.cpp', 'utf8');
+const wording = require('./warning-text-scope.cjs');
+for (const file of wording.files) {
+  const current = fs.readFileSync(file, 'utf8');
+  const old = cp.execFileSync('git', ['show', 'v3.4.7:' + file], {encoding: 'utf8'});
+  assert.strictEqual(wording.normalize(file, current), old, file + ' changes only the approved literal');
+  assert.notStrictEqual(wording.normalize(file, current + '\n// Unexpected edit\n'), old,
+    'neighboring changes remain visible');
+  assert.notStrictEqual(wording.normalize(file, current.replace('Check connection or settings.', 'Different advice.')), old,
+    'unapproved wording remains visible');
+}
 const start = source.indexOf('// Runs on the browser thread');
 const end = source.indexOf('CONNECTION_LISTENER_CALLBACKS', start);
 assert(start > 0 && end > start);
@@ -62,7 +72,7 @@ void Drain() {
 }
 int main() {
   MoonlightInstance app; g_Instance = &app;
-  const std::string poor = "WarningMsg: Slow connection to PC.\\nReduce your bitrate!";
+  const std::string poor = "WarningMsg: Video stream unstable. Check connection or settings.";
   const std::string okay = "NoWarningMsg: Connection to PC has been improved.";
   Queue(CONN_STATUS_POOR); Queue(CONN_STATUS_OKAY);
   assert(pending.size() == 2 && messages.empty()); Drain();
@@ -85,7 +95,7 @@ int main() {
     Queue(CONN_STATUS_POOR); app.m_SessionGeneration++; Queue(CONN_STATUS_OKAY); Drain();
     assert(messages == std::vector<std::string>({okay})); messages.clear();
   }
-  std::cout << "native warnings: asynchronous FIFO, original messages and stop/session guards passed\\n";
+  std::cout << "native warnings: approved wording, asynchronous FIFO and stop/session guards passed\\n";
 }
 `;
 const tmp = fs.mkdtempSync(path.join(require('os').tmpdir(), 'moonlight-warning-test-'));
@@ -96,4 +106,47 @@ try {
     '-fno-omit-frame-pointer', file, '-o', bin], {stdio: 'inherit'});
   cp.execFileSync(bin, [], {stdio: 'inherit', timeout: 10000});
 } finally { fs.rmSync(tmp, {recursive: true, force: true}); }
+
+// Run the complete production handler. Apart from the approved display text,
+// termination cleanup, diagnostics, menu restoration and timing must match.
+const messagesFile = 'wasm/platform/messages.js';
+const oldMessages = cp.execFileSync('git', ['show', 'v3.4.7:' + messagesFile], {encoding: 'utf8'});
+const newMessages = fs.readFileSync(messagesFile, 'utf8');
+function dispatch(code, message) {
+  const trace = [];
+  const record = name => (...args) => trace.push([name, ...args]);
+  const context = {
+    console: {log() {}}, api: 'fixture',
+    SessionDiagnostics: {finish: record('finish'), note: record('note')},
+    stopVideoPresentationObserver: record('stop video observer'),
+    stopAudioScheduler: record('stop audio'),
+    snackbarLogLong: record('snackbar'), showApps: record('show apps'),
+    setTimeout: record('timer'),
+    $(selector) {
+      return {
+        css: (...args) => trace.push(['css', selector, ...args]),
+        removeClass: (...args) => trace.push(['removeClass', selector, ...args]),
+        text: (...args) => trace.push(['text', selector, ...args])
+      };
+    }
+  };
+  vm.runInNewContext(code, context);
+  context.handleMessage(message);
+  // Timer callbacks are not executed here; compare their source and delay.
+  return JSON.parse(JSON.stringify(trace, (key, value) => typeof value === 'function' ? value.toString() : value));
+}
+for (const message of [
+  ...[0, -100, -101, -102, -103, -104, -999].map(code => 'streamTerminated: ' + code),
+  'WarningMsg: Video stream unstable. Check connection or settings.',
+  'NoWarningMsg: Connection to PC has been improved.',
+  'DecoderError: Synthetic error', 'ProgressMsg: Synthetic progress'
+]) {
+  const expected = dispatch(oldMessages, message);
+  if (message === 'streamTerminated: -101') {
+    const snackbar = expected.find(event => event[0] === 'snackbar');
+    assert.strictEqual(snackbar[1], "Your network connection isn't performing well. Reduce your video bitrate setting or try a faster connection.");
+    snackbar[1] = 'Stream ended. Check connection or settings.';
+  }
+  assert.deepStrictEqual(dispatch(newMessages, message), expected, message + ' preserves all non-text effects');
+}
 console.log('connection_warning_test: receive callback returns before UI work; FIFO and stale-session guards OK');
