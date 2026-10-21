@@ -110,6 +110,14 @@ try {
     assert(summary, 'native completion marker');
     report.variants[name] = {summary, checks, healthy: observations.split('\n').filter(x => x.startsWith('HEALTHY\t')),
       extraction_sha256: {tail: sha(tail), constants: sha(constants), status: sha(status)}, sanitizers: 'ASan/UBSan/LSan: no reported violations'};
+    const stress = observations.split('\n').filter(x => x.startsWith('STRESS\t')).map(line => {
+      const values = line.split('\t').slice(1).map(Number);
+      return Object.fromEntries(['codec', 'metrics', 'fragments', 'fps', 'seed', 'frames',
+        'offered_failures', 'append_failures', 'unsafe_submissions', 'forgotten_recovery', 'requests']
+        .map((key, index) => [key, values[index]]));
+    });
+    assert.strictEqual(stress.length, 72, 'seeded simulation completion markers');
+    report.variants[name].stress = stress;
     console.log(name + ': ' + summary);
     if (!legacy) {
       // A generated-only mutation must be caught by the actual behavioral assertions.
@@ -125,6 +133,21 @@ try {
   }
   assert.deepStrictEqual(report.variants.current.healthy, report.variants.baseline.healthy,
     'healthy payload/sequence/timestamps, submit count and clock-read count must match the release');
+  const schedule = items => items.map(({codec, metrics, fragments, fps, seed, frames, offered_failures}) =>
+    ({codec, metrics, fragments, fps, seed, frames, offered_failures}));
+  assert.deepStrictEqual(schedule(report.variants.current.stress), schedule(report.variants.baseline.stress),
+    'both variants receive exactly the same deterministic fault schedule');
+  report.stress_comparison = {};
+  for (const name of ['baseline', 'current']) {
+    const items = report.variants[name].stress;
+    report.stress_comparison[name] = {
+      scenarios: items.length,
+      frames: items.reduce((sum, row) => sum + row.frames, 0),
+      unsafe_submissions: items.reduce((sum, row) => sum + row.unsafe_submissions, 0),
+      forgotten_recovery: items.reduce((sum, row) => sum + row.forgotten_recovery, 0)
+    };
+  }
+  console.log('seeded recovery simulations: ' + JSON.stringify(report.stress_comparison));
   const legacyCases = new Map(report.variants.baseline.checks.map(x => [x.name, x]));
   report.comparison = report.variants.current.checks.map(item => ({name: item.name,
     baseline: legacyCases.get(item.name)?.status || 'NOT_TESTED', current: item.status}));
