@@ -20,7 +20,8 @@ const flush=async()=>{for(let i=0;i<350;i++)await Promise.resolve();};
   await cached.open();assert.strictEqual(cached.calls.length,before,'warm return must retain compressed bytes within the same budget');
   for(let id=1;id<=16;id++)assert.strictEqual(cached.card(id).querySelector('img').src,url(id),'cover bytes unchanged');
   const retained=cached.calls.length;cached.revision();cached.node('libraryRefresh').click();await flush();
-  assert.strictEqual(cached.calls.length,retained+16,'explicit Refresh still renews every cover');
+  assert.strictEqual(cached.calls.length,retained,'Reload does not renew covers in the old document');
+  assert.strictEqual(cached.io.reloads,1);
   cached.suspend();
 
   const large=fixture(6,id=>'data:image/png;base64,'+Buffer.alloc(1024*1024,id).toString('base64'));
@@ -38,7 +39,7 @@ const flush=async()=>{for(let i=0;i<350;i++)await Promise.resolve();};
   await recovery.open();assert.strictEqual(recovery.host.paired,true);
   assert.strictEqual(recovery.host.ppkstr,'fixture-pin');
   recovery.host.connect=function(){this.online=true;this._authenticatedOnline=true;return Promise.resolve('fixture.invalid');};
-  recovery.node('libraryRefresh').click();await flush();
+  await recovery.open();await flush();
   assert.match(recovery.node('libraryStatus').textContent,/PC online/);
   assert.strictEqual(recovery.node('libraryPlay').textContent,'Play');recovery.suspend();
   const cp=require('child_process'),file='wasm/platform/console-library.js';
@@ -49,5 +50,5 @@ const flush=async()=>{for(let i=0;i<350;i++)await Promise.resolve();};
     ['return host.connect(current)','return host.connect()'],['if (!host.paired)','if (host.paired)']]) {
     assert(source.includes(old));assert.notStrictEqual(normalize(file,source.replace(old,next)),oldSource,'unknown neighboring changes are rejected');
   }
-  console.log('menu_recovery_test: disk-before-PC/network-after-PC ordering, exact binary retention, count/byte bounds, forced renewal and transient recovery OK');
+  console.log('menu_recovery_test: disk-before-PC/network-after-PC ordering, exact binary retention, count/byte bounds, document reload without old-document IO and explicit recovery OK');
 })().catch(error=>{console.error(error);process.exitCode=1;});

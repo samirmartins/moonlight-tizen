@@ -42,6 +42,7 @@ function launch(source) {
   .replace("  if (typeof ControllerMapping !== 'undefined') ControllerMapping.prepareSession();\n", '');
 }
 function normalize(file, source) {
+ source = require('./manual-library-scope.cjs').normalize(file, source);
  source = require('./gamepad-publication-scope.cjs').normalize(file, source);
  source = legacy(file, source);
  if (file === 'wasm/platform/index.js') return launch(source);

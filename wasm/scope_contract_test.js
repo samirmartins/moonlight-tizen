@@ -152,7 +152,7 @@ assert.strictEqual(css.slice(css.indexOf('   Streaming Layout')),oldCss.slice(ol
 // the explicitly authorized error/lifecycle and held-input changes.
 const fs = require('fs'), cp = require('child_process'), assert = require('assert');
 function old(file) { return require('./controller-mapping-scope.cjs').legacy(file, cp.execFileSync('git', ['show', 'v3.4.0:' + file], {encoding: 'utf8'})); }
-function current(file) { return fs.readFileSync(file, 'utf8'); }
+function current(file) { return require('./manual-library-scope.cjs').normalize(file,fs.readFileSync(file, 'utf8')); }
 function maskMethod(source, marker) {
  const start = source.indexOf(marker); assert(start >= 0, marker);
  let end = source.indexOf('{', start) + 1, depth = 1;

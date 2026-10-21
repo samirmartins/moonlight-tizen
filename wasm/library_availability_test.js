@@ -13,12 +13,9 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
   for(const app of f.apps)assert(f.card(app.id).querySelector('img').src.startsWith('data:image/'));
   assert.match(f.node('libraryStatus').textContent,/Checking/);
   assert(!f.node('libraryPlay').disabled,'checking does not block manual Play/Wake');
-  // Programmatic reentry must coalesce too. Manual Refresh still renews covers
-  // after confirmation, without cancelling/restarting TLS for repeated clicks.
-  for(let i=0;i<30;i++)f.node('libraryRefresh').onclick();
-  assert.strictEqual(connections,1);assert(scopes[0].active);
+  assert(!f.node('libraryRefresh').disabled,'document reload is available even during discovery');
   gate.resolve('fixture.invalid');await opening;await f.flush();
-  assert.strictEqual(f.calls.filter(call=>call.force).length,4);
+  assert.strictEqual(f.calls.filter(call=>call.force).length,0);
   assert.match(f.node('libraryStatus').textContent,/PC online/);assert(!f.node('libraryRefresh').disabled);
   f.suspend();assert.strictEqual(f.timers.size,0);
   // A missing discovery callback is bounded independently of artwork.
@@ -28,25 +25,24 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
   f.timers.delete(timeout[0]);timeout[1].fn();await opening;
   assert.match(f.node('libraryStatus').textContent,/not responding/);
   assert(!f.node('libraryRefresh').disabled);f.suspend();assert.strictEqual(f.timers.size,0);
-  // Slow disk decoding cannot consume the retry while Refresh is pending.
+  // Slow disk decoding never schedules another check in the old document.
   f=fixture();f.host.delay=[];f.host.connect=()=>Promise.reject(Error('timeout'));
   opening=f.c.ConsoleLibrary.open(f.host);await f.flush();
   assert(![...f.timers.values()].some(t=>t.ms===2000));
   for(let i=0;i<2;i++){f.host.delay.splice(0).forEach(resolve=>resolve('data:image/png;base64,fixture'));await f.flush();}
-  await opening;assert([...f.timers.values()].some(t=>t.ms===2000));f.suspend();assert.strictEqual(f.timers.size,0);
-  // A failed quick probe cannot establish that the PC is powered off. Keep a
-  // full-deadline retry so slower responses can still restore verified status.
+  await opening;assert.strictEqual(f.timers.size,0);f.suspend();
+  // No response is not proof of power-off. Recovery is an explicit visit/reload.
   f=fixture();scopes=[];connections=0;f.host.online=false;
   f.host.connect=scope=>{scopes.push(scope);connections++;return connections===1?Promise.reject(Error('quick timeout')):Promise.resolve('fixture.invalid');};
   await f.open();assert.match(f.node('libraryStatus').textContent,/not responding/);
   assert(!/offline|powered off/i.test(f.node('libraryStatus').textContent));
-  const entry=[...f.timers].find(([,t])=>t.ms===2000);assert(entry);
-  f.timers.delete(entry[0]);f.host.online=true;entry[1].fn();await f.flush();
+  assert.strictEqual(f.timers.size,0);
+  f.host.online=true;await f.open();
   assert.strictEqual(scopes[1].useAppListProbe,undefined);assert.match(f.node('libraryStatus').textContent,/PC online/);
   f.suspend();assert.strictEqual(f.timers.size,0);
   // App-list failure after authenticated contact never becomes PC offline.
   f=fixture();f.host.getAppListWithCacheFlush=()=>Promise.reject(Error('slow app list'));
-  await f.open();assert.strictEqual(f.host.online,true);assert.match(f.node('libraryStatus').textContent,/PC online · library unavailable/);
+  await f.open();assert.strictEqual(f.host.online,true);assert.match(f.node('libraryStatus').textContent,/PC responded · library unavailable/);
   f.suspend();assert.strictEqual(f.timers.size,0);
   // Delayed discovery cannot restart I/O or repaint after entering gameplay.
   f=fixture();gate=deferred();let lateScope;
@@ -79,5 +75,5 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
     const normalize=require('./library-availability-scope.cjs').normalize;
     assert.strictEqual(normalize(file,fs.readFileSync(file,'utf8')),cp.execFileSync('git',['show','v3.4.5:'+file],{encoding:'utf8'}),'availability-only changes: '+file);
   }
-  console.log('library_availability_test: cache before discovery, single-flight Refresh, authenticated quick/full probes, no false power claim, slow list, local-first fallback and cancellation OK');
+  console.log('library_availability_test: cache before one-shot check, bounded probes, no false power claim, slow list, explicit recovery, pinned fallback and cancellation OK');
 })().catch(error=>{console.error(error);process.exitCode=1;});

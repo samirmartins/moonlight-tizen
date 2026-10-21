@@ -87,21 +87,17 @@ function closeUtilityDialog(id) {
 }
 
 var WakeHost = (function() {
-  var host = null, scope = null, retry = 0, deadline = 0, opened = false;
+  var host = null, scope = null, opened = false;
   function status(text) { document.getElementById('wakeStatus').textContent = text; }
   function cancel() {
     if (scope) scope.cancel();
     scope = null;
-    clearTimeout(retry);
-    clearTimeout(deadline);
-    retry = deadline = 0;
     document.getElementById('wakeSend').disabled = false;
   }
   function close() {
     cancel();
     opened = false;
     closeUtilityDialog('wakeDialog');
-    if (!isInGame && host && hosts[host.serverUid] === host) beginBackgroundPollingOfHost(host);
   }
   function save() {
     var mac = normalizeWakeMac(document.getElementById('wakeMac').value);
@@ -117,49 +113,23 @@ var WakeHost = (function() {
     endBackgroundPollingOfHost(host);
     scope = createMenuRequestScope();
     var current = scope;
-    var valid = function() { return opened && current.active && scope === current && !isInGame; };
+    var valid = function() { return opened && current.active && scope === current && !isInGame && !document.hidden; };
     document.getElementById('wakeSend').disabled = true;
     status('Sending Wake-on-LAN...');
-    deadline = setTimeout(function() {
-      if (!valid()) return;
-      cancel();
-      status('Sunshine not ready yet. Close this dialog; the PC list will keep checking automatically.');
-      if (hosts[host.serverUid] === host) beginBackgroundPollingOfHost(host);
-    }, 60000);
-    var check = function() {
-      if (!valid()) return;
-      host.connect(current).then(function() {
-        if (!valid()) return;
-        if (host.paired && host.ppkstr && host._authenticatedOnline === false) {
-          status('PC awake · waiting for authenticated Sunshine connection…');
-          retry = setTimeout(check,3000); return;
-        }
-        updateHostStatusIndicator(host);
-        var cell = document.getElementById('host-' + host.serverUid);
-        if (cell) cell.classList.remove('host-cell-inactive');
-        cancel();
-        status('PC online — Sunshine/GameStream responded. Close to connect.');
-      }, function() {
-        if (valid()) retry = setTimeout(check, 3000);
-      });
-    };
     current.request(function() { return host.sendWOL(); }, 8000).then(function() {
       if (!valid()) return;
-      status('Wake packet sent. Waiting up to 60 s for Sunshine/GameStream (sent does not mean awake).');
-      check();
-    }, function(error) {
+      cancel();
+      status('Wake packet sent. Wait for the PC, then press Play or Reload Moonlight. Sent does not mean awake.');
+    }, function() {
       if (!valid()) return;
       cancel();
-      status('Could not send: ' + (error.message || error));
+      status('Could not send the wake packet. Check the saved MAC and local network.');
     });
   }
   return {
     cancel: cancel,
-    hostUpdated: function(updatedHost) {
-      if (opened && host === updatedHost && !scope && host.online) {
-        status('PC online — Sunshine/GameStream responded. Close to connect.');
-      }
-    },
+    // Sending a packet does not check availability or start an app.
+    hostUpdated: function() {},
     open: function(selectedHost) {
       if (isInGame || isDialogOpen) return;
       cancel();

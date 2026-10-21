@@ -1,5 +1,5 @@
 'use strict';
-// Production NvHTTP + library, synthetic transport and deterministic retry clock.
+// Production NvHTTP + library, synthetic transport and explicit menu visits.
 // Browser coverage separately exercises the XML parser with actual DOMParser.
 const assert=require('assert');
 const {fixture}=require('./library_cover_cache_test.js');
@@ -13,8 +13,8 @@ function xmlQuery(xml,tag='root') {
 const list='<root status_code="200"><App><ID>1</ID><AppTitle>Game 001</AppTitle></App></root>';
 const empty='<root status_code="200"></root>',denied='<root status_code="401"></root>';
 async function retry(f) {
-  const entry=[...f.timers].find(([,t])=>t.ms===2000);assert(entry,'retry remains armed after every failed boot response');
-  f.timers.delete(entry[0]);entry[1].fn();await f.flush();
+  assert.strictEqual(f.timers.size,0,'no periodic retry remains armed');
+  await f.open();
 }
 function setup() {
   const f=fixture(1),c=f.c,h=f.host,raw=new c.NvHTTP('fixture.invalid','fixture');
@@ -65,5 +65,5 @@ function setup() {
   assert(first.every(a=>a[0].includes('/serverinfo?')),'offline never fetches the app list');
   await retry(r);assert.strictEqual(r.requests.length,10);assert.deepStrictEqual(r.requests.slice(5).map(a=>a[0].split('?')[0]),first.map(a=>a[0].split('?')[0]));
   assert(r.requests.every(a=>a[0].startsWith('https://')));r.suspend();
-  console.log('host_availability_test: serverinfo-first connection, 12 offline rounds, auth delay, recovery without restart, second power cycle, empty/bad list distinction, full fallback scan and gameplay cancellation OK');
+  console.log('host_availability_test: serverinfo-first connection, 12 explicit offline visits, auth delay, second power cycle, empty/bad lists, full fallback scan and no periodic polling OK');
 })().catch(error=>{console.error(error);process.exitCode=1;});

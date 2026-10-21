@@ -91,11 +91,11 @@ function realLauncher(f,stage,resume=false,source=launcher) {
  f.c.isInGame=true;f.c.handleMessage('Connection Established');
  assert.strictEqual(connected,1);assert.strictEqual(focused,1);
  f.c.ConsoleLibrary.suspend();
- // An offline, pending Wake & play is cancelled; even a late successful packet
+ // An offline, pending Wake packet is cancelled; even a late successful packet
  // reply must not start polling, create audio again or launch on return.
  f=fixture({online:false,wakeDelayed:true});
  ['hosts','runtime'].forEach(x=>f.c.ConsoleLibrary.ready(x));await f.flush();
- f.node('libraryPlay').click();assert.strictEqual(f.calls.wake,1);
+ f.node('libraryWake').click();assert.strictEqual(f.calls.wake,1);
  f.visibility(true);f.host.online=true;f.host.resolveWake();await f.flush();
  assert.strictEqual(f.launched.length,0);assert.strictEqual(f.timers.size,0);
  f.visibility(false);await f.flush();assert.strictEqual(f.launched.length,0);assert.strictEqual(f.calls.wake,1);

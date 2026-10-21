@@ -276,27 +276,17 @@ function beginBackgroundPollingOfHost(host) {
     if (cell) cell.classList.toggle('host-cell-inactive', !host.online);
     updateHostStatusIndicator(host);
   };
-  var schedule = function() {
-    if (!current()) return;
-    activePolls[uid] = window.setTimeout(function() {
-      delete activePolls[uid];
-      if (!current()) return;
-      host.pollServer(function() { update(); schedule(); }, scope);
-    }, 5000);
-  };
+  // One check per PC-list visit. There is no periodic availability polling.
   host.connect(scope).then(function() {
     if (!current()) return;
     host.online = true;
     host._consecutivePollFailures = 0;
     update();
-    if (host.online) schedule();
-    else host.pollServer(function() { update(); schedule(); }, scope);
   }, function() {
     if (!current()) return;
     host.online = false;
     host._memCachedApplist = null;
     update();
-    schedule();
   });
 }
 

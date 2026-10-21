@@ -83,6 +83,7 @@ const flush=async()=>{for(let i=0;i<100;i++)await Promise.resolve();};
   const index=fs.readFileSync('wasm/platform/index.js','utf8');
   assert(index.includes('host.connect(scope).then(function() {'),'startup uses the same coordinator');
   const tools=fs.readFileSync('wasm/platform/menu-tools.js','utf8');
-  assert.strictEqual(tools,cp.execFileSync('git',['show','ed86862:wasm/platform/menu-tools.js'],{encoding:'utf8'}).replace('    scope.useAppListProbe = true;\n',''));
+  assert.strictEqual(require('./manual-library-scope.cjs').normalize('wasm/platform/menu-tools.js',tools),
+    cp.execFileSync('git',['show','ed86862:wasm/platform/menu-tools.js'],{encoding:'utf8'}).replace('    scope.useAppListProbe = true;\n',''));
   console.log('host_connect_test: fresh startup coordinator, full fallback, pinned identity, preserved pairing/cache, supersession, late reply, timeout cleanup, zero gameplay work and exact source scope OK');
 })().catch(error=>{console.error(error);process.exitCode=1;});

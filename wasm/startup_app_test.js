@@ -64,12 +64,12 @@ function fixture(options={}) {
    assert.strictEqual(f.calls.connect,1,'Readiness is idempotent');
    assert.deepStrictEqual(f.prefs().favorites,[2]);assert.deepStrictEqual(f.prefs().recent,[1]);
    assert.strictEqual(f.prefs().focus,2);
-   if(!online){await f.tick(2000);assert.strictEqual(f.calls.wake,0);assert.strictEqual(f.launched.length,0);}
+   if(!online){assert.strictEqual(f.timers.size,0);assert.strictEqual(f.calls.wake,0);assert.strictEqual(f.launched.length,0);}
    // Old candidate preferences must never wake or launch, but manual Play still works.
    f.node('libraryPlay').click();await f.flush();
    assert.strictEqual(f.launched.length,1);assert.strictEqual(f.launched[0].app,2);
-   assert.strictEqual(f.calls.wake,online?0:1);
-   assert.strictEqual(f.calls.audio,online?0:1);
+   assert.strictEqual(f.calls.wake,0);
+   assert.strictEqual(f.calls.audio,0);
    f.c.ConsoleLibrary.suspend();await f.flush();assert.strictEqual(f.timers.size,0);
   } catch(error) {
    console.error('STRESS_CASE '+JSON.stringify({seed,index,online,wake,ready}));throw error;
@@ -77,10 +77,10 @@ function fixture(options={}) {
  }
  let f=fixture({online:false,wakeDelayed:true,record:{startupApp:1,startupWake:true}});
  ['hosts','runtime'].forEach(part=>f.c.ConsoleLibrary.ready(part));await f.flush();
- f.node('libraryPlay').click();assert.strictEqual(f.calls.wake,1);
- f.node('libraryPlay').click();f.c.ConsoleLibrary.accept();assert.strictEqual(f.calls.wake,1);
- f.node('libraryCancel').click();f.host.online=true;f.host.resolveWake();await f.flush();
- assert.strictEqual(f.launched.length,0);assert.strictEqual(f.calls.close,1);
+ f.node('libraryWake').click();assert.strictEqual(f.calls.wake,1);
+ f.node('libraryWake').click();assert.strictEqual(f.calls.wake,1);
+ f.c.ConsoleLibrary.settings();f.host.online=true;f.host.resolveWake();await f.flush();
+ assert.strictEqual(f.launched.length,0);assert.strictEqual(f.calls.close,0);
  f.c.ConsoleLibrary.suspend();assert.strictEqual(f.timers.size,0);
  f=fixture({delayed:true,record:{startupApp:1,startupWake:true}});
  ['runtime','hosts'].forEach(part=>f.c.ConsoleLibrary.ready(part));await f.flush();

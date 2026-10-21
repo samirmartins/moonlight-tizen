@@ -4,12 +4,11 @@ var ConsoleLibrary = (function() {
   var prefs = { preferred: '', hosts: {} };
   var host = null, apps = [], selected = 0, filter = 'all';
   var active = false, scope = null, coverScope = null, epoch = 0, busy = false, checking = false;
-  var retry = 0, deadline = 0, preparedAudio = false, settingsReturn = false;
+  var settingsReturn = false, wakeScope = null, reloading = false;
   var runtimeReady = false, hostsReady = false, started = false, bound = false;
   var navIndex = 0, currentRecord = null;
   var launchPending = false, launchTimer = 0;
   var refreshPending = null, refreshCovers = false;
-  var wakeIntent = null;
   try {
     var saved = JSON.parse(localStorage.getItem(key));
     if (saved && typeof saved.preferred === 'string' && saved.hosts && typeof saved.hosts === 'object') prefs = saved;
@@ -131,22 +130,16 @@ var ConsoleLibrary = (function() {
   }
   function valid(token) { return active && !isInGame && !document.hidden && token === epoch && host && hosts[host.serverUid] === host; }
   function status(text) { el('libraryStatus').textContent = text; }
-  function cancel(keepWake) {
-    var preserveWake = keepWake === true && wakeIntent && wakeIntent.host === host;
+  function cancel() {
     epoch++;
     if (scope) scope.cancel();
     if (coverScope) coverScope.cancel();
     scope = null;
     coverScope = null;
-    clearTimeout(retry); retry = 0; checking = false; busy = !!preserveWake;
+    checking = false; busy = false;
     refreshPending = null; refreshCovers = false;
-    if (!preserveWake) {
-      clearTimeout(deadline); deadline = 0;
-      if (wakeIntent) wakeIntent.scope.cancel();
-      wakeIntent = null;
-      if (preparedAudio && !isInGame) stopAudioScheduler(true);
-      preparedAudio = false;
-    }
+    if (wakeScope) wakeScope.cancel();
+    wakeScope = null;
   }
   function hide() {
     cancel(); active = false;
@@ -158,7 +151,6 @@ var ConsoleLibrary = (function() {
   }
   function suspend() {
     // Called before streaming. Late replies cannot render, save or start tasks.
-    preparedAudio = false;
     hide();
     el('game-grid').textContent = '';
     selectedCard = null;
@@ -178,7 +170,7 @@ var ConsoleLibrary = (function() {
     return values.length === 1 ? values[0] : null;
   }
   function controls() {
-    return ['libraryPCsBtn','settingsBtn','quitRunningAppBtn','libraryPlay','libraryFavorite','libraryAll','libraryFavorites','libraryRecent','libraryRefresh','libraryCancel'].filter(function(name) {
+    return ['libraryPCsBtn','settingsBtn','quitRunningAppBtn','libraryWake','libraryPlay','libraryFavorite','libraryAll','libraryFavorites','libraryRecent','libraryRefresh'].filter(function(name) {
       var node = el(name); return node && !node.disabled && node.style.display !== 'none' && !node.hidden;
     });
   }
@@ -195,14 +187,14 @@ var ConsoleLibrary = (function() {
   function updateSelection() {
     var app = picked(), r = record();
     el('libraryTitle').textContent = app ? app.title : 'Your library';
-    el('libraryPlay').textContent = hostReady() && app && Number(host.currentGame) === app.id ? 'Resume' : hostReady() ? 'Play' : 'Wake & play';
-    // Checking never locks Play/Wake. Repeated Refresh shares the current work.
-    el('libraryPlay').disabled = !app || busy || launchPending;
+    el('libraryPlay').textContent = app && Number(host.currentGame) === app.id ? 'Resume' : 'Play';
+    // Availability is advisory. Play never wakes a PC or waits for a probe.
+    el('libraryPlay').disabled = !app;
+    el('libraryWake').disabled = !!wakeScope;
     el('libraryFavorite').disabled = !app || busy;
     el('libraryFavorite').textContent = app && r.favorites.indexOf(app.id) !== -1 ? '★ Favorite' : '☆ Favorite';
     el('libraryFavorite').setAttribute('aria-pressed', !!app && r.favorites.indexOf(app.id) !== -1);
-    el('libraryRefresh').disabled = busy || launchPending || !!refreshPending;
-    el('libraryCancel').hidden = !busy;
+    el('libraryRefresh').disabled = false;
     el('quitRunningAppBtn').style.display = host.online && Number(host.currentGame) > 0 ? '' : 'none';
     var card = el('game-container-' + selected);
     if (card && card.parentNode !== el('game-grid')) card = null;
@@ -278,7 +270,7 @@ var ConsoleLibrary = (function() {
     }
     renderedHost = host;
     el('libraryEmpty').hidden = items.length !== 0;
-    el('libraryEmpty').textContent = apps.length ? 'No games in this section. Choose All games.' : host.online ? 'Add games in Sunshine, then Refresh.' : 'Wake the PC to load your library.';
+    el('libraryEmpty').textContent = apps.length ? 'No games in this section. Choose All games.' : 'Start the PC and Sunshine, then use Reload Moonlight.';
     ['All','Favorites','Recent'].forEach(function(name) {
       el('library'+name).setAttribute('aria-pressed', filter === name.toLowerCase());
     });
@@ -306,25 +298,21 @@ var ConsoleLibrary = (function() {
       return address;
     });
   }
-  function refresh(forceCovers, thorough) {
-    if (!active || isInGame || (busy && !(wakeIntent && wakeIntent.sent))) return Promise.resolve();
+  function refresh(forceCovers) {
+    if (!active || isInGame || document.hidden) return Promise.resolve();
     if (refreshPending) {
       refreshCovers = refreshCovers || forceCovers === true;
       return refreshPending;
     }
-    cancel(!!wakeIntent); scope = createMenuRequestScope();
-    var current = scope, token = epoch, reached = false, retryCheck = false;
-    var waking = !!(wakeIntent && wakeIntent.sent);
+    cancel(); scope = createMenuRequestScope();
+    var current = scope, token = epoch, reached = false;
     refreshCovers = forceCovers === true;
     checking = true;
-    status(thorough ? 'PC not responding · checking again…' : 'Checking PC…'); updateSelection();
+    status('Checking PC once…'); updateSelection();
     // Disk-only artwork is independent of network discovery, including a cold
     // menu/offline PC. Never queue downloads in front of the status request.
     var cached = render(false, true);
-    // Artwork is presentation, not readiness. During wake, neither a stalled
-    // disk read nor cover downloads may hold the next authenticated probe.
-    if (waking) cached.catch(function() {});
-    // Startup, Refresh and Wake use the same fresh serverinfo connection.
+    // One bounded startup/return check only. No retry loop or wake intent.
     refreshPending = current.request(function() {
       return connect(current,token);
     }, 26000).then(function() {
@@ -338,16 +326,8 @@ var ConsoleLibrary = (function() {
       if (!valid(token)) return;
       apps = cleanApps(value); record().apps = apps; host._memCachedApplist = apps;
       save(); checking = false; status('PC online · ' + apps.length + ' games');
-      return (waking ? Promise.resolve() : cached).then(function() {
-        if (!hostReady()) { retryCheck = true; status('Sunshine not verified · retrying…'); }
-        // Wake stores only an intent. This ordinary library refresh owns all
-        // discovery and hands off once to the same launcher as manual Play.
-        if (valid(token) && wakeIntent && wakeIntent.sent && hostReady() && host.paired &&
-            apps.some(function(app) { return app.id === wakeIntent.appId; })) {
-          var intent = wakeIntent; wakeIntent = null; intent.scope.cancel();
-          launch(intent.appId,true); return;
-        }
-        if (valid(token) && !waking) return render(refreshCovers);
+      return cached.then(function() {
+        if (valid(token)) return render(refreshCovers);
       });
     }, function(error) {
       if (!valid(token)) return;
@@ -357,22 +337,11 @@ var ConsoleLibrary = (function() {
       if (!reached) host.online = false;
       // No response cannot distinguish a powered-off PC from a slow Sunshine,
       // firewall or network failure. Do not claim to have measured its power.
-      status(!reached ? 'PC not responding · retrying…' : !host.paired ? 'Pair this PC from PCs.' : 'PC online · library unavailable');
-      // Only the visible menu retries; suspend/settings/stream cancel the scope.
-      retryCheck = true;
-      return waking ? undefined : cached;
+      status(!reached ? 'PC not responding. Try Play or Reload Moonlight.' : !host.paired ? 'Pair this PC from PCs.' : 'PC responded · library unavailable. Use Reload Moonlight.');
+      return cached;
     }).then(function() {
       if (!valid(token)) return;
       refreshPending = null; refreshCovers = false; updateSelection();
-      if (wakeIntent && wakeIntent.sent) {
-        if (!host.paired) { wakeIntent.fail('PC needs pairing. Open PCs.'); return; }
-        retryCheck = true;
-        status(hostReady() && !apps.some(function(app) { return app.id === wakeIntent.appId; })
-          ? 'PC online · waiting for selected app · retrying…' : 'Waiting for Sunshine · retrying…');
-      }
-      // Normal Refresh retains its artwork barrier. Wake reaches this point
-      // from network readiness alone, so slow images cannot consume its budget.
-      if (retryCheck) retry = setTimeout(function() { if (valid(token)) refresh(false, true); }, 2000);
     });
     updateSelection();
     return refreshPending;
@@ -403,54 +372,53 @@ var ConsoleLibrary = (function() {
     var r = record();
     if (r.focus !== appId) { r.focus = appId; saveFocus(); }
     r.recent = [appId].concat(r.recent.filter(function(old) { return old !== appId; })).slice(0,20);
-    save(); preparedAudio = false; cancel(); updateSelection();
+    save(); cancel(); updateSelection();
     launchPending = true;
     clearTimeout(launchTimer);
     launchTimer = setTimeout(function() { launchPending = false; launchTimer = 0; },2000);
-    // Online launch is synchronous with the click; wake launch reuses the
-    // context prepared by that same click, preserving Tizen's autoplay gesture.
+    // Keep the original manual launcher in the user's audio gesture.
     startGame(chosenHost,appId,audioReady);
   }
   function play(appId) {
-    if (!active || isInGame || busy || launchPending || !apps.some(function(app) { return app.id === id(appId); })) return;
+    if (!active || isInGame || launchPending || !apps.some(function(app) { return app.id === id(appId); })) return;
     appId = id(appId); select(appId);
-    if (hostReady()) {
-      if (!host.paired) { hostChosen(host); return; }
-      launch(appId,false); return;
-    }
+    if (!host.paired) { snackbarLog('Pair this PC from PCs before playing.'); return; }
+    launch(appId,false);
+  }
+  function wake() {
+    if (!active || isInGame || wakeScope) return;
     if (!normalizeWakeMac(host.wakeMacOverride || host.macAddress)) {
-      cancel();
-      WakeHost.open(host); snackbarLog('Set the Wake-on-LAN MAC once, then choose Play.'); return;
+      WakeHost.open(host); return;
     }
-    cancel();
-    var intent = { host: host, appId: appId, scope: createMenuRequestScope(), sent: false };
-    wakeIntent = intent;
-    prepareStreamAudio(); preparedAudio = true; busy = true;
-    status('Waking PC…'); updateSelection();
-    Navigation.change(Views.AppsNav); navIndex = controls().indexOf('libraryCancel'); focusNav(0);
-    function currentWake() {
-      return wakeIntent === intent && intent.scope.active && active && !isInGame && !document.hidden &&
-        hosts[intent.host.serverUid] === intent.host && host === intent.host;
-    }
-    function failed(text) {
-      if (!currentWake()) return;
-      cancel(); scope = createMenuRequestScope(); status(text); updateSelection(); focusCards();
-    }
-    intent.fail = failed;
-    intent.scope.request(function() { return intent.host.sendWOL(); },8000).then(function() {
-      if (!currentWake()) return;
-      intent.sent = true;
-      deadline = setTimeout(function() { failed('PC not ready after 120 s. Check Sunshine, then try again.'); },120000);
-      // No separate wake polling loop: use the proven visible-library path.
-      refresh(false,true);
-    },function() { failed('Could not send Wake-on-LAN. Check PC settings.'); });
+    var current = createMenuRequestScope(), token = epoch;
+    wakeScope = current; updateSelection();
+    current.request(function() { return host.sendWOL(); },8000).then(function() {
+      if (valid(token) && wakeScope === current) {
+        status('Wake packet sent. Wait for the PC, then press Play.');
+        snackbarLog('Wake packet sent. This does not confirm the PC is awake.');
+      }
+    },function() {
+      if (valid(token) && wakeScope === current) snackbarLog('Could not send Wake-on-LAN. Check the saved MAC and PC settings.');
+    }).then(function() {
+      if (wakeScope !== current) return;
+      current.cancel(); wakeScope = null;
+      if (valid(token)) updateSelection();
+    });
+  }
+  function reload() {
+    if (!active || isInGame || document.hidden || reloading) return;
+    reloading = true;
+    cancel(); stopPollingHosts(); stopSubnetScanner();
+    // Reload the document and its WASM runtime, not another NvHTTP object.
+    // Persistent pairing/settings are untouched; never reload during a stream.
+    window.location.reload();
   }
   function bind() {
     if (bound) return; bound = true;
     el('libraryPlay').onclick = function() { play(selected); };
+    el('libraryWake').onclick = wake;
     el('libraryFavorite').onclick = favorite;
-    el('libraryRefresh').onclick = function() { refresh(true); };
-    el('libraryCancel').onclick = function() { cancel(); scope = createMenuRequestScope(); status('Wake cancelled'); updateSelection(); focusCards(); };
+    el('libraryRefresh').onclick = reload;
     el('libraryPCsBtn').onclick = showHosts;
     el('libraryHomeBtn').onclick = function() { var pc = preferred(); if (pc) showApps(pc); };
     ['All','Favorites','Recent'].forEach(function(name) {
@@ -483,7 +451,7 @@ var ConsoleLibrary = (function() {
     showAppsMode(); decorate();
     el('game-grid').style.display = 'grid'; $('#wasmSpinner').hide();
     // refresh() owns the single initial render/cache pass and its cancellation.
-    status('Checking PC…');
+    status('Checking PC once…');
     var opening = refresh();
     Navigation.change(Views.Apps); Navigation.start(); focusCards();
     return opening;
@@ -504,7 +472,7 @@ var ConsoleLibrary = (function() {
     accept: function() { play(selected); }, favorite: favorite,
     showHomeButton: function() { if (preferred()) { bind(); el('libraryHomeBtn').style.display = 'inline-flex'; } },
     settings: function() { settingsReturn = active; hide(); },
-    backAction: function() { if (busy) el('libraryCancel').click(); else exitAppDialog(); },
+    backAction: function() { exitAppDialog(); },
     back: function() { if (!settingsReturn) return false; settingsReturn = false; var pc = preferred(); if (!pc) return false; Navigation.pop(); open(pc); return true; }
   };
 })();

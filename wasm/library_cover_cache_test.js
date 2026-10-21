@@ -3,7 +3,7 @@
 const assert = require('assert'), fs = require('fs'), vm = require('vm'), cp = require('child_process');
 const file = 'wasm/platform/console-library.js', source = fs.readFileSync(file, 'utf8');
 function fixture(count = 4, coverUrl, options = {}) {
-  const all = [], nodes = new Map(), timers = new Map(), calls = [], io = {deletes:0};
+  const all = [], nodes = new Map(), timers = new Map(), calls = [], io = {deletes:0,reloads:0};
   let timerId = 0, serial = 0;
   const mutations = {classes:0,tabs:0};
   class Element {
@@ -58,6 +58,7 @@ function fixture(count = 4, coverUrl, options = {}) {
     hosts:{'fixture-pc':host},Views:{Apps:{},AppsNav:{}},
     document:{hidden:false,getElementById(id){return nodes.get(id) || all.find(n=>n.id===id && n.isConnected) || (id.startsWith('game-container-') ? null : node(id));},
       createElement(tag){return new Element(tag);},createDocumentFragment(){return new Element('fragment');},body:node('body')},
+    location:{reload(){io.reloads++;}},
     localStorage:{getItem(k){return storage.has(k)?storage.get(k):null;},removeItem(k){storage.delete(k);},setItem(k,v){writes.push({key:k,value:String(v)});if(options.fail&&options.fail(k))throw Error('Synthetic storage failure');storage.set(k,String(v));}},
     setTimeout(fn,ms){timers.set(++timerId,{fn,ms});return timerId;},clearTimeout(id){timers.delete(id);},
     $(){return {children(){return this;},show(){},hide(){}};},
@@ -88,12 +89,12 @@ if (require.main === module) (async()=>{
   f.suspend(); assert.strictEqual(f.node('game-grid').children.length,0,'no image elements retained in streaming grid');
   assert.strictEqual(f.timers.size,0,'no cache timer or background cover work during gameplay');
   await f.open(); assert.strictEqual(f.calls.length,before,'return from stream reuses cached URLs');
-  // Refresh deliberately bypasses the memory cache but retains valid old art while loading.
+  // Reload replaces Refresh: no requests are queued in the old document.
   const old = f.card(1).querySelector('img').src; f.revision();
   f.node('libraryRefresh').click(); await f.flush();
-  assert.strictEqual(f.calls.length,before+f.apps.length);
-  assert(f.calls.slice(before).every(call=>call.force===true));
-  assert.notStrictEqual(f.card(1).querySelector('img').src,old,'Refresh replaces existing covers');
+  assert.strictEqual(f.io.reloads,1);
+  assert.strictEqual(f.calls.length,before);
+  assert.strictEqual(f.card(1).querySelector('img').src,old,'old document never renews covers');
   before=f.calls.length;
   f.c.ConsoleLibrary.favorite(); f.node('libraryFavorites').click(); await f.flush();
   f.node('libraryAll').click(); await f.flush();
@@ -135,13 +136,15 @@ if (require.main === module) (async()=>{
   assert.strictEqual(late.timers.size,0);
   late.host.delay=null; await late.open(); assert(late.calls.length>=before+late.apps.length,'cancelled replies never enter cache'); late.suspend();
   const clearing=fixture(4); await clearing.open();
+  clearing.host.online=false;
+  clearing.host.delay=[]; clearing.c.ConsoleLibrary.invalidateCovers(clearing.host);
+  const reopening=clearing.c.ConsoleLibrary.open(clearing.host); await clearing.flush();
   const displayed=clearing.card(1).querySelector('img').src;
-  clearing.host.delay=[]; clearing.node('libraryRefresh').click(); await clearing.flush();
   assert.strictEqual(clearing.host.delay.length,2,'only two concurrent renewal requests');
   await clearing.c.NvHTTP.prototype.clearBoxArt.call(clearing.host);
   before=clearing.calls.length;
   clearing.host.delay.splice(0).forEach(resolve=>resolve('data:image/png;base64,stale-clear'));
-  await clearing.flush();
+  await reopening; await clearing.flush();
   assert.strictEqual(clearing.calls.length,before,'cleared scope cannot continue its queue');
   assert.strictEqual(clearing.card(1).querySelector('img').src,displayed,'cleared late replies cannot overwrite a displayed cover');
   clearing.host.delay=null; clearing.suspend(); await clearing.open();
@@ -157,5 +160,5 @@ if (require.main === module) (async()=>{
     'wasm/platform/display.js','wasm/platform/diagnostics.js','wasm/platform/index.js',
     'wasm/platform/messages.js','wasm/platform/navigation.js','wasm/index.html','wasm/static/css',
     'moonlight-common-c','CMakeLists.txt','res/config.xml']);
-  console.log('library_cover_cache_test: warm return, node reuse, forced Refresh, filters, offline, host/app invalidation, bounded LRU, oversized art, cancellation and unchanged gameplay scope OK');
+  console.log('library_cover_cache_test: warm return, node reuse, reload cancellation, filters, offline, host/app invalidation, bounded LRU, oversized art and unchanged gameplay scope OK');
 })().catch(error=>{console.error(error);process.exitCode=1;});

@@ -64,16 +64,23 @@ function assertFrozen(reference, paths) {
         assert.strictEqual(visual(file, fs.readFileSync(file,'utf8')), visual(file, old), 'controller test styles only');
         continue;
       }
+      if (file === 'wasm/index.html') {
+        const old=cp.execFileSync('git',['show',reference+':'+file],{encoding:'utf8'});
+        const menu=require('./manual-library-scope.cjs').normalize;
+        assert.strictEqual(menu(file,fs.readFileSync(file,'utf8')),menu(file,old),'approved menu labels only');
+        continue;
+      }
       // Permit only the approved packaging version bump; IDs, build options
       // and every other byte remain part of the frozen contract.
       if (file === 'CMakeLists.txt' || file === 'res/config.xml') {
         const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
         const current = fs.readFileSync(file, 'utf8');
         const normalizeVersion = source => file === 'CMakeLists.txt'
-          ? source.replace('project(MoonlightWasm VERSION 3.4.6)', 'project(MoonlightWasm VERSION 3.4.3)')
+          ? source.replace('project(MoonlightWasm VERSION 3.4.7)', 'project(MoonlightWasm VERSION 3.4.3)')
+            .replace('project(MoonlightWasm VERSION 3.4.6)', 'project(MoonlightWasm VERSION 3.4.3)')
             .replace('project(MoonlightWasm VERSION 3.4.5)', 'project(MoonlightWasm VERSION 3.4.3)')
             .replace('project(MoonlightWasm VERSION 3.4.4)', 'project(MoonlightWasm VERSION 3.4.3)')
-          : source.replace(' version="3.4.6"', ' version="3.4.3"').replace(' version="3.4.5"', ' version="3.4.3"').replace(' version="3.4.4"', ' version="3.4.3"');
+          : source.replace(' version="3.4.7"', ' version="3.4.3"').replace(' version="3.4.6"', ' version="3.4.3"').replace(' version="3.4.5"', ' version="3.4.3"').replace(' version="3.4.4"', ' version="3.4.3"');
         assert.strictEqual(normalizeVersion(current), normalizeVersion(old), 'approved version bump only');
         continue;
       }

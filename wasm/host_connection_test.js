@@ -95,13 +95,13 @@ const flush=async()=>{for(let i=0;i<30;i++)await Promise.resolve();};
   host.hostname='fixture';
   for(const address of ['127.1.2.3','[::1]','0:0:0:0:0:0:0:1','LOCALHOST.','x.localhost']) assert(c.isLoopbackHost(address));
   assert(!c.isLoopbackHost('192.0.2.1'));assert(!c.isLoopbackHost('fixture.invalid'));
-  // WOL dialog keeps checking until pinned HTTPS is authenticated, not just HTTP.
+  // WOL is packet-only; neither success nor dialog closure authenticates a PC.
   host.sendWOL=()=>Promise.resolve();host._authenticatedOnline=false;
-  host.connect=()=>{host.online=true;return Promise.resolve();};
+  let wakeChecks=0;host.connect=()=>{wakeChecks++;return Promise.resolve();};
   c.WakeHost.open(host);element('wakeSend').onclick();await flush();
-  assert.match(element('wakeStatus').textContent,/waiting for authenticated/);
-  const next=[...timers].at(-1);timers.delete(next[0]);host._authenticatedOnline=true;next[1]();await flush();
-  assert.match(element('wakeStatus').textContent,/PC online/);assert.strictEqual(timers.size,0);
+  assert.match(element('wakeStatus').textContent,/Wake packet sent/);
+  assert.strictEqual(wakeChecks,0);assert.strictEqual(host._authenticatedOnline,false);
+  element('wakeClose').onclick();assert.strictEqual(wakeChecks,0);assert.strictEqual(timers.size,0);
   c.webapis={network:{getIp:()=> '192.0.2.4',getSubnetMask:()=> '255.255.255.0'}};
   assert.strictEqual(c.getWakeBroadcastAddress(),'192.0.2.255');
   c.webapis.network.getSubnetMask=()=> '255.0.255.0';assert.strictEqual(c.getWakeBroadcastAddress(),'');
