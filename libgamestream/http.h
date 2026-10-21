@@ -35,15 +35,6 @@ int http_request(const char* url, const char* ppkstr, PHTTP_DATA data);
 // Menu requests have their own deadline/cancel flag, independent of pairing.
 int http_request_bounded(const char* url, const char* ppkstr, PHTTP_DATA data,
                          int timeout_ms, const int* cancelled);
-// Menu-only numeric/resolved endpoint; leaves the original URL, Host and TLS
-// identity intact. DNS has already completed outside the curl worker.
-typedef struct _HTTP_ADDRESS_SCOPE {
-  unsigned char address[16];
-  unsigned int scope;
-} HTTP_ADDRESS_SCOPE;
-int http_request_menu(const char* url, const char* ppkstr, PHTTP_DATA data,
-                      int timeout_ms, const int* cancelled, const char* resolve_entry,
-                      const HTTP_ADDRESS_SCOPE* scopes, size_t scope_count);
 void http_free_data(PHTTP_DATA data);
 
 #ifdef __cplusplus

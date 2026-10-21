@@ -26,8 +26,6 @@
 #include <openssl/ssl.h>
 #include <openssl/x509v3.h>
 #include <openssl/pem.h>
-#include <sys/socket.h>
-#include <netinet/in.h>
 
 extern X509 *g_Cert;
 extern EVP_PKEY *g_PrivateKey;
@@ -81,39 +79,14 @@ static int _progress_callback(void *clientp, double dltotal, double dlnow, doubl
   return 0;
 }
 
-typedef struct _MENU_SOCKET_CONTEXT {
-  const HTTP_ADDRESS_SCOPE* scopes;
-  size_t count;
-  size_t next;
-} MENU_SOCKET_CONTEXT;
-
-static curl_socket_t menu_open_socket(void* opaque, curlsocktype purpose,
-                                      struct curl_sockaddr* address) {
-  MENU_SOCKET_CONTEXT* context = opaque;
-  if (address->family == AF_INET6) {
-    struct sockaddr_in6* ipv6 = (struct sockaddr_in6*)&address->addr;
-    for (size_t i = context->next; i < context->count; i++) {
-      if (!memcmp(&ipv6->sin6_addr, context->scopes[i].address, 16)) {
-        ipv6->sin6_scope_id = context->scopes[i].scope;
-        context->next = i + 1;
-        break;
-      }
-    }
-  }
-  return socket(address->family, address->socktype, address->protocol);
-}
-
-static int http_request_impl(const char* url, const char* ppkstr, PHTTP_DATA data,
-                            int timeout_ms, const int* cancelled,
-                            int menu, const char* resolve_entry,
-                            const HTTP_ADDRESS_SCOPE* scopes, size_t scope_count) {
+int http_request_bounded(const char* url, const char* ppkstr, PHTTP_DATA data,
+                         int timeout_ms, const int* cancelled) {
   int ret;
   CURL *curl;
   const char* real_url = url;
   char* rewritten_url = NULL;
   char* resolve_string = NULL;
   struct curl_slist *resolve_list = NULL;
-  MENU_SOCKET_CONTEXT socket_context = {scopes, scope_count, 0};
 
   if (cancelled == NULL) http_reset_cancel();
 
@@ -140,7 +113,7 @@ static int http_request_impl(const char* url, const char* ppkstr, PHTTP_DATA dat
   const char* bracket_start = strchr(url, '[');
   const char* bracket_end = strchr(url, ']');
 
-  if (!menu && bracket_start != NULL && bracket_end != NULL && bracket_end > bracket_start) {
+  if (bracket_start != NULL && bracket_end != NULL && bracket_end > bracket_start) {
     int ipv6_len = bracket_end - bracket_start - 1;
     char ipv6_raw[128] = {0};
     if (ipv6_len < sizeof(ipv6_raw)) {
@@ -176,23 +149,6 @@ static int http_request_impl(const char* url, const char* ppkstr, PHTTP_DATA dat
   }
 
   curl_easy_setopt(curl, CURLOPT_URL, real_url);
-
-  if (menu) {
-    // Do not allow an environment proxy to introduce another synchronous DNS
-    // call. No proxy is exposed by the TV client; legacy requests are unchanged.
-    curl_easy_setopt(curl, CURLOPT_PROXY, "");
-    if (resolve_entry != NULL) {
-      resolve_list = curl_slist_append(NULL, resolve_entry);
-      if (resolve_list == NULL) { ret = GS_OUT_OF_MEMORY; goto cleanup; }
-      curl_easy_setopt(curl, CURLOPT_RESOLVE, resolve_list);
-    }
-    if (scope_count) {
-      // CURLOPT_RESOLVE accepts numeric addresses but discards per-address
-      // scope IDs. Restore them at socket creation, before curl connects.
-      curl_easy_setopt(curl, CURLOPT_OPENSOCKETFUNCTION, menu_open_socket);
-      curl_easy_setopt(curl, CURLOPT_OPENSOCKETDATA, &socket_context);
-    }
-  }
 
   // Use the pinned certificate for HTTPS
   if (ppkstr != NULL) {
@@ -233,17 +189,6 @@ cleanup:
   if (resolve_list) curl_slist_free_all(resolve_list);
   curl_easy_cleanup(curl);
   return ret;
-}
-
-int http_request_bounded(const char* url, const char* ppkstr, PHTTP_DATA data,
-                         int timeout_ms, const int* cancelled) {
-  return http_request_impl(url, ppkstr, data, timeout_ms, cancelled, 0, NULL, NULL, 0);
-}
-
-int http_request_menu(const char* url, const char* ppkstr, PHTTP_DATA data,
-                      int timeout_ms, const int* cancelled, const char* resolve_entry,
-                      const HTTP_ADDRESS_SCOPE* scopes, size_t scope_count) {
-  return http_request_impl(url, ppkstr, data, timeout_ms, cancelled, 1, resolve_entry, scopes, scope_count);
 }
 
 int http_request(const char* url, const char* ppkstr, PHTTP_DATA data) {

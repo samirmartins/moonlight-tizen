@@ -107,11 +107,6 @@ function realLauncher(f,stage,resume=false,source=launcher) {
  f.visibility(true);f.visibility(false);await f.flush();
  assert(!f.c.ConsoleLibrary.visible());assert(f.c.isDialogOpen);
  assert(!f.log.includes('menu'));assert(!f.log.includes('nav switch'));assert(f.log.includes('startPollingHosts'));
- // Pairing emptied the scopes before hide; completion while hidden must still
- // allow host-grid polling to return when the application becomes visible.
- f=fixture();f.c.ConsoleLibrary.settings();f.c.pairingPollingPause={};f.c.hostPollScopes={};
- f.visibility(true);f.c.pairingPollingPause=null;f.visibility(false);await f.flush();
- assert(f.log.includes('startPollingHosts'));f.c.ConsoleLibrary.suspend();
  // A launch confirmation must not remain frozen with stale click handlers.
  f=fixture();f.node('quitAppDialog').open=true;f.c.isDialogOpen=true;
  f.visibility(true);assert(!f.node('quitAppDialog').open);assert(!f.c.isDialogOpen);

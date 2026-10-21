@@ -46,7 +46,7 @@ const flush=async()=>{for(let i=0;i<350;i++)await Promise.resolve();};
   const normalize=require('./menu-recovery-scope.cjs').normalize;
   assert.strictEqual(normalize(file,source),oldSource,'only tested cache and PC-first changes against released library');
   for(const [old,next] of [['4 * 1024 * 1024','8 * 1024 * 1024'],['cacheOnly === true || !hostReady()','false'],
-    ['return host.loadLibrary(current','return host.loadLibrary(null'],['if (!host.paired)','if (host.paired)']]) {
+    ['return host.connect(current)','return host.connect()'],['if (!host.paired)','if (host.paired)']]) {
     assert(source.includes(old));assert.notStrictEqual(normalize(file,source.replace(old,next)),oldSource,'unknown neighboring changes are rejected');
   }
   console.log('menu_recovery_test: disk-before-PC/network-after-PC ordering, exact binary retention, count/byte bounds, forced renewal and transient recovery OK');

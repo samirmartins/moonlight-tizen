@@ -201,7 +201,6 @@ NvHTTP.prototype = {
   connect: function(scope) {
     var self = this;
     if (isInGame || (scope && !scope.active)) return Promise.reject(new Error('Connection cancelled'));
-    if (self._libraryAttempt && self._libraryAttempt.scope !== scope) self._libraryAttempt.cancel();
     if (self._connectionAttempt) self._connectionAttempt.cancel();
     // Recreate the startup client for every attempt, not its credentials or
     // saved UI/cache. No poll callbacks or failed-request state are inherited.
@@ -210,11 +209,6 @@ NvHTTP.prototype = {
       'serverUid', 'ppkstr', 'paired', 'isNvidiaServerSoftware'].forEach(function(key) {
       if (self[key] !== undefined) probe[key] = self[key];
     });
-    // Runtime-only cursor; never persist TV network details with a saved PC.
-    if (!self._rediscovery) Object.defineProperty(self, '_rediscovery', {
-      value: { key: '', cursor: 0 }, configurable: true
-    });
-    Object.defineProperty(probe, '_rediscovery', { value: self._rediscovery });
     var fresh = createMenuRequestScope(), rejectAttempt;
     var owner = { cancel: function() {
       fresh.cancel();
@@ -257,41 +251,6 @@ NvHTTP.prototype = {
       fresh.cancel();
       if (self._connectionAttempt === owner) self._connectionAttempt = null;
     }
-    result.cancel = owner.cancel;
-    return result;
-  },
-
-  // Connection and fresh library data belong to one cancellable menu attempt.
-  // A replacement connection must also retire an old in-flight app-list read.
-  loadLibrary: function(scope, onConnected) {
-    var self = this;
-    if (isInGame || (scope && !scope.active)) return Promise.reject(new Error('Connection cancelled'));
-    if (self._libraryAttempt) self._libraryAttempt.cancel();
-    var fresh = createMenuRequestScope();
-    var owner = { scope: fresh, cancel: function() { fresh.cancel(); } };
-    Object.defineProperty(self, '_libraryAttempt', { value: owner, writable: true, configurable: true });
-    function current() {
-      return self._libraryAttempt === owner && fresh.active && !isInGame && (!scope || scope.active);
-    }
-    var operation = fresh.request(function() { return self.connect(fresh); }, 26000).then(function() {
-      if (!current()) throw new Error('Connection cancelled');
-      if (onConnected) onConnected();
-      if (!self.online || !self.paired || (self.ppkstr && self._authenticatedOnline !== true)) {
-        throw new Error('PC library not authenticated');
-      }
-      return fresh.request(function() { return self.getAppListWithCacheFlush(fresh); }, 10000);
-    }).then(function(value) {
-      if (!current()) throw new Error('Connection cancelled');
-      return value;
-    });
-    operation.cancel = owner.cancel;
-    var parent = scope || createMenuRequestScope();
-    var result = parent.request(function() { return operation; }, 36000);
-    function cleanup() {
-      fresh.cancel();
-      if (self._libraryAttempt === owner) self._libraryAttempt = null;
-    }
-    result = result.then(function(value) { cleanup(); return value; }, function(error) { cleanup(); throw error; });
     result.cancel = owner.cancel;
     return result;
   },
@@ -422,53 +381,11 @@ NvHTTP.prototype = {
     addCandidate(localSuffix);
     addCandidate(this.externalIP);
 
-    var self = this, discovery = null;
-    function active() { return !isInGame && (!scope || scope.active); }
-    function discover() {
-      if (discovery) return discovery;
-      discovery = Promise.resolve([]);
-      if (!active() || !scope || !self.ppkstr || !self.paired || !self.serverUid ||
-          typeof Module === 'undefined' || typeof Module.discoverHosts !== 'function') return discovery;
-      try {
-        if (typeof webapis === 'undefined' || !webapis.network) return discovery;
-        var ip = webapis.network.getIp(), mask = webapis.network.getSubnetMask();
-        if (typeof ip !== 'string' || typeof mask !== 'string') return discovery;
-        var state = self._rediscovery || { key: '', cursor: 0 };
-        var key = ip + '/' + mask + ':' + self.httpsPort;
-        if (state.key !== key) { state.key = key; state.cursor = 0; }
-        discovery = scope.request(function() {
-          return sendMessage('discoverHosts', [ip, mask, self.localAddress || self.address, self.httpsPort, state.cursor]);
-        }, 2200).then(function(text) {
-          if (!active()) return [];
-          var result = JSON.parse(text);
-          if (!result || !Array.isArray(result.addresses) || result.addresses.length > 8 ||
-              !Number.isInteger(result.cursor) || result.cursor < 0 || result.cursor > 4294967295) return [];
-          state.cursor = result.cursor;
-          // Native hints must still pass the existing pinned HTTPS/UUID parser.
-          return result.addresses.filter(function(address) {
-            if (typeof address !== 'string' || !/^\d{1,3}(\.\d{1,3}){3}$/.test(address)) return false;
-            var parts = address.split('.').map(Number), own = ip.split('.').map(Number), net = mask.split('.').map(Number);
-            if (parts.some(function(n) { return n > 255; }) || own.length !== 4 || net.length !== 4 ||
-                parts[0] === 0 || parts[0] === 127 || parts[0] >= 224 || address === ip) return false;
-            return parts.every(function(n, i) { return (n & net[i]) === (own[i] & net[i]); });
-          });
-        }).catch(function() { return []; });
-      } catch (error) { /* Network API unavailable: retain the saved-address path. */ }
-      return discovery;
-    }
-    function tryDiscovered(addresses, index) {
-      if (!active()) return;
-      while (index < addresses.length && seen[addresses[index]]) index++;
-      if (index >= addresses.length) { onFailure(); return; }
-      var address = addresses[index]; seen[address] = true;
-      self.refreshServerInfoAtAddress(address, scope).then(function() {
-        if (active()) onSuccess(address);
-      }, function() { tryDiscovered(addresses, index + 1); });
-    }
     var tryNext = function(index) {
-      if (!active()) return;
+      if (scope && !scope.active) return;
       if (index >= candidates.length) {
-        discover().then(function(addresses) { tryDiscovered(addresses, 0); });
+        console.error('%c[utils.js, selectServerAddress]', 'color: gray;', 'Operation failed; private details omitted.');
+        onFailure();
         return;
       }
       var addr = candidates[index];
@@ -477,9 +394,6 @@ NvHTTP.prototype = {
         if (scope && !scope.active) return;
         onSuccess(addr);
       }.bind(this), function() {
-        // Overlap discovery with remaining saved candidates, but never displace
-        // an existing valid route or add latency when the first route succeeds.
-        discover();
         tryNext.call(this, index + 1);
       }.bind(this));
     }.bind(this);

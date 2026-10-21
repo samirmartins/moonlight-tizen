@@ -259,11 +259,10 @@ function updateHostStatusIndicator(host) {
 
 // Each menu visit owns a cancellable scope, including requests still in flight.
 var hostPollScopes = {};
-var pairingPollingPause = null;
 
 function beginBackgroundPollingOfHost(host) {
   endBackgroundPollingOfHost(host);
-  if (isInGame || document.hidden || pairingPollingPause) return;
+  if (isInGame) return;
   var uid = host.serverUid;
   var scope = createMenuRequestScope();
   hostPollScopes[uid] = scope;
@@ -302,7 +301,7 @@ function beginBackgroundPollingOfHost(host) {
 }
 
 function startPollingHosts() {
-  if (isInGame || document.hidden || pairingPollingPause) return;
+  if (isInGame) return;
   for (var uid in hosts) beginBackgroundPollingOfHost(hosts[uid]);
 }
 
@@ -760,29 +759,10 @@ function addHostDialog() {
   });
 }
 
-// Pause every host, including callbacks already queued before manual pairing.
-// The terminal callback may enter the library; never restart host-grid polling
-// there, during gameplay, or while the application is hidden.
-function pauseHostPollingForPairing() {
-  var owner = {};
-  pairingPollingPause = owner;
-  stopPollingHosts();
-  return function() {
-    if (pairingPollingPause !== owner) return;
-    pairingPollingPause = null;
-    if (!isInGame && !document.hidden && !ConsoleLibrary.visible()) startPollingHosts();
-  };
-}
-
 // Show the Pairing dialog before pairing with the given NvHTTP host object. Returns whether the pairing was successful or failed.
 function pairingDialog(nvhttpHost, onSuccess, onFailure) {
   if (!onFailure) {
     onFailure = function() {}
-  }
-
-  if (isInGame || document.hidden || pairingPollingPause || isPairingInProgress) {
-    onFailure();
-    return;
   }
 
   if (!pairingCert) {
@@ -792,20 +772,7 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
     return;
   }
 
-  var resumePolling = pauseHostPollingForPairing(), completed = false, checked = false;
-  var succeeded = onSuccess, failed = onFailure;
-  function finish(callback) {
-    if (completed) return;
-    completed = true;
-    try { callback(); } finally { resumePolling(); }
-  }
-  onSuccess = function() { finish(succeeded); };
-  onFailure = function() { finish(failed); };
-
-  try { nvhttpHost.pollServer(function(returnedNvHTTPHost) {
-    if (checked || completed) return;
-    checked = true;
-    if (isInGame || document.hidden) { onFailure(); return; }
+  nvhttpHost.pollServer(function(returnedNvHTTPHost) {
     if (!returnedNvHTTPHost.online) {
       console.error('%c[index.js, pairingDialog]', 'color: gray;', 'Operation failed; private details omitted.'); // Logging both object (for console) and toString-ed object (for text logs)
       snackbarLogLong('Failed to connect to ' + nvhttpHost.hostname + '. Ensure Sunshine is running on your host PC or GameStream is enabled in the GeForce Experience SHIELD settings.');
@@ -895,10 +862,7 @@ function pairingDialog(nvhttpHost, onSuccess, onFailure) {
       }
       onFailure();
     });
-  }); } catch (error) {
-    console.warn('Pairing preflight failed.');
-    onFailure();
-  }
+  });
 }
 
 // Add the new NvHTTP Host object inside the host grid

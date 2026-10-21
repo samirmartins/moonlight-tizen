@@ -231,7 +231,7 @@ var ConsoleLibrary = (function() {
       return descending ? -order : order;
     });
   }
-  function render(forceCovers, cacheOnly, paintOnly) {
+  function render(forceCovers, cacheOnly) {
     if (!active || isInGame) return;
     var r = record(), items = list(), grid = el('game-grid'), token = epoch, fragment = document.createDocumentFragment();
     prepareCovers();
@@ -283,7 +283,6 @@ var ConsoleLibrary = (function() {
       el('library'+name).setAttribute('aria-pressed', filter === name.toLowerCase());
     });
     updateSelection();
-    if (paintOnly === true) return Promise.resolve();
     // Two covers at a time; all requests belong to the current menu visit.
     if (coverScope) coverScope.cancel();
     coverScope = createMenuRequestScope();
@@ -292,8 +291,7 @@ var ConsoleLibrary = (function() {
       if (!valid(token) || !currentScope || !currentScope.active || !queue.length) return Promise.resolve();
       var app = queue.shift(), card = el('game-container-' + app.id);
       return host.getBoxArt(app.id, currentScope, cacheOnly === true || !hostReady(), forceCovers === true).then(function(url) {
-        if (valid(token) && currentScope.active && card && card.isConnected &&
-            apps.some(function(currentApp) { return currentApp.id === app.id && currentApp.title === app.title; })) {
+        if (valid(token) && currentScope.active && card && card.isConnected) {
           rememberCover(app, url);
           card.querySelector('img').src = url;
           card._mlCoverTitle = app.title;
@@ -302,13 +300,10 @@ var ConsoleLibrary = (function() {
     }
     return Promise.all([next(), next()]);
   }
-  function connect(current, token, onConnected) {
-    return host.loadLibrary(current, function() {
+  function connect(current, token) {
+    return host.connect(current).then(function(address) {
       if (!valid(token) || !current.active) throw new Error('Menu request cancelled');
-      onConnected();
-    }).then(function(value) {
-      if (!valid(token) || !current.active) throw new Error('Menu request cancelled');
-      return value;
+      return address;
     });
   }
   function refresh(forceCovers, thorough) {
@@ -316,9 +311,6 @@ var ConsoleLibrary = (function() {
     if (refreshPending) {
       refreshCovers = refreshCovers || forceCovers === true;
       return refreshPending;
-    }
-    if (wakeIntent && wakeIntent.sent && wakeIntent.remaining() <= 0) {
-      wakeIntent.expire(); return Promise.resolve();
     }
     cancel(!!wakeIntent); scope = createMenuRequestScope();
     var current = scope, token = epoch, reached = false, retryCheck = false;
@@ -329,62 +321,48 @@ var ConsoleLibrary = (function() {
     // Disk-only artwork is independent of network discovery, including a cold
     // menu/offline PC. Never queue downloads in front of the status request.
     var cached = render(false, true);
-    // Artwork never owns connection completion/retry, including normal Refresh.
-    cached.catch(function() {});
-    var budget = waking ? Math.min(36000, wakeIntent.remaining()) : 36000;
-    // Startup, Refresh and Wake share connection -> authentication -> fresh list.
+    // Artwork is presentation, not readiness. During wake, neither a stalled
+    // disk read nor cover downloads may hold the next authenticated probe.
+    if (waking) cached.catch(function() {});
+    // Startup, Refresh and Wake use the same fresh serverinfo connection.
     refreshPending = current.request(function() {
-      return connect(current,token,function() {
+      return connect(current,token);
+    }, 26000).then(function() {
         reached = true;
         if (!hostReady()) throw new Error('Sunshine is still starting.');
         if (!host.paired) throw new Error('Pair this PC from PCs to access its library.');
         checking = false;
         status('PC online · updating games…'); updateSelection();
-      });
-    }, budget).then(function(value) {
+        return host.getAppListWithCacheFlush(current);
+    }).then(function(value) {
       if (!valid(token)) return;
       apps = cleanApps(value); record().apps = apps; host._memCachedApplist = apps;
       save(); checking = false; status('PC online · ' + apps.length + ' games');
-      if (!hostReady()) { retryCheck = true; status('Sunshine not verified · retrying…'); }
-      // Check elapsed time as well as the timer: a delayed event-loop task must
-      // not start a game after the user's original wake budget has expired.
-      if (wakeIntent && wakeIntent.sent && wakeIntent.remaining() <= 0) {
-        wakeIntent.expire(); return;
-      }
-      if (wakeIntent && wakeIntent.sent && hostReady() && host.paired &&
-          apps.some(function(app) { return app.id === wakeIntent.appId; })) {
-        var intent = wakeIntent; wakeIntent = null; intent.scope.cancel();
-        launch(intent.appId,true); return;
-      }
-      var force = refreshCovers;
-      // Retain the disk-first artwork order, but detach it from readiness.
-      // A newer visit/refresh invalidates this presentation-only continuation.
-      if (!waking) {
-        render(false, true, true);
-        cached.then(function() {
-          if (valid(token)) return render(force);
-        }).catch(function() {});
-      }
+      return (waking ? Promise.resolve() : cached).then(function() {
+        if (!hostReady()) { retryCheck = true; status('Sunshine not verified · retrying…'); }
+        // Wake stores only an intent. This ordinary library refresh owns all
+        // discovery and hands off once to the same launcher as manual Play.
+        if (valid(token) && wakeIntent && wakeIntent.sent && hostReady() && host.paired &&
+            apps.some(function(app) { return app.id === wakeIntent.appId; })) {
+          var intent = wakeIntent; wakeIntent = null; intent.scope.cancel();
+          launch(intent.appId,true); return;
+        }
+        if (valid(token) && !waking) return render(refreshCovers);
+      });
     }, function(error) {
       if (!valid(token)) return;
       checking = false;
       current.cancel();
       // A reachable unpaired PC is different from an offline PC.
-      var cancelled = error && (error.message === 'Connection cancelled' || error.message === 'Menu request cancelled');
-      if (!reached && !cancelled) host.online = false;
+      if (!reached) host.online = false;
       // No response cannot distinguish a powered-off PC from a slow Sunshine,
       // firewall or network failure. Do not claim to have measured its power.
-      // A replacement connection may already have succeeded. Cancellation is
-      // not a failed reachability probe and cannot overwrite its online state.
-      status(cancelled ? (hostReady() ? 'PC online · checking again…' : 'Checking PC…') :
-        !reached ? 'PC not responding · retrying…' : !host.paired ? 'Pair this PC from PCs.' : 'PC online · library unavailable');
+      status(!reached ? 'PC not responding · retrying…' : !host.paired ? 'Pair this PC from PCs.' : 'PC online · library unavailable');
       // Only the visible menu retries; suspend/settings/stream cancel the scope.
       retryCheck = true;
+      return waking ? undefined : cached;
     }).then(function() {
       if (!valid(token)) return;
-      if (wakeIntent && wakeIntent.sent && wakeIntent.remaining() <= 0) {
-        wakeIntent.expire(); return;
-      }
       refreshPending = null; refreshCovers = false; updateSelection();
       if (wakeIntent && wakeIntent.sent) {
         if (!host.paired) { wakeIntent.fail('PC needs pairing. Open PCs.'); return; }
@@ -392,6 +370,8 @@ var ConsoleLibrary = (function() {
         status(hostReady() && !apps.some(function(app) { return app.id === wakeIntent.appId; })
           ? 'PC online · waiting for selected app · retrying…' : 'Waiting for Sunshine · retrying…');
       }
+      // Normal Refresh retains its artwork barrier. Wake reaches this point
+      // from network readiness alone, so slow images cannot consume its budget.
       if (retryCheck) retry = setTimeout(function() { if (valid(token)) refresh(false, true); }, 2000);
     });
     updateSelection();
@@ -443,9 +423,7 @@ var ConsoleLibrary = (function() {
       WakeHost.open(host); snackbarLog('Set the Wake-on-LAN MAC once, then choose Play.'); return;
     }
     cancel();
-    var clock = function() { return typeof performance !== 'undefined' && typeof performance.now === 'function' ? performance.now() : Date.now(); };
-    var intent = { host: host, appId: appId, scope: createMenuRequestScope(), sent: false, until: 0,
-      remaining: function() { return Math.max(0, intent.until - clock()); } };
+    var intent = { host: host, appId: appId, scope: createMenuRequestScope(), sent: false };
     wakeIntent = intent;
     prepareStreamAudio(); preparedAudio = true; busy = true;
     status('Waking PC…'); updateSelection();
@@ -459,12 +437,10 @@ var ConsoleLibrary = (function() {
       cancel(); scope = createMenuRequestScope(); status(text); updateSelection(); focusCards();
     }
     intent.fail = failed;
-    intent.expire = function() { failed('PC not ready after 120 s. Check Sunshine, then try again.'); };
     intent.scope.request(function() { return intent.host.sendWOL(); },8000).then(function() {
       if (!currentWake()) return;
       intent.sent = true;
-      intent.until = clock() + 120000;
-      deadline = setTimeout(intent.expire,120000);
+      deadline = setTimeout(function() { failed('PC not ready after 120 s. Check Sunshine, then try again.'); },120000);
       // No separate wake polling loop: use the proven visible-library path.
       refresh(false,true);
     },function() { failed('Could not send Wake-on-LAN. Check PC settings.'); });

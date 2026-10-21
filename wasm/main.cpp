@@ -66,7 +66,6 @@ MoonlightInstance::MoonlightInstance()
     }
 
 MoonlightInstance::~MoonlightInstance() { 
-  m_MenuHttp.stop();
   m_WakeDispatcher.stop();
   m_Dispatcher.stop();
 }

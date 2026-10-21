@@ -177,7 +177,7 @@ const openBegin=player.indexOf('  auto openTicket ='),openEnd=player.indexOf('\n
 assert(openBegin>=0&&openEnd>openBegin);
 player=player.slice(0,openBegin)+'  g_Instance->m_Source->Open([](EmssOperationResult){});'+player.slice(openEnd);
 assert.strictEqual(player, baseline, 'no other video/PTS/assembly/presentation change');
-let main = require('./menu-transport-scope.cjs').normalize('wasm/main.cpp',current('wasm/main.cpp'))
+let main = current('wasm/main.cpp')
  .replace('  emscripten_set_blur_callback(EMSCRIPTEN_EVENT_TARGET_WINDOW, NULL, EM_TRUE, handleFocusLost);\n', '')
  .replace('  emscripten_set_visibilitychange_callback(NULL, EM_TRUE, handleVisibilityChange);\n', '');
 
@@ -218,8 +218,7 @@ for (const file of files) {
       'moonlight-common-c/src/PlatformSockets.c',
       'wasm/static/js/utils.js','wasm/static/js/mdns-browser/main.js'].includes(file)) continue;
  if (['wasm/platform/messages.js','wasm/platform/common.js'].includes(file)) {
-  const menu = require('./menu-transport-scope.cjs').normalize;
-  assert.strictEqual(withoutLogs(menu(file,current(file))),withoutLogs(menu(file,old(file))),file+' privacy logging and scoped cancellation only');
+  assert.strictEqual(withoutLogs(current(file)),withoutLogs(old(file)),file+' privacy-only logging');
  } else if (file === 'wasm/gamepad.cpp') {
   assert.strictEqual(withoutInputWake(current(file)), withoutInputWake(old(file)), file+' wake-only change');
  } else if (file === 'wasm/platform/menu-tools.js') {

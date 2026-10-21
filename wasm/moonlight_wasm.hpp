@@ -9,7 +9,6 @@
 
 #include <Limelight.h>
 #include "lib.hpp"
-#include "menu_http.hpp"
 #include "video_telemetry.hpp"
 #include "video_timing.hpp"
 #include "session_lifecycle.hpp"
@@ -212,8 +211,6 @@ class MoonlightInstance {
   MessageResult HttpInit(std::string cert, std::string privateKey, std::string myUniqueId);
   void OpenUrl(int callbackId, std::string url, std::string ppk, bool binaryResponse);
   void OpenUrlScoped(int callbackId, std::string url, std::string ppk, bool binaryResponse, int timeoutMs);
-  void CancelMenuRequest(int callbackId) { m_MenuHttp.cancel(callbackId); }
-  void DiscoverHosts(int callbackId, std::string localIp, std::string subnet, std::string preferred, int port, uint32_t cursor);
 
   LoadResult LoadCert(const char* certStr, const char* keyStr);
 
@@ -316,7 +313,6 @@ class MoonlightInstance {
   std::atomic<int32_t> m_MouseDeltaX, m_MouseDeltaY;
   Dispatcher m_Dispatcher;
   Dispatcher m_WakeDispatcher;
-  mlhttp::Transport m_MenuHttp;
 
   std::mutex m_Mutex;
   std::condition_variable m_EmssStateChanged;

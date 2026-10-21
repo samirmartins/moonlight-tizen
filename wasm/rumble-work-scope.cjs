@@ -1,7 +1,6 @@
 'use strict';
 // Reverse only the tested inactive-slot skip; all actuator policy stays frozen.
 function normalize(file,source) {
-  source=require('./controller-vendor-scope.cjs').normalize(file,source);
   if(file !== 'wasm/platform/gamepad.js')return source;
   const begin=source.indexOf('function _rumbleNeedsPump(now) {');
   const end=source.indexOf('function _rumbleStop() {',begin);

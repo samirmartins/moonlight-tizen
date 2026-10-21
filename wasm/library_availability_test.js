@@ -28,11 +28,10 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
   f.timers.delete(timeout[0]);timeout[1].fn();await opening;
   assert.match(f.node('libraryStatus').textContent,/not responding/);
   assert(!f.node('libraryRefresh').disabled);f.suspend();assert.strictEqual(f.timers.size,0);
-  // Disk decoding never holds ordinary Refresh completion/retry either.
+  // Slow disk decoding cannot consume the retry while Refresh is pending.
   f=fixture();f.host.delay=[];f.host.connect=()=>Promise.reject(Error('timeout'));
   opening=f.c.ConsoleLibrary.open(f.host);await f.flush();
-  assert([...f.timers.values()].some(t=>t.ms===2000));
-  assert(!f.node('libraryRefresh').disabled,'network attempt completes before cover decoding');
+  assert(![...f.timers.values()].some(t=>t.ms===2000));
   for(let i=0;i<2;i++){f.host.delay.splice(0).forEach(resolve=>resolve('data:image/png;base64,fixture'));await f.flush();}
   await opening;assert([...f.timers.values()].some(t=>t.ms===2000));f.suspend();assert.strictEqual(f.timers.size,0);
   // A failed quick probe cannot establish that the PC is powered off. Keep a
