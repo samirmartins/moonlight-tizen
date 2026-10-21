@@ -23,7 +23,7 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
   opening=f.c.ConsoleLibrary.open(f.host);await f.flush();
   const timeout=[...f.timers].find(([,t])=>t.ms===26000);assert(timeout);
   f.timers.delete(timeout[0]);timeout[1].fn();await opening;
-  assert.match(f.node('libraryStatus').textContent,/not responding/);
+  assert.strictEqual(f.node('libraryStatus').textContent,'PC unavailable. Turn it on or use Wake PC, then reload Moonlight.');
   assert(!f.node('libraryRefresh').disabled);f.suspend();assert.strictEqual(f.timers.size,0);
   // Slow disk decoding never schedules another check in the old document.
   f=fixture();f.host.delay=[];f.host.connect=()=>Promise.reject(Error('timeout'));
@@ -34,7 +34,7 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
   // No response is not proof of power-off. Recovery is an explicit visit/reload.
   f=fixture();scopes=[];connections=0;f.host.online=false;
   f.host.connect=scope=>{scopes.push(scope);connections++;return connections===1?Promise.reject(Error('quick timeout')):Promise.resolve('fixture.invalid');};
-  await f.open();assert.match(f.node('libraryStatus').textContent,/not responding/);
+  await f.open();assert.match(f.node('libraryStatus').textContent,/PC unavailable/);
   assert(!/offline|powered off/i.test(f.node('libraryStatus').textContent));
   assert.strictEqual(f.timers.size,0);
   f.host.online=true;await f.open();
@@ -42,7 +42,10 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
   f.suspend();assert.strictEqual(f.timers.size,0);
   // App-list failure after authenticated contact never becomes PC offline.
   f=fixture();f.host.getAppListWithCacheFlush=()=>Promise.reject(Error('slow app list'));
-  await f.open();assert.strictEqual(f.host.online,true);assert.match(f.node('libraryStatus').textContent,/PC responded · library unavailable/);
+  await f.open();assert.strictEqual(f.host.online,true);assert.strictEqual(f.node('libraryStatus').textContent,'Games unavailable · Try Reload Moonlight.');
+  f.suspend();
+  f=fixture();f.host.paired=false;await f.open();
+  assert.strictEqual(f.node('libraryStatus').textContent,'Pairing required · Open PCs.');
   f.suspend();assert.strictEqual(f.timers.size,0);
   // Delayed discovery cannot restart I/O or repaint after entering gameplay.
   f=fixture();gate=deferred();let lateScope;

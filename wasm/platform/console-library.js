@@ -308,7 +308,7 @@ var ConsoleLibrary = (function() {
     var current = scope, token = epoch, reached = false;
     refreshCovers = forceCovers === true;
     checking = true;
-    status('Checking PC once…'); updateSelection();
+    status('Checking PC…'); updateSelection();
     // Disk-only artwork is independent of network discovery, including a cold
     // menu/offline PC. Never queue downloads in front of the status request.
     var cached = render(false, true);
@@ -320,7 +320,7 @@ var ConsoleLibrary = (function() {
         if (!hostReady()) throw new Error('Sunshine is still starting.');
         if (!host.paired) throw new Error('Pair this PC from PCs to access its library.');
         checking = false;
-        status('PC online · updating games…'); updateSelection();
+        status('PC online · Loading games…'); updateSelection();
         return host.getAppListWithCacheFlush(current);
     }).then(function(value) {
       if (!valid(token)) return;
@@ -337,7 +337,7 @@ var ConsoleLibrary = (function() {
       if (!reached) host.online = false;
       // No response cannot distinguish a powered-off PC from a slow Sunshine,
       // firewall or network failure. Do not claim to have measured its power.
-      status(!reached ? 'PC not responding. Try Play or Reload Moonlight.' : !host.paired ? 'Pair this PC from PCs.' : 'PC responded · library unavailable. Use Reload Moonlight.');
+      status(!reached ? 'PC unavailable. Turn it on or use Wake PC, then reload Moonlight.' : !host.paired ? 'Pairing required · Open PCs.' : 'Games unavailable · Try Reload Moonlight.');
       return cached;
     }).then(function() {
       if (!valid(token)) return;
@@ -394,7 +394,7 @@ var ConsoleLibrary = (function() {
     wakeScope = current; updateSelection();
     current.request(function() { return host.sendWOL(); },8000).then(function() {
       if (valid(token) && wakeScope === current) {
-        status('Wake packet sent. Wait for the PC, then press Play.');
+        status('Wake packet sent. Press Play when the PC is ready.');
         snackbarLog('Wake packet sent. This does not confirm the PC is awake.');
       }
     },function() {
@@ -451,7 +451,7 @@ var ConsoleLibrary = (function() {
     showAppsMode(); decorate();
     el('game-grid').style.display = 'grid'; $('#wasmSpinner').hide();
     // refresh() owns the single initial render/cache pass and its cancellation.
-    status('Checking PC once…');
+    status('Checking PC…');
     var opening = refresh();
     Navigation.change(Views.Apps); Navigation.start(); focusCards();
     return opening;

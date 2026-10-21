@@ -119,7 +119,7 @@ var WakeHost = (function() {
     current.request(function() { return host.sendWOL(); }, 8000).then(function() {
       if (!valid()) return;
       cancel();
-      status('Wake packet sent. Wait for the PC, then press Play or Reload Moonlight. Sent does not mean awake.');
+      status('Wake packet sent. Press Play when the PC is ready.');
     }, function() {
       if (!valid()) return;
       cancel();

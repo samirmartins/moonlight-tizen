@@ -12,7 +12,7 @@ An open-source client for NVIDIA GameStream and [Sunshine](https://app.lizardbyt
 
 ## Interface
 
-![Moonlight interface: Wake & play, basic settings, Resume library and the initial Add Host screen](docs/images/interface.gif)
+![Moonlight interface: Wake PC, settings, Resume library, Add Host and controller testing](docs/images/interface.gif)
 
 Local UI demonstration with simulated PC states and openly licensed game images;
 see [image credits and licenses](docs/images/ATTRIBUTION.md).
@@ -58,7 +58,7 @@ This fork focuses on smooth playback, low latency and full picture quality on Sa
 - Video timing follows the TV's refresh rate, which is reported to the host.
 - Gamepad controls include optional rumble and saved button remapping with a visual editor and button test.
 - A controller-first library keeps favorites, recent games and the last PC ready to
-  use, with Play, Resume and Wake & play in one screen.
+  use, with Play, Resume, Wake PC and Reload Moonlight in one screen.
 - Cached covers appear while checking the PC, including offline, and are reused after games.
 
 ---
@@ -66,7 +66,7 @@ This fork focuses on smooth playback, low latency and full picture quality on Sa
 ## Recommended settings
 
 - **Initial defaults:** H.264, 1920×1080 at 60 FPS and 30 Mbps; saved settings are preserved.
-- Opening Moonlight shows the library; games and Wake & play are started manually.
+- Opening Moonlight shows the library; waking the PC and starting a game are separate manual actions.
 - Leaving for Smart Hub disconnects only the client; the game stays on the PC for manual Resume.
 - **Rumble feedback** defaults on; saved preferences are preserved.
 - **Audio jitter buffer** defaults to 100 ms, but this is an adaptive ceiling rather than
@@ -84,14 +84,16 @@ ForceGM requests Game Mode for the TV panel. The in-app switch selects the
 decoder's Ultra Low Latency mode, which can freeze video on some models.
 Leave the switch **off** when using ForceGM; it does not disable the panel request.
 
-### How do I set up Wake & play?
+### How do I wake the PC and start playing?
 
 Enable Wake-on-LAN on the PC and its network adapter, then pair Moonlight while
-the PC is online so it can learn the adapter's MAC address. When the PC is offline,
-select a cached game and choose **Wake & play**. If prompted, enter the physical
-LAN adapter's MAC and choose **Save MAC**. Sunshine must be available after the
-PC wakes. **Checking PC** does not block the wake action; **Refresh** reloads the
-library. The MAC stays in TV storage and LAN wake packets.
+the PC is online so it can learn the adapter's MAC address. Choose **Wake PC**;
+if prompted, enter the physical LAN adapter's MAC and press **Wake PC** to save and send.
+Once the PC and Sunshine are ready, select a game and press **Play**.
+The PC check does not block Play. If its status is stale, **Reload Moonlight**
+reloads the app without clearing saved pairing or settings. Availability is
+checked on opening or returning to the library, not continuously.
+The MAC stays in TV storage and LAN wake packets.
 
 ### What if the PC does not appear or pairing fails?
 

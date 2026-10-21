@@ -25,7 +25,7 @@ function setup(){
   assert.strictEqual(f.launches[0][1],1);assert.strictEqual(f.launches[0][2],false);
   assert.strictEqual(f.wakes,0);assert.strictEqual(f.audio,0);assert.strictEqual(f.timers.size,0);
   f=setup();f.infoGate=deferred();const opening=f.c.ConsoleLibrary.open(f.host);await f.flush();
-  assert.match(f.node('libraryStatus').textContent,/Checking/);assert(!f.node('libraryPlay').disabled);
+  assert.strictEqual(f.node('libraryStatus').textContent,'Checking PC…');assert(!f.node('libraryPlay').disabled);
   f.node('libraryPlay').click();f.infoGate.resolve('late');await opening;await f.flush();
   assert.strictEqual(f.launches.length,1);assert.strictEqual(f.wakes,0);assert.strictEqual(f.timers.size,0);
   // Sending WoL never connects, polls, initializes audio or launches a game.
@@ -33,7 +33,7 @@ function setup(){
   f.node('libraryWake').click();await f.flush();
   assert.strictEqual(f.wakes,1);assert.strictEqual(f.connects,connects);
   assert.strictEqual(f.launches.length,0);assert.strictEqual(f.audio,0);assert.strictEqual(f.timers.size,0);
-  assert.match(f.node('libraryStatus').textContent,/Wake packet sent/);assert(!f.node('libraryWake').disabled);
+  assert.strictEqual(f.node('libraryStatus').textContent,'Wake packet sent. Press Play when the PC is ready.');assert(!f.node('libraryWake').disabled);
   assert.strictEqual(f.host.online,false,'sending is not evidence of readiness');
   // Duplicate packets are suppressed only while the send is pending. Play is not.
   f=setup();await f.open();f.wakeGate=deferred();f.node('libraryWake').click();

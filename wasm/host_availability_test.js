@@ -53,7 +53,7 @@ function setup() {
   assert(f.requests.filter(a=>a[0].includes('/serverinfo?')).every(a=>a[3]===4500));
   // The same running client survives another off/on cycle and accepts zero games.
   f.state='off';await f.c.ConsoleLibrary.open(f.host);await f.flush();assert(!f.host.online);
-  f.state='malformed';await retry(f);assert(f.host.online);assert.match(f.node('libraryStatus').textContent,/library unavailable/);assert.strictEqual(f.host._memCachedApplist.length,1,'bad response cannot replace last good cache');
+  f.state='malformed';await retry(f);assert(f.host.online);assert.match(f.node('libraryStatus').textContent,/Games unavailable/);assert.strictEqual(f.host._memCachedApplist.length,1,'bad response cannot replace last good cache');
   f.state='empty';await retry(f);assert(f.host.online&&f.host._authenticatedOnline);
   assert.match(f.node('libraryStatus').textContent,/0 games/);assert.strictEqual(f.host._memCachedApplist.length,0);
   f.suspend();assert.strictEqual(f.timers.size,0);assert.strictEqual(f.node('game-grid').children.length,0);

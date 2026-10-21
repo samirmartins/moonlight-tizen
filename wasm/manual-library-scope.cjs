@@ -9,6 +9,18 @@ const approved={
   'wasm/index.html':'7be525cfcb24a00a0f39443b2f8a5b4d251649549f35e50126d87421038b6055'
 };
 function normalize(file,source){
+  // Approved release wording only; unknown text or executable edits stay visible.
+  if(file==='wasm/platform/console-library.js')for(const [current,previous]of [
+    ['Checking PC…','Checking PC once…'],
+    ['PC online · Loading games…','PC online · updating games…'],
+    ['PC unavailable. Turn it on or use Wake PC, then reload Moonlight.','PC not responding. Try Play or Reload Moonlight.'],
+    ['Pairing required · Open PCs.','Pair this PC from PCs.'],
+    ['Games unavailable · Try Reload Moonlight.','PC responded · library unavailable. Use Reload Moonlight.'],
+    ['Wake packet sent. Press Play when the PC is ready.','Wake packet sent. Wait for the PC, then press Play.']
+  ])source=source.replaceAll(current,previous);
+  if(file==='wasm/platform/menu-tools.js')source=source.replace(
+    'Wake packet sent. Press Play when the PC is ready.',
+    'Wake packet sent. Wait for the PC, then press Play or Reload Moonlight. Sent does not mean awake.');
   if(approved[file]&&crypto.createHash('sha256').update(source).digest('hex')===approved[file])
     return cp.execFileSync('git',['show','v3.4.6:'+file],{encoding:'utf8'});
   return source;

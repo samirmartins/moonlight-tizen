@@ -7,6 +7,17 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.4.7
+
+### Improved
+- Separates Wake PC from Play/Resume so waking a computer does not automatically
+  start a game or wait in a readiness loop
+- Replaces Refresh with Reload Moonlight, reloading the client while preserving
+  saved pairing, preferences and the persistent library cache
+- Keeps manual Play/Resume available independently of menu availability checks
+- Checks PC availability once per menu visit instead of continuously polling
+- Clarifies connection messages and updates the README interface demonstration
+
 ## v3.4.6
 
 ### Improved

@@ -7,15 +7,17 @@ and no game developer endorses this fork.
 The original image files are retained without pixel changes in `open-games/`.
 The application's existing `object-fit: cover` scales and crops their visible
 area in `game-library.png` and `game-library-wake.png`; favorites, selection,
-online Resume and offline Wake & play are demonstration states.
+online Resume and offline Wake PC/Play are demonstration states.
 `settings.png` and `add-host.png` contain only this application's interface.
 `moonlight-logo.png` renders the existing application logo from
 `wasm/static/res/ic_moonlight_logo.svg`, without changes to its design. The
 96 × 96 PNG is centered above the title with GitHub-compatible HTML alignment.
-`interface.gif` combines Wake & play, settings, Resume and the initial Add Host
-screen in that order, with two seconds per frame. Its source captures are retained
-as lossless 2048 × 1152 PNGs; the GIF is scaled to 1920 × 1080 and uses a separate
-256-color palette for each frame with dithering.
+`interface.gif` combines Wake PC/Play, settings, Resume, the initial Add Host
+screen and controller button testing, with two seconds per frame. The four
+screen captures are retained as lossless 2048 × 1152 PNGs; the GIF is scaled to
+1920 × 1080. Its controller-test frame retains the previously published cyan
+input highlights and the CC0 artwork credited in
+[the application asset notice](../../wasm/static/res/controller-dualsense-LICENSE.txt).
 
 ## Source images
 
