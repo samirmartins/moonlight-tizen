@@ -9,6 +9,7 @@ const approved={
   'wasm/index.html':'7be525cfcb24a00a0f39443b2f8a5b4d251649549f35e50126d87421038b6055'
 };
 function normalize(file,source){
+  source=require('./video-recovery-scope.cjs').normalize(file,source);
   // Approved release wording only; unknown text or executable edits stay visible.
   if(file==='wasm/platform/console-library.js')for(const [current,previous]of [
     ['Checking PC…','Checking PC once…'],

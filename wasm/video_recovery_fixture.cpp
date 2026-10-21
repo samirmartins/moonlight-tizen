@@ -1,0 +1,244 @@
+// Test-only fault-injection driver. No Samsung decoder or timing measurement.
+#include <algorithm>
+#include <cassert>
+#include <chrono>
+#include <cstdint>
+#include <cstdio>
+#include <string>
+#include <vector>
+#include "Limelight.h"
+
+extern "C" {
+void fixture_reset(int); void fixture_close(void); void fixture_set_time(uint64_t);
+void fixture_deliver(int, int); unsigned fixture_requests(void);
+unsigned fixture_warnings(void); unsigned fixture_clears(void);
+unsigned fixture_packets(void); unsigned fixture_frame_reports(void);
+unsigned fixture_fec_reports(void);
+int fixture_waiting(void); int fixture_idr_processed(void);
+void fixture_service(uint64_t); void fixture_cancel(void);
+unsigned fixture_time_reads(void); int fixture_request_spacing(void);
+}
+using Stamp = std::chrono::steady_clock::time_point;
+struct Position { int64_t positionUs = -1; uint64_t atMs = 0; };
+struct Clock { Position Read() { return {}; } };
+struct Stats {
+  unsigned totalRenderTime = 0, renderedFrames = 0, pacerDroppedFrames = 0;
+  std::vector<uint32_t> appendUs;
+};
+namespace mltelemetry {
+void Add(std::vector<uint32_t>& values, uint32_t value) { values.push_back(value); }
+}
+// The SDK Result<void> converts to true only for kSuccess. Preserve that rule.
+struct Result { const char* error; explicit operator bool() const {
+  return std::string(error) == "kSuccess";
+}};
+const char* nextError = "kSuccess";
+unsigned attempts = 0, actualFailures = 0;
+uint64_t payloadDigest = 1469598103934665603ULL;
+void digest(uint64_t value) { payloadDigest = (payloadDigest ^ value) * 1099511628211ULL; }
+struct Track {
+  Result AppendPacket(int) {
+    attempts++;
+    if (std::string(nextError) != "kSuccess") actualFailures++;
+    return {nextError};
+  }
+};
+struct Instance { Track m_VideoTrack; Clock m_PipelinePosition; } instance;
+Instance* g_Instance = &instance;
+Stats m_ActiveWndVideoStats;
+// Values extracted unchanged from production by the JS driver.
+#include "append_constants.inc"
+void ClLogMessage(const char*, ...) {}
+void RecordAppendCadence(Stats&) {}
+void RecordPipelineLead(Stats&, double, bool, int64_t, uint64_t, uint32_t) {}
+void NotePresentationProgress(bool, int64_t, uint32_t) {}
+bool collect = false;
+std::vector<int> statuses;
+template<bool CollectStats> int Submit() {
+  int pkt = 0; double framePts = 0;
+  Stamp appendStart = std::chrono::steady_clock::now();
+  // Entire return/measurement block extracted unchanged from wasmplayer.cpp.
+#include "append_tail.inc"
+}
+extern "C" int fixture_submit(PDECODE_UNIT unit) {
+  digest(unit->frameNumber); digest(unit->frameType);
+  digest(unit->presentationTimeMs); digest(unit->fullLength);
+  for (PLENTRY entry = unit->bufferList; entry; entry = entry->next)
+    for (int i = 0; i < entry->length; i++) digest(static_cast<unsigned char>(entry->data[i]));
+  const int status = collect ? Submit<true>() : Submit<false>();
+  statuses.push_back(status);
+  return status;
+}
+void reset(int codec, bool metrics) {
+  fixture_reset(codec); collect = metrics; s_lastIdrRequestMs = 0;
+  attempts = actualFailures = 0; nextError = "kSuccess";
+  payloadDigest = 1469598103934665603ULL;
+  m_ActiveWndVideoStats = {}; statuses.clear();
+}
+void send(uint64_t ms, bool idr = false, const char* error = "kSuccess", int fragments = 1) {
+  fixture_set_time(ms); nextError = error; fixture_deliver(idr, fragments);
+}
+unsigned checks = 0;
+void check(bool condition, const char* description) {
+  checks++;
+  if (!condition) { std::fprintf(stderr, "HARNESS ASSERTION: %s\n", description); std::abort(); }
+}
+void result(const char* name, const char* contract, const char* evidence) {
+  std::printf("CASE\t%s\t%s\t%s\n", name, contract, evidence);
+}
+int main() {
+  const int codecs[] = {VIDEO_FORMAT_H264, VIDEO_FORMAT_H265, VIDEO_FORMAT_AV1_MAIN8};
+  unsigned matrixCases = 0;
+  for (int codec : codecs) for (bool metrics : {false, true}) for (int fragments : {1, 3}) {
+    reset(codec, metrics);
+    for (int frame = 1; frame <= 600; frame++) send(10000 + frame * 1000 / 60, frame == 1, "kSuccess", fragments);
+    check(attempts == 600 && actualFailures == 0 && fixture_requests() == 0,
+          "healthy stream reaches submit without recovery");
+    check(fixture_warnings() == 0 && fixture_packets() == 600u * fragments && fixture_frame_reports() == 600,
+          "healthy consecutive RTP frames produce no warning");
+    check(metrics ? m_ActiveWndVideoStats.appendUs.size() == 600 : m_ActiveWndVideoStats.appendUs.empty(),
+          "measurement branch follows opt-in");
+    std::printf("HEALTHY\t%d\t%d\t%d\t%016llx\t%u\t%u\n", codec, metrics, fragments,
+                static_cast<unsigned long long>(payloadDigest), fixture_time_reads(), attempts);
+
+    // A rejection opens recovery, but is absent from the displayed rej counter.
+    reset(codec, metrics); send(10000, true);
+    send(10017, false, "kAppendBufferFull", fragments);
+    check(statuses.back() == DR_NEED_IDR && fixture_waiting() && fixture_requests() == 1,
+          "first rejection requests IDR and enters recovery");
+    check(actualFailures == 1 && m_ActiveWndVideoStats.pacerDroppedFrames == 0,
+          "first rejection is missing from rej");
+    check(!metrics || m_ActiveWndVideoStats.appendUs.size() == 1,
+          "failed append is excluded from append timing");
+    send(10034, true, "kSuccess", fragments);
+    check(!fixture_waiting(), "accepted IDR ends recovery");
+
+    // A new independent loss shortly after recovery must not assume an old IDR is pending.
+    send(10050, false, "kAppendBufferFull", fragments);
+    check(statuses.back() == (RECOVERY_FIXED ? DR_NEED_IDR : DR_OK) &&
+          fixture_waiting() == RECOVERY_FIXED && fixture_requests() == 1,
+          "new rejection rearms recovery independently of request cooldown");
+    const auto beforeDependent = attempts;
+    send(10067, false, "kSuccess", fragments);
+    check(attempts == beforeDependent + (RECOVERY_FIXED ? 0 : 1) && actualFailures == 2,
+          "dependent P frame is withheld after rejected reference");
+
+    // The replacement keyframe itself can be rejected inside the cooldown.
+    reset(codec, metrics);
+    send(10000, true, "kAppendBufferFull", fragments);
+    check(!fixture_idr_processed() && fixture_waiting() && statuses.back() == DR_NEED_IDR,
+          "first failed IDR is not considered processed");
+    send(10017, true, "kAppendExpectsKeyframe", fragments);
+    check(statuses.back() == (RECOVERY_FIXED ? DR_NEED_IDR : DR_OK) &&
+          fixture_idr_processed() == !RECOVERY_FIXED && fixture_waiting() == RECOVERY_FIXED,
+          "only accepted replacement IDR ends recovery");
+    check(actualFailures == 2 && m_ActiveWndVideoStats.renderedFrames == 0,
+          "no keyframe was accepted by fake player");
+
+    // Boundary cases use real production 500 ms comparison, including uint32 wrap.
+    for (unsigned delta : {1u, 16u, 100u, 499u, 500u, 501u, 2000u}) {
+      reset(codec, metrics);
+      send(10000, true); send(10100, false, "kAppendBufferFull", fragments);
+      send(10101, true, "kSuccess", fragments);
+      send(10100 + delta, false, "kAppendBufferFull", fragments);
+      check(statuses.back() == (RECOVERY_FIXED || delta >= 500 ? DR_NEED_IDR : DR_OK),
+            "500 ms boundary matches production");
+      check(fixture_requests() == (delta < 500 ? 1u : 2u), "request limit is preserved");
+      matrixCases++;
+    }
+    reset(codec, metrics); send(UINT32_MAX - 50ULL, true);
+    send(UINT32_MAX - 40ULL, false, "kAppendBufferFull", fragments);
+    send(UINT32_MAX - 20ULL, true, "kSuccess", fragments);
+    send(UINT32_MAX + 20ULL, false, "kAppendBufferFull", fragments);
+    check(statuses.back() == (RECOVERY_FIXED ? DR_NEED_IDR : DR_OK) && fixture_requests() == 1,
+          "unsigned time wrap preserves cooldown without changing failure status");
+
+    // Different SDK errors all take the same recovery branch in this client.
+    for (const char* error : {"kAppendBufferFull", "kAppendExpectsKeyframe", "kAppendIgnored", "kAppendInvalidTrackState", "kAppendInvalidPts"}) {
+      reset(codec, metrics); send(10000, true);
+      send(10017, false, error, fragments);
+      check(statuses.back() == DR_NEED_IDR && fixture_requests() == 1,
+            "distinct SDK errors lose their identity and request IDR");
+      matrixCases++;
+    }
+
+    // No packet/frame number is lost. Recovery alone removes frames from the warning numerator.
+    reset(codec, metrics);
+    for (int frame = 1; frame <= 600; frame++) send(10000 + frame * 1000 / 60, frame == 1, "kSuccess", fragments);
+    send(10000 + 601 * 1000 / 60, false, "kAppendBufferFull", fragments);
+    for (int frame = 602; frame <= 691; frame++) send(10000 + frame * 1000 / 60, false, "kSuccess", fragments);
+    check(attempts == 601 && fixture_waiting(), "90 fully received P frames are dropped before submit during IDR wait");
+    for (int frame = 692; frame <= 1000; frame++) send(10000 + frame * 1000 / 60, frame == 692, "kSuccess", fragments);
+    check(fixture_packets() == 1000u * fragments && fixture_frame_reports() == 1000 && fixture_fec_reports() == 0,
+          "all synthetic RTP frames completed with no packet omission");
+    check(actualFailures == 1 && fixture_warnings() >= 1 && fixture_clears() >= 1,
+          "internal recovery produces and later clears network warning without injected transport loss");
+
+    // Existing 120-drop safety net, expressed in frames rather than a wall-clock deadline.
+    reset(codec, metrics); send(10000, true);
+    send(10017, false, "kAppendBufferFull", fragments);
+    for (int frame = 0; frame < 119; frame++) send(10034 + frame * 17, false, "kSuccess", fragments);
+    check(fixture_requests() == 1, "no additional request before 120 consecutive drops");
+    send(12057, false, "kSuccess", fragments);
+    check(fixture_requests() == 2, "120th dropped frame requests IDR again");
+    matrixCases++;
+
+    // No submit callback while waiting: existing receive progress/timeout services the due request.
+    reset(codec, metrics); send(10000, true);
+    send(10017, false, "kAppendBufferFull", fragments);
+    send(10034, true, "kSuccess", fragments);
+    send(10050, false, "kAppendBufferFull", fragments);
+    const auto beforeService = attempts;
+    fixture_service(10516);
+    check(fixture_requests() == 1, "deferred request cannot fire at 499 ms");
+    fixture_service(10517);
+    check(fixture_requests() == (RECOVERY_FIXED ? 2u : 1u) && attempts == beforeService,
+          "deferred request is sent without another submit callback");
+    check(fixture_request_spacing(), "deferred requests preserve minimum spacing");
+
+    // A spontaneous accepted IDR makes an unsent deferred request unnecessary.
+    if (RECOVERY_FIXED) {
+      reset(codec, metrics); send(10000, true);
+      send(10017, false, "kAppendBufferFull", fragments); send(10034, true, "kSuccess", fragments);
+      send(10050, false, "kAppendBufferFull", fragments); send(10067, true, "kSuccess", fragments);
+      fixture_service(10600);
+      check(fixture_requests() == 1 && !fixture_waiting(), "accepted IDR cancels pending request");
+    }
+    // Repeated failures, even in a burst, must never manufacture accepted IDRs or an IDR storm.
+    if (RECOVERY_FIXED) {
+      reset(codec, metrics);
+      for (int frame = 0; frame < 120; frame++) send(10000 + frame * 17, true, "kAppendBufferFull", fragments);
+      check(actualFailures == 120 && !fixture_idr_processed() && fixture_waiting(), "repeated IDR failures stay in recovery");
+      check(fixture_requests() == 4 && fixture_request_spacing(), "repeated IDR failures remain rate limited");
+      reset(codec, metrics); send(10000, true); send(10017, false, "kAppendBufferFull", fragments);
+      for (int frame = 0; frame < 240; frame++) send(10018, false, "kSuccess", fragments);
+      check(fixture_requests() == 1 && fixture_request_spacing(), "frame-count safety net cannot bypass cooldown during a burst");
+    }
+    // Cancellation and a fresh session cannot leak a deferred request.
+    reset(codec, metrics); send(10000, true);
+    send(10017, false, "kAppendBufferFull", fragments); send(10034, true, "kSuccess", fragments);
+    send(10050, false, "kAppendBufferFull", fragments); fixture_cancel(); fixture_service(10600);
+    check(fixture_requests() == 1, "cancelled session does not send pending request");
+    reset(codec, metrics); fixture_service(10600);
+    check(fixture_requests() == 0, "new session has no inherited pending request");
+    // The 32-bit request clock can be zero while the 64-bit RTP clock is valid.
+    send(1ULL << 32, true, "kAppendBufferFull", fragments);
+    check(fixture_requests() == (RECOVERY_FIXED ? 1u : 0u) &&
+          statuses.back() == (RECOVERY_FIXED ? DR_NEED_IDR : DR_OK), "first failure works at clock zero");
+    matrixCases += 4;
+  }
+  fixture_close();
+  result("healthy_stream", "PASS", "600 frames; H264/HEVC/AV1; 1/3 fragments; metrics OFF/ON");
+  result("post_recovery_rejection", RECOVERY_FIXED ? "PASS" : "FAIL_REPRODUCED", "new rejected P frame must enter recovery inside cooldown");
+  result("rejected_replacement_idr", RECOVERY_FIXED ? "PASS" : "FAIL_REPRODUCED", "only an accepted keyframe may finish recovery");
+  result("sdk_error_classification", "LIMITATION_REPRODUCED", "five distinct simulated SDK errors request identical IDR recovery");
+  result("rejection_coverage", "LIMITATION_REPRODUCED", "first failure absent from rej; failed-call duration absent from append stats");
+  result("warning_without_transport_loss", "REPRODUCED", "all 1000 frames completed RTP; delayed IDR alone triggers then clears warning");
+  result("cooldown_boundaries", "PASS", "1/16/100/499/500/501/2000 ms and uint32 wrap");
+  result("recovery_safety_net", "PASS", "new request after 120 discarded frames, not after a timer deadline");
+  result("deferred_without_callback", RECOVERY_FIXED ? "PASS" : "FAIL_REPRODUCED", "due IDR request is sent even while P frames are withheld");
+  result("clock_zero", RECOVERY_FIXED ? "PASS" : "FAIL_REPRODUCED", "initial recovery must not be suppressed by an uninitialized cooldown");
+  result("cancel_and_restart", "PASS", "no deferred requests survive stop/restart");
+  if (RECOVERY_FIXED) result("repeated_rejections", "PASS", "120 failed IDRs and 240-frame burst keep request spacing; no false success");
+  std::printf("SUMMARY\tchecks=%u\tmatrix_cases=%u\n", checks, matrixCases);
+}

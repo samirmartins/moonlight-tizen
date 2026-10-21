@@ -4,7 +4,7 @@ cd "$(dirname "${BASH_SOURCE[0]}")/.."
 for command in node gcc g++ ffmpeg git timeout; do
   command -v "$command" >/dev/null || { echo "Missing dependency: $command" >&2; exit 1; }
 done
-for reference in v3.3.8 v3.3.10 v3.4.0; do
+for reference in v3.3.8 v3.3.10 v3.4.0 v3.4.7; do
   git rev-parse --verify "$reference^{commit}" >/dev/null || {
     echo "Missing baseline tag $reference. Fetch full history and tags." >&2; exit 1;
   }

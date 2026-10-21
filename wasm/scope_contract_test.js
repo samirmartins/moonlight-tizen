@@ -44,7 +44,7 @@ function withoutLogs(source) {
 {
 'use strict';
 const assert = require('assert'), fs = require('fs'), cp = require('child_process');
-const current = fs.readFileSync('wasm/wasmplayer.cpp', 'utf8');
+const current = require('./video-recovery-scope.cjs').normalize('wasm/wasmplayer.cpp', fs.readFileSync('wasm/wasmplayer.cpp', 'utf8'));
 const baseline = cp.execFileSync('git', ['show', 'v3.3.8:wasm/wasmplayer.cpp'], {encoding: 'utf8'});
 function section(text, begin, end) {
   const start = text.indexOf(begin);

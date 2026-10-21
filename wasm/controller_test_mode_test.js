@@ -103,5 +103,6 @@ assert.notStrictEqual(normalize(cssFile,css.replace('visibility:hidden','visibil
 const art='wasm/static/res/controller-dualsense.png';
 assert(fs.readFileSync(art).equals(cp.execFileSync('git',['show','v3.4.4:'+art],{maxBuffer:1024*1024})),'original CC0 pixels unchanged');
 for(const name of ['wasm/platform/audio.js','wasm/platform/audio-worklet.js','wasm/wasmplayer.cpp','wasm/main.cpp','wasm/platform/controller-mapping.js'])
-  assert(fs.readFileSync(name).equals(cp.execFileSync('git',['show','v3.4.4:'+name],{maxBuffer:4*1024*1024})),name+' unchanged');
+  assert.strictEqual(require('./video-recovery-scope.cjs').normalize(name,fs.readFileSync(name,'utf8')),
+    cp.execFileSync('git',['show','v3.4.4:'+name],{maxBuffer:4*1024*1024,encoding:'utf8'}),name+' unchanged outside tested recovery correction');
 console.log('controller_test_mode_test: physical highlights, short presses, keyboard/view isolation, exact 3s hold, release guard, disconnect/reentry and unchanged artwork/playback OK');

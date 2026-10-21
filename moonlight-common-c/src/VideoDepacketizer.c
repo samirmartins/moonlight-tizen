@@ -24,6 +24,14 @@ static unsigned int firstPacketPresentationTime;
 static bool dropStatePending;
 static bool idrFrameProcessed;
 
+// DIRECT_SUBMIT state belongs to the receive thread. Limit requests, never
+// the decoder's obligation to invalidate references after a rejected frame.
+static bool decoderRefreshActive;
+static bool decoderRefreshRequestPending;
+static bool decoderRefreshRequestSent;
+static uint32_t lastDecoderRefreshRequestMs;
+#define DECODER_REFRESH_INTERVAL_MS 500
+
 #define DR_CLEANUP -1000
 
 #define CONSECUTIVE_DROP_LIMIT 120
@@ -76,6 +84,32 @@ void initializeVideoDepacketizer(int pktSize) {
     dropStatePending = false;
     idrFrameProcessed = false;
     strictIdrFrameWait = !isReferenceFrameInvalidationEnabled();
+    decoderRefreshActive = false;
+    decoderRefreshRequestPending = false;
+    decoderRefreshRequestSent = false;
+    lastDecoderRefreshRequestMs = 0;
+}
+
+// Also called after the existing UDP receive timeout. A deferred request must
+// not depend on another submit callback: P-frames are withheld during recovery.
+void servicePendingVideoDecoderRefresh(void) {
+    if (!decoderRefreshRequestPending) {
+        return;
+    }
+    if (ConnectionInterrupted) {
+        decoderRefreshRequestPending = false;
+        return;
+    }
+
+    const uint32_t now = (uint32_t)PltGetMillis();
+    if (decoderRefreshRequestSent &&
+            now - lastDecoderRefreshRequestMs < DECODER_REFRESH_INTERVAL_MS) {
+        return;
+    }
+    decoderRefreshRequestPending = false;
+    decoderRefreshRequestSent = true;
+    lastDecoderRefreshRequestMs = now;
+    LiRequestIdrFrame();
 }
 
 // Free the NAL chain
@@ -122,7 +156,13 @@ static void dropFrameState(void) {
 
         // Request an IDR frame
         waitingForIdrFrame = true;
-        LiRequestIdrFrame();
+        if (decoderRefreshActive) {
+            decoderRefreshRequestPending = true;
+            servicePendingVideoDecoderRefresh();
+        }
+        else {
+            LiRequestIdrFrame();
+        }
     }
 
     cleanupFrameState();
@@ -292,6 +332,12 @@ void LiCompleteVideoFrame(VIDEO_FRAME_HANDLE handle, int drStatus) {
         // Remember that the IDR frame was processed. We can now use
         // reference frame invalidation.
         idrFrameProcessed = true;
+        // Only an accepted keyframe ends recovery, not its arrival or an
+        // elapsed cooldown. An unsolicited accepted IDR cancels a deferred one.
+        if (VideoCallbacks.capabilities & CAPABILITY_DIRECT_SUBMIT) {
+            decoderRefreshActive = false;
+            decoderRefreshRequestPending = false;
+        }
     }
 
     while (qdu->decodeUnit.bufferList != NULL) {
@@ -721,7 +767,15 @@ void requestDecoderRefresh(void) {
     dropStatePending = true;
     
     // Request the IDR frame
-    LiRequestIdrFrame();
+    if (VideoCallbacks.capabilities & CAPABILITY_DIRECT_SUBMIT) {
+        decoderRefreshActive = true;
+        decoderRefreshRequestPending = true;
+        servicePendingVideoDecoderRefresh();
+    }
+    else {
+        // Preserve the queued-renderer protocol; it has a separate consumer.
+        LiRequestIdrFrame();
+    }
 }
 
 // Return 1 if packet is the first one in the frame
@@ -1067,6 +1121,7 @@ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
         if (waitingForIdrFrame || waitingForRefInvalFrame) {
             // IDR wait takes priority over RFI wait (and an IDR frame will satisfy both)
             if (waitingForIdrFrame) {
+                servicePendingVideoDecoderRefresh();
                 Limelog("Waiting for IDR frame\n");
 
                 // We wait for the first fully received frame after a loss to approximate

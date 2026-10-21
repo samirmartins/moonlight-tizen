@@ -23,7 +23,7 @@ Dependencies: Node.js 22, GCC/G++, FFmpeg with libx264, OpenSSL development head
 and Git/GNU timeout. Native fixtures use ASan/UBSan.
 The runner checks completion markers, rejects unhandled rejections, bounds each
 process and cleans temporary files, including failed runs.
-The current comparisons require tags `v3.3.8`, `v3.3.10`, `v3.4.0`, `v3.4.1`, `v3.4.2`, `v3.4.3` and `v3.4.4`;
+The current comparisons require tags `v3.3.8`, `v3.3.10`, `v3.4.0`, `v3.4.1`, `v3.4.2`, `v3.4.3`, `v3.4.4` and `v3.4.7`;
 use a full checkout. CI uses `fetch-depth: 0` and read-only permissions, without
 signing secrets. These tests do not compile the Samsung target or prove TV performance.
 
@@ -91,6 +91,15 @@ only inactive-slot work changes. These checks do not measure TV latency or CPU.
 For documentation-only changes, check content, links and templates; a TV test
 or WGT rebuild is not required. For runtime changes, select the full suite and
 focused native/browser checks appropriate to the affected behavior.
+
+Video recovery: `video_recovery_test.js` compares the production RTP queue,
+depacketizer and extracted submit/status code against v3.4.7 using synthetic
+codec headers, a controlled clock and injected Samsung results. It checks
+repeated rejected keyframes, deferred IDR requests without another submit,
+500 ms spacing, wrap/zero, cancellation/restart and healthy payload/timestamp/
+clock-read equivalence. ASan/UBSan and a negative control guard the fixture.
+The idle retry uses the existing receive timeout; no video queue or worker is
+added. These are recovery contracts, not measured FPS or TV latency gains.
 
 Optional seeded stress is separate from the core runner. The existing JS fixtures
 accept `ML_STARTUP_CASES`, `ML_RUMBLE_FRAMES`, `ML_AUDIO_SECONDS`,

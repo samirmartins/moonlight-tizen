@@ -52,6 +52,13 @@ function assertFrozen(reference, paths) {
     // independently tested overlay aggregation move, never a whole-file mask.
     const changed = cp.execFileSync('git', ['diff', '--name-only', reference, '--', ...rest], {encoding:'utf8'}).trim().split('\n').filter(Boolean);
     for (const file of changed) {
+      const recovery = require('./video-recovery-scope.cjs');
+      if (recovery.files.includes(file) && file !== 'wasm/wasmplayer.cpp') {
+        const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
+        assert.strictEqual(recovery.normalize(file, fs.readFileSync(file,'utf8')), old,
+          'exact tested recovery patch only: '+file);
+        continue;
+      }
       if (file === 'wasm/platform/index.js') {
         const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
         const defaults = require('./rumble-default-scope.cjs').normalize;

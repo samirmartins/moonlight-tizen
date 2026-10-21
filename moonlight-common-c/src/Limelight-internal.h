@@ -133,6 +133,7 @@ void destroyVideoDepacketizer(void);
 void queueRtpPacket(PRTPV_QUEUE_ENTRY queueEntry);
 void stopVideoDepacketizer(void);
 void requestDecoderRefresh(void);
+void servicePendingVideoDecoderRefresh(void);
 void notifyFrameLost(unsigned int frameNumber, bool speculative);
 
 void initializeVideoStream(void);

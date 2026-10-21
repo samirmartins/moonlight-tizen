@@ -21,7 +21,7 @@ for(const f of ['wasm/auddec.cpp','wasm/audio_ring.hpp','wasm/platform/audio.js'
   // The authorized wake-only exception is also behaviorally tested; keep the
   // snapshot, mapping, network values and rumble frozen to the same baseline.
   assert.strictEqual(normalizeWake(fs.readFileSync(f,'utf8')),normalizeWake(old(f)),f+' approved wake-only change');
- } else assert.strictEqual(lifecycle(f,fs.readFileSync(f,'utf8')),lifecycle(f,old(f)),f+' unchanged outside tested Smart Hub policy');
+ } else assert.strictEqual(lifecycle(f,require('./video-recovery-scope.cjs').normalize(f,fs.readFileSync(f,'utf8'))),lifecycle(f,old(f)),f+' unchanged outside tested Smart Hub/recovery policy');
 }
 function section(s,a,b){const start=s.indexOf(a),end=s.indexOf(b,start);assert(start>=0&&end>start);return s.slice(start,end);}
 const main=fs.readFileSync('wasm/main.cpp','utf8');

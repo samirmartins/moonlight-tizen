@@ -144,6 +144,9 @@ static void VideoReceiveThreadProc(void* context) {
             break;
         }
         else if  (err == 0) {
+            if (!PltIsThreadInterrupted(&receiveThread)) {
+                servicePendingVideoDecoderRefresh();
+            }
             if (!receivedDataFromPeer) {
                 // If we wait many seconds without ever receiving a video packet,
                 // assume something is broken and terminate the connection.

@@ -21,6 +21,7 @@ const newPrefix=windowDeclaration+
   oldPrefix.slice(oldPrefix.indexOf(windowDeclaration)+windowDeclaration.length,
     oldPrefix.lastIndexOf('      if (g_Instance')).replace(/^      /gm,'        ');
 function normalize(file,source) {
+  source=require('./video-recovery-scope.cjs').normalize(file,source);
   if(file!=='wasm/wasmplayer.cpp')return source;
   return source.replace(newPrefix,oldPrefix).replace(
     '    // Flip the shared collection window every two seconds while either\n'+

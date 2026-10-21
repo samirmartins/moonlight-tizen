@@ -68,9 +68,8 @@ static constexpr double kPtsStepMaxFactor = 2.0;
 // Low-delay VUI only: retain the host's reference count, profile and level.
 static constexpr int kSpsFixupStage = 1;
 
-// Minimum interval between IDR requests triggered by append failures. A
-// keyframe costs several times a P-frame, so one request per rejected packet
-// turns a congested link into a worse one.
+// Preserve the existing warning/counter window. Actual IDR request limiting
+// belongs to the depacketizer, independently of decoder acceptance status.
 static constexpr uint32_t kIdrRequestIntervalMs = 500;
 
 // ─── Presentation stall detection ────────────────────────────────────────────
@@ -1356,12 +1355,14 @@ int MoonlightInstance::VidDecSubmitDecodeUnitImpl(PDECODE_UNIT decodeUnit) {
     if (nowMs - s_lastIdrRequestMs >= kIdrRequestIntervalMs) {
       s_lastIdrRequestMs = nowMs;
       ClLogMessage("Append video packet failed, requesting IDR\n");
-      return DR_NEED_IDR;
     }
-    // A refresh is already on its way, so drop this frame quietly
-    if constexpr (CollectStats) {
-      m_ActiveWndVideoStats.pacerDroppedFrames++;
+    else {
+      // Preserve the optional counter policy; cooldown is not decoder success.
+      if constexpr (CollectStats) {
+        m_ActiveWndVideoStats.pacerDroppedFrames++;
+      }
     }
+    return DR_NEED_IDR;
   }
 
   return DR_OK;
