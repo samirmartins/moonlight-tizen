@@ -7,6 +7,19 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.4.8
+
+### Improved
+- Fixes video recovery after decoder rejections, including repeat failures
+  within the keyframe-request cooldown
+- Completes recovery only after the player accepts a keyframe, protecting
+  dependent frames from premature submission
+- Services deferred keyframe requests during recovery and existing receive
+  timeouts, retaining request rate limits and clearing pending work on stop
+- Uses clearer stream warnings without assuming bitrate is the cause
+- Expands recovery regression coverage across codecs, repeated failures,
+  clock wraparound and optional performance metrics
+
 ## v3.4.7
 
 ### Improved
