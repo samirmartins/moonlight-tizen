@@ -2,7 +2,8 @@
 const assert=require('assert'),fs=require('fs'),vm=require('vm'),cp=require('child_process');
 const file='wasm/platform/gamepad.js',current=fs.readFileSync(file,'utf8');
 const baseline=cp.execFileSync('git',['show','v3.4.4:'+file],{encoding:'utf8'});
-const normalize=require('./rumble-work-scope.cjs').normalize;
+const normalize=(file,source)=>require('./rumble-work-scope.cjs').normalize(file,
+ require('./library-navigation-scope.cjs').normalize(file,source));
 assert.strictEqual(normalize(file,current),baseline,'only inactive rumble slots may differ');
 for(const [from,to] of [['_RUMBLE_MIN_INTERVAL_MS = 100','_RUMBLE_MIN_INTERVAL_MS = 200'],
   ['duration: _RUMBLE_DURATION_MS','duration: 1000'],['actuator.reset()','actuator.pulse(0, 0)']]) {

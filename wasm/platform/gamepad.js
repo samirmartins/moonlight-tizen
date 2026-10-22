@@ -11,6 +11,7 @@ const Controller = (function() {
 
   class Gamepad {
     constructor(gamepad) {
+      this.index = gamepad.index;
       this.buttons = gamepad.buttons.map((button) => new Button(button));
       this.axes = gamepad.axes.slice();
     }
@@ -35,7 +36,7 @@ const Controller = (function() {
         }
       }
       if (changes) {
-        window.dispatchEvent(new CustomEvent('gamepadinputchanged', { detail: { changes } }));
+        window.dispatchEvent(new CustomEvent('gamepadinputchanged', { detail: { changes, padIndex: this.index } }));
         // Event delivery is synchronous: a listener may change the layout.
         if (this.buttons.length !== newButtons.length || this.axes.length !== newAxes.length) {
           this.buttons = newButtons.map((button) => new Button(button));
@@ -57,6 +58,7 @@ const Controller = (function() {
   }
 
   function onGamepadDisconnected(event) {
+    if (typeof LibraryNavigation !== 'undefined') LibraryNavigation.disconnect(event.gamepad.index);
     delete gamepads[event.gamepad.index];
   }
 
@@ -87,6 +89,7 @@ const Controller = (function() {
   }
 
   function stopWatching() {
+    if (typeof LibraryNavigation !== 'undefined') LibraryNavigation.reset();
     if (pollingInterval) {
       clearInterval(pollingInterval);
       pollingInterval = null;

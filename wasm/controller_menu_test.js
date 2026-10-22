@@ -35,7 +35,11 @@ function pad(index){return {index,connected:true,buttons:Array.from({length:17},
 function snapshot(f){return Object.keys(f.state()).map(key=>{
  const p=f.state()[key];return {key,buttons:Array.from(p.buttons,b=>({pressed:b.pressed,value:b.value})),axes:Array.from(p.axes)};
 });}
-function compare(a,b){assert.deepStrictEqual(snapshot(a),snapshot(b));assert.strictEqual(JSON.stringify(a.events),JSON.stringify(b.events));}
+function compare(a,b){
+ assert.deepStrictEqual(snapshot(a),snapshot(b));
+ assert.strictEqual(JSON.stringify(a.events.map(e=>e.detail.changes)),JSON.stringify(b.events.map(e=>e.detail.changes)));
+ assert(a.events.every(e=>Number.isInteger(e.detail.padIndex)), 'menu events identify their controller');
+}
 const idle=fixture(),oldIdle=fixture(baseline),p=pad(0),q=pad(0);
 idle.setPads([p]);oldIdle.setPads([q]);idle.start();oldIdle.start();idle.start();oldIdle.start();
 assert.deepStrictEqual(idle.periods,[16]);

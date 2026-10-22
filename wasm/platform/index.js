@@ -122,6 +122,10 @@ function attachListeners() {
       return;
     }
     isGamepadActive = true;
+    if (typeof LibraryNavigation !== 'undefined' && LibraryNavigation.handle(e.detail)) {
+      repeatAction = null; clearTimeout(repeatTimeout);
+      return;
+    }
     const changes = e.detail.changes;
     // Iterate through each change in the gamepad input
     changes.forEach((change) => {

@@ -79,8 +79,16 @@ Menu controller: `controller_menu_test.js` compares events, order and private
 snapshots with the prior implementation, including hotplug, layout changes,
 restart, legacy polling and synchronous/reentrant listeners. Stable layouts
 reuse snapshot arrays/buttons; unchanged polls do not create a changes array.
-Emitted payloads remain independent. The 16 ms interval and all streaming and
+Emitted payloads remain independent; menu events also identify their controller.
+The 16 ms interval and all streaming and
 rumble policy remain frozen; allocation counts are not physical TV measurements.
+
+Library navigation: `library_navigation_test.js` executes the production reader
+and menu listener against v3.4.8 with a deterministic clock. It covers immediate
+analog selection, jitter/hysteresis, digital repeat, direction reversal, multiple
+controllers, cancellation and unchanged gameplay sources. Only the library uses
+the new directional state; other menus retain their existing navigation. Synthetic
+timing is not physical controller-to-screen latency.
 
 Controller test mode: `controller_test_mode_test.js` checks physical artwork
 highlights, confirm/back isolation, a continuous three-second Circle/B hold,

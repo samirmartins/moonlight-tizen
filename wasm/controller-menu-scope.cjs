@@ -2,6 +2,7 @@
 // Only the tested private menu snapshot reuse may differ. The streaming
 // publisher, sampling, rumble and menu scheduling remain outside this exception.
 function normalize(file,source) {
+  source=require('./library-navigation-scope.cjs').normalize(file,source);
   if(file!=='wasm/platform/gamepad.js')return source;
   const end=source.indexOf('// Streaming gamepad publisher');
   require('assert')(end>0,'menu/streaming boundary');
