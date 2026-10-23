@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/images/moonlight-logo.png" alt="Moonlight logo" width="96" height="96">
+  <img src="docs/images/vibelight-logo.png" alt="Vibelight-Tizen logo" width="320" height="320">
 </p>
 
 <h1 align="center">Vibelight-Tizen</h1>
