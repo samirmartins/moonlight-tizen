@@ -1,16 +1,16 @@
 <p align="center">
-  <img src="docs/images/vibelight-logo.png" alt="Vibelight-Tizen logo" width="320" height="320">
+  <img src="docs/images/vibelight-logo.png" alt="VibeLight-Tizen logo" width="320" height="320">
 </p>
 
-A **vibe-coded fork of Moonlight Tizen** for Samsung Smart TVs, developed with AI assistance and maintained independently. Built on [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen).
+**VibeLight-Tizen** is a vibe-coded fork for Samsung Smart TVs, developed with AI assistance and maintained independently. Built on [BrightCraft's Tizen client](https://github.com/brightcraft/moonlight-tizen).
 
-Stream PC games through [Sunshine](https://app.lizardbyte.dev/Sunshine/) or NVIDIA GameStream. The goal: keep improving Moonlight on Tizen OS toward a **console-like experience**, with **smoother gameplay, low latency and full picture quality**.
+Stream PC games through [Sunshine](https://app.lizardbyte.dev/Sunshine/) or NVIDIA GameStream. The goal: keep improving VibeLight on Tizen OS toward a **console-like experience**, with **smoother gameplay, low latency and full picture quality**.
 
 ---
 
 ## Interface
 
-![Moonlight interface: Wake PC, settings, Resume library, Add Host and controller testing](docs/images/interface.gif)
+![VibeLight interface: Wake PC, settings, Resume library, Add Host and controller testing](docs/images/interface.gif)
 
 Local UI demonstration with simulated PC states and openly licensed game images;
 see [image credits and licenses](docs/images/ATTRIBUTION.md).
@@ -22,15 +22,14 @@ see [image credits and licenses](docs/images/ATTRIBUTION.md).
 You need a Samsung TV running **Tizen 5.5 or newer** and a PC running Sunshine.
 Keep the TV, PC and installation device on the same local network.
 
-Hardware validation is currently limited to a **Samsung DU7700 running Tizen 9.0**,
-with smooth 1080p, 1440p and 4K playback. Reports from other models are welcome.
+Choose the build that suits your TV:
 
-On the tested TV, we recommend the **ForceGM** version, which requests TV panel
-Game Mode. Keep Moonlight's in-app *Game Mode* switch **off**. If ForceGM causes
-problems on your TV, use the **normal** version, which does not request TV panel
-Game Mode.
+- **Normal:** does not request TV panel Game Mode.
+- **ForceGM:** requests TV panel Game Mode; behavior depends on the TV and firmware.
 
-1. **Download Moonlight.** Get a `.wgt` from the
+The in-app *Game Mode* switch is separate; see the FAQ below.
+
+1. **Download VibeLight.** Get a `.wgt` from the
    [latest release](https://github.com/samirmartins/moonlight-tizen/releases/latest).
 2. **Install on the TV.** Enable the TV's Developer Mode and install the downloaded
    widget with Apps2Samsung, following the
@@ -39,7 +38,7 @@ Game Mode.
    [Getting Started guide](https://docs.lizardbyte.dev/projects/sunshine/latest/md_docs_2getting__started.html),
    open its web interface, and add your games under **Applications**.
    You can use **Desktop** for the first connection. Keep Sunshine running.
-4. **Add and pair the PC.** Open Moonlight on the TV and select your PC from **PCs**.
+4. **Add and pair the PC.** Open VibeLight on the TV and select your PC from **PCs**.
    If it is not listed, choose **Add Host** and enter the PC's local IP address.
    Enter the PIN shown on the TV in Sunshine's **PIN** page on the PC to complete pairing.
 5. **Start playing.** Connect a gamepad to the TV, select a game or **Desktop**
@@ -48,7 +47,7 @@ Game Mode.
 
 ---
 
-## What Vibelight offers
+## What VibeLight offers
 
 - **Video:** hardware decoding, H.264/HEVC/AV1, TV-aware timing and stream recovery.
 - **Audio:** AudioWorklet playback separate from the interface, with adaptive buffering.
@@ -78,14 +77,14 @@ Game Mode.
 
 ForceGM requests Game Mode for the TV panel. The in-app switch selects the
 decoder's Ultra Low Latency mode, which can freeze video on some models.
-Leave the switch **off** when using ForceGM; it does not disable the panel request.
+The switch can remain **off** while ForceGM requests panel Game Mode.
 
 ### How do I wake the PC?
 
 Enable Wake-on-LAN on the PC and network adapter, then pair while online to
 learn its MAC address. Choose **Wake PC**; enter the LAN adapter's MAC if prompted.
 Once Sunshine is ready, press **Play**. PC checks never block Play.
-For stale status, use **Reload Moonlight**; pairing and settings are preserved.
+For stale status, use the library's **reload button**; pairing and settings are preserved.
 Checks run on entering the library, not continuously. The MAC stays in TV storage
 and LAN wake packets.
 
@@ -119,7 +118,7 @@ See [Updates](INSTALLATION.md#updates).
 ## Building
 
 ```bash
-docker build --ulimit nofile=1024:524288 -t moonlight-tizen .
+docker build --ulimit nofile=1024:524288 -t vibelight-tizen .
 ```
 
 Root build is not end-to-end verified; signing may use a test key.
