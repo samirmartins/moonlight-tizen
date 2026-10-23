@@ -1,5 +1,9 @@
 <p align="center">
-  <img src="docs/images/vibelight-logo.png" alt="VibeLight-Tizen logo" width="320" height="320">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/vibelight-logo.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/vibelight-logo-light.png">
+    <img src="docs/images/vibelight-logo-light.png" alt="VibeLight-Tizen logo" width="320" height="320">
+  </picture>
 </p>
 
 **VibeLight-Tizen** is a vibe-coded fork for Samsung Smart TVs, developed with AI assistance and maintained independently. Built on [BrightCraft's Tizen client](https://github.com/brightcraft/moonlight-tizen).
@@ -49,7 +53,7 @@ The in-app *Game Mode* switch is separate; see the FAQ below.
 
 ## What VibeLight offers
 
-- **Video:** hardware decoding, H.264/HEVC/AV1, TV-aware timing and stream recovery.
+- **Video:** hardware decoding, H.264/HEVC/AV1 (depending on TV hardware), TV-aware timing and stream recovery.
 - **Audio:** AudioWorklet playback separate from the interface, with adaptive buffering.
 - **Controls:** rumble, saved button remapping and visual button testing.
 - **Library:** controller-first navigation, favorites, recent games, cached covers,
