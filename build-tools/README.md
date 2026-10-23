@@ -23,9 +23,18 @@ Dependencies: Node.js 22, GCC/G++, FFmpeg with libx264, OpenSSL development head
 and Git/GNU timeout. Native fixtures use ASan/UBSan.
 The runner checks completion markers, rejects unhandled rejections, bounds each
 process and cleans temporary files, including failed runs.
-The current comparisons require tags `v3.3.8`, `v3.3.10`, `v3.4.0`, `v3.4.1`, `v3.4.2`, `v3.4.3`, `v3.4.4` and `v3.4.7`;
+The current comparisons require tags `v3.3.8`, `v3.3.10`, `v3.4.0`, `v3.4.1`, `v3.4.2`, `v3.4.3`, `v3.4.4`, `v3.4.7`, `v3.4.8` and `v3.4.9`;
 use a full checkout. CI uses `fetch-depth: 0` and read-only permissions, without
 signing secrets. These tests do not compile the Samsung target or prove TV performance.
+
+Transport recovery: `video_transport_test.js` compares real RTP/depacketizer
+code with v3.4.9 under reordering, real loss and partial traffic for three codecs.
+It checks deferred IDR spacing, cancellation, bounded logs, recovery transitions,
+and healthy payload/timestamps/clock reads. `display_cadence_test.js` preserves
+11 reliable rates and rejects mixed cadence without touching presentation.
+Exact source guards and negative controls complement behavioral tests; synthetic
+clock/packets and fake decoder results do not measure physical latency or fluency.
+`release_security_test.js` keeps private signing out of workflows and CI read-only.
 
 Session lifecycle: the core compiles production methods with real pthreads and a
 controllable platform adapter. It covers concurrent duplicate stops, absent/failed
