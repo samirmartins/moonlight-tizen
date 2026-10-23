@@ -1600,6 +1600,7 @@ const Navigation = (function() {
     }
 
     function push(view, hostname) {
+      if (typeof LibraryNavigation !== 'undefined') LibraryNavigation.viewChanged();
       if (get()) {
         get().leave();
       }
@@ -1611,6 +1612,7 @@ const Navigation = (function() {
     }
 
     function change(view) {
+      if (get() !== view && typeof LibraryNavigation !== 'undefined') LibraryNavigation.viewChanged();
       get().leave();
       viewStack[viewStack.length - 1] = view;
       get().enter();
@@ -1618,6 +1620,7 @@ const Navigation = (function() {
 
     function pop() {
       if (viewStack.length > 1) {
+        if (typeof LibraryNavigation !== 'undefined') LibraryNavigation.viewChanged();
         get().leave();
         viewStack.pop();
         get().enter();
@@ -1643,6 +1646,7 @@ const Navigation = (function() {
     }
 
     function stop() {
+      if (typeof LibraryNavigation !== 'undefined') LibraryNavigation.reset();
       if (running) {
         running = false;
         window.removeEventListener('mousemove', loseFocus);
@@ -1674,5 +1678,6 @@ const Navigation = (function() {
     pop: Stack.pop,
     start: State.start,
     stop: State.stop,
+    isRunning: State.isRunning,
   };
 })();

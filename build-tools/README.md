@@ -83,11 +83,12 @@ Emitted payloads remain independent; menu events also identify their controller.
 The 16 ms interval and all streaming and
 rumble policy remain frozen; allocation counts are not physical TV measurements.
 
-Library navigation: `library_navigation_test.js` executes the production reader
-and menu listener against v3.4.8 with a deterministic clock. It covers immediate
+Menu navigation: `library_navigation_test.js` executes the production reader,
+listener and navigation stack against v3.4.8 with a deterministic clock. It covers immediate
 analog selection, jitter/hysteresis, digital repeat, direction reversal, multiple
-controllers, cancellation and unchanged gameplay sources. Only the library uses
-the new directional state; other menus retain their existing navigation. Synthetic
+controllers, cancellation and unchanged gameplay sources. Library, Settings, PC
+selection and pairing dialogs share this state. View changes cancel held-input
+repetition; the controller test captures raw input independently. Synthetic
 timing is not physical controller-to-screen latency.
 
 Controller test mode: `controller_test_mode_test.js` checks physical artwork

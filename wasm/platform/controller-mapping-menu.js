@@ -188,6 +188,7 @@ var ControllerMappingMenu = (function() {
     render(); setStatus('Test finished. Menu navigation stays on the original layout.');
   }
   function startTest() {
+    if (typeof LibraryNavigation !== 'undefined') LibraryNavigation.reset();
     clearTestInput();
     choosing = false; testing = true; lastSample = ''; exitSince = null; exitPad = null; lastCountdown = '';
     var initial = padsNow();

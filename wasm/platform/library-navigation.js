@@ -1,16 +1,22 @@
-// Library-only directional input. The streaming publisher never uses this state.
+// Shared menu-only directional input. The streaming publisher never uses this state.
 var LibraryNavigation = (function() {
   var pads = Object.create(null), owner = null, direction = null, timer = null, epoch = 0, pendingAction = false;
   var activate = 0.5, release = 0.35, initialDelay = 350, repeatInterval = 100;
 
   function available() {
-    return !isInGame && !isDialogOpen && !document.hidden && ConsoleLibrary.visible();
+    return !isInGame && !document.hidden &&
+      (typeof Navigation.isRunning !== 'function' || Navigation.isRunning());
   }
   function cancelRepeat() {
     ++epoch;
     clearTimeout(timer); timer = null; direction = null; owner = null;
   }
   function reset() { cancelRepeat(); pads = Object.create(null); pendingAction = false; }
+  function viewChanged() {
+    // Retain held directions as suppressed until release or a new direction.
+    // A stick held at a view boundary must not immediately move its new menu.
+    cancelRepeat(); pendingAction = false;
+  }
   function disconnect(index) {
     delete pads[index];
     if (owner === index) cancelRepeat();
@@ -38,8 +44,8 @@ var LibraryNavigation = (function() {
   }
   function schedule(delay, token) {
     timer = setTimeout(function() {
-      timer = null;
       if (token !== epoch) return;
+      timer = null;
       if (!available()) { reset(); return; }
       Navigation[direction]();
       if (token === epoch && available()) schedule(repeatInterval, token);
@@ -48,7 +54,6 @@ var LibraryNavigation = (function() {
   }
   function handle(detail) {
     if (!available()) { reset(); return false; }
-    if (pendingAction) return true;
     var index = detail.padIndex === undefined ? 0 : detail.padIndex;
     var pad = pads[index];
     if (!pad) pad = pads[index] = {buttons: Object.create(null), axes: [0, 0], x: 0, y: 0};
@@ -67,22 +72,23 @@ var LibraryNavigation = (function() {
         pad.axes[change.index] = Number.isFinite(change.value) ? change.value : 0;
       }
     });
+    pad.x = axis(pad.axes[0], pad.x); pad.y = axis(pad.axes[1], pad.y);
+    var previous = pad.direction || null;
+    var next = choose(pad, previous);
+    pad.direction = next;
     if (action) {
-      reset();
+      viewChanged();
       var actionToken = epoch;
       pendingAction = true;
       // Keep the existing confirm/back debounce; only directions are immediate.
       delayedNavigation(function() {
         if (actionToken !== epoch) return;
         if (!available()) { reset(); return; }
-        reset(); Navigation[action]();
+        pendingAction = false; Navigation[action]();
       });
       return true;
     }
-    pad.x = axis(pad.axes[0], pad.x); pad.y = axis(pad.axes[1], pad.y);
-    var previous = pad.direction || null;
-    var next = choose(pad, previous);
-    pad.direction = next;
+    if (pendingAction) return true;
     // A different pad's unchanged held direction/noise must not steal focus.
     if (owner !== index && (!next || next === previous)) return true;
     if (owner === index && next === direction) return true;
@@ -95,5 +101,5 @@ var LibraryNavigation = (function() {
     else if (token === epoch) reset();
     return true;
   }
-  return {handle: handle, reset: reset, disconnect: disconnect};
+  return {handle: handle, reset: reset, disconnect: disconnect, viewChanged: viewChanged};
 })();

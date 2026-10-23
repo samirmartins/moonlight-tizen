@@ -5,7 +5,7 @@ const old=file=>cp.execFileSync('git',['show','v3.4.8:'+file],{encoding:'utf8'})
 const index=read('wasm/platform/index.js'),gamepad=read('wasm/platform/gamepad.js');
 const controller=read('wasm/platform/library-navigation.js');
 function fixture(legacy=false) {
- let now=0,serial=0,peak=0,raf=0,visible=true;
+ let now=0,serial=0,peak=0,raf=0,visible=true,running=true;
  const timers=new Map(),listeners=new Map(),moves=[],events=[];
  const pads=Array.from({length:2},(_,index)=>({index,connected:true,
   buttons:Array.from({length:17},()=>({pressed:false,value:0})),axes:[0,0,0,0]}));
@@ -17,9 +17,10 @@ function fixture(legacy=false) {
   setTimeout:(fn,delay)=>add(fn,delay,0),clearTimeout:id=>timers.delete(id),
   setInterval:(fn,delay)=>add(fn,delay,delay),clearInterval:id=>timers.delete(id),
   requestAnimationFrame:fn=>{raf++;return add(()=>fn(now),16,0);},
-  Date:{now:()=>now},ConsoleLibrary:{visible:()=>visible},Navigation:{},
+  Date:{now:()=>now},ConsoleLibrary:{visible:()=>visible},Navigation:{isRunning:()=>running},
   CustomEvent:function(type,init){this.type=type;this.detail=init.detail;},
   addEventListener(type,fn){if(!listeners.has(type))listeners.set(type,new Set());listeners.get(type).add(fn);},
+  removeEventListener(type,fn){if(listeners.has(type))listeners.get(type).delete(fn);},
   dispatchEvent(event){events.push(event);for(const fn of listeners.get(event.type)||[])fn(event);}};
  c.window=c;
  for(const name of ['left','right','up','down','accept','back','press'])c.Navigation[name]=()=>moves.push([name,now]);
@@ -44,8 +45,8 @@ function fixture(legacy=false) {
  return {c,pads,moves,events,advance,timers,stats:()=>({peak,raf}),
   axis(x,y=0,slot=0){pads[slot].axes[0]=x;pads[slot].axes[1]=y;},
   button(index,pressed,slot=0){pads[slot].buttons[index]={pressed,value:Number(pressed)};},
-  hide(){visible=false;if(!legacy)c.LibraryNavigation.reset();},
-  show(){visible=true;},stop(){c.menuController.stopWatching();},
+  hide(){visible=false;running=false;if(!legacy)c.LibraryNavigation.reset();},
+  show(){visible=true;running=true;},stop(){c.menuController.stopWatching();},
   unplug(slot){pads[slot]=null;c.dispatchEvent({type:'gamepaddisconnected',gamepad:{index:slot}});}};
 }
 // Real 16 ms polling and the real index.js listener, not a rewritten algorithm.
@@ -103,7 +104,7 @@ multiple.unplug(1);const before=multiple.moves.length;multiple.advance(1500);ass
 assert(multiple.events.filter(e=>e.type==='gamepadinputchanged').some(e=>e.detail.padIndex===1));
 for(const transition of ['dialog','hidden','game','stop','library']) {
  const f=fixture();f.axis(.8);f.advance(20);
- if(transition==='dialog')f.c.isDialogOpen=true;
+ if(transition==='dialog'){f.c.isDialogOpen=true;f.c.LibraryNavigation.viewChanged();}
  if(transition==='hidden')f.c.document.hidden=true;
  if(transition==='game')f.c.isInGame=true;
  if(transition==='stop')f.stop();
@@ -116,8 +117,8 @@ const stale=Array.from(reset.timers.values()).find(t=>!t.interval).fn;
 reset.hide();reset.show();reset.button(13,true);reset.advance(32);stale();reset.advance(500);
 assert.deepStrictEqual(reset.moves.map(m=>m[0]),['right','down','down','down'],'old queued callback is inert');
 for(const legacy of [true,false]){
- const f=fixture(legacy);f.hide();f.axis(.8);f.advance(200);
- assert.deepStrictEqual(f.moves,[['right',166]],'other menus retain original directional behavior');
+ const f=fixture(legacy);f.c.ConsoleLibrary.visible=()=>false;f.axis(.8);f.advance(200);
+ assert.deepStrictEqual(f.moves,[['right',legacy?166:16]],'Settings and PC menus use corrected directional behavior');
  const game=fixture(legacy);game.c.isInGame=true;game.axis(.8);game.button(15,true);game.advance(1000);
  assert.strictEqual(game.moves.length,0,'no menu work during gameplay');
  const confirm=fixture(legacy);confirm.button(0,true);confirm.advance(200);
@@ -130,6 +131,57 @@ assert.strictEqual(accepting.moves.length,0,'analog noise does not change the se
 accepting.advance(170);assert.deepStrictEqual(accepting.moves,[['accept',166]]);
 const cancelled=fixture();cancelled.button(0,true);cancelled.advance(20);cancelled.hide();cancelled.show();cancelled.advance(200);
 assert.strictEqual(cancelled.moves.length,0,'old library confirm does not run in a new visit');
+for(const context of ['Settings','PCs','AddHostDialog','PairingDialog']) {
+ const a=fixture(true),b=fixture();
+ for(const f of [a,b]){f.c.ConsoleLibrary.visible=()=>false;f.c.isDialogOpen=context.endsWith('Dialog');}
+ for(let t=0;t<800;t+=16)for(const f of [a,b]){f.axis(t%32?.79:.81,.01);f.advance(t+16);}
+ assert.strictEqual(a.moves.length,0,context+' baseline analog jitter starvation reproduced');
+ assert.deepStrictEqual(b.moves.map(m=>m[1]),[16,366,466,566,666,766],context+' uses shared corrected handler');
+ const digitalA=fixture(true),digitalB=fixture();
+ for(const f of [digitalA,digitalB]){f.c.ConsoleLibrary.visible=()=>false;f.c.isDialogOpen=context.endsWith('Dialog');f.button(13,true);}
+ for(let t=0;t<1000;t+=16)for(const f of [digitalA,digitalB]){f.axis(t%32?.01:.02);f.advance(t+16);}
+ assert.strictEqual(digitalA.moves.length,1,context+' baseline D-pad cancellation reproduced');
+ assert.strictEqual(digitalB.moves.length,8,context+' D-pad repeat survives analog noise');
+}
+// Run the production navigation stack too: settings/host/dialog transitions
+// must invalidate timers without transferring a held stick to the next view.
+const stack=fixture(),navigationSource=read('wasm/platform/navigation.js');
+stack.c.LibraryNavigation.reset();
+vm.runInContext(navigationSource.slice(navigationSource.indexOf('const Navigation = (function() {'))+
+ '\nwindow.realNavigation = Navigation;',stack.c);
+const navigation=stack.c.realNavigation;
+stack.c.Navigation=navigation;
+function view(label){const result={enter(){},leave(){}};
+ for(const name of ['up','down','left','right','accept','back','press'])result[name]=()=>stack.moves.push([label+':'+name]);
+ return result;
+}
+const settings=view('Settings'),pairing=view('Pairing'),hosts=view('PCs');
+navigation.push(settings);navigation.start();stack.axis(.8);stack.advance(20);
+assert.deepStrictEqual(stack.moves,[['Settings:right']]);
+navigation.push(pairing);stack.c.isDialogOpen=true;
+for(let t=20;t<500;t+=16){stack.axis(t%32?.79:.81);stack.advance(t+16);}
+assert.strictEqual(stack.moves.length,1,'held noisy axis cannot leak through push');
+stack.axis(0);stack.advance(528);stack.axis(.8);stack.advance(550);
+assert.strictEqual(stack.moves.at(-1)[0],'Pairing:right','dialog accepts a new analog press');
+navigation.pop();stack.c.isDialogOpen=false;stack.advance(1000);
+assert.strictEqual(stack.moves.length,2,'pop cancels held dialog repeat');
+stack.axis(0);stack.advance(1024);stack.axis(.8);stack.advance(1040);
+const beforeSameView=stack.moves.length;navigation.change(settings);stack.advance(1400);
+assert.strictEqual(stack.moves.length,beforeSameView+1,'reentering the same view does not interrupt its repeat');
+navigation.change(hosts);stack.advance(1800);
+assert.strictEqual(stack.moves.length,beforeSameView+1,'change cancels old view repeat');
+stack.axis(0);stack.advance(1824);stack.button(13,true);stack.advance(1840);
+assert.strictEqual(stack.moves.at(-1)[0],'PCs:down');
+navigation.stop();const stopped=stack.moves.length;stack.advance(2500);
+assert.strictEqual(stack.moves.length,stopped);assert.strictEqual(stack.timers.size,1,'stop leaves no navigation work');
+navigation.start();stack.button(13,false);stack.advance(2528);stack.button(1,true);stack.advance(2700);
+assert.strictEqual(stack.moves.at(-1)[0],'PCs:back','confirm/back work after restarting menu navigation');
+const crossAction=fixture();crossAction.axis(.8);crossAction.button(0,true);crossAction.advance(200);
+crossAction.c.LibraryNavigation.viewChanged();
+for(let t=200;t<700;t+=16){crossAction.axis(t%32?.79:.81);crossAction.advance(t+16);}
+assert.deepStrictEqual(crossAction.moves,[['accept',166]],'held axis is suppressed after confirming a screen change');
+crossAction.axis(0);crossAction.advance(736);crossAction.axis(.8);crossAction.advance(752);
+assert.deepStrictEqual(crossAction.moves.at(-1),['right',752]);
 // Freeze every existing runtime file against the last stable. Only four exact
 // JS/HTML hooks and packaging version strings may differ, not native streaming.
 const normalize=require('./library-navigation-scope.cjs').normalize;
@@ -138,6 +190,7 @@ const paths=cp.execFileSync('git',['ls-tree','-r','--name-only','v3.4.8','--',
  .filter(file=>!file.endsWith('_test.js')&&!file.endsWith('.cjs'));
 for(const file of paths){
  if(!['wasm/platform/index.js','wasm/platform/gamepad.js','wasm/platform/console-library.js',
+  'wasm/platform/navigation.js','wasm/platform/controller-mapping-menu.js',
   'wasm/index.html','CMakeLists.txt','res/config.xml'].includes(file)) {
   assert.deepStrictEqual(fs.readFileSync(file),cp.execFileSync('git',['show','v3.4.8:'+file]),'unchanged runtime bytes: '+file);
   continue;
@@ -150,7 +203,8 @@ for(const file of paths){
 for(const [file,from,to]of [
  ['wasm/platform/index.js','const changes = e.detail.changes;','const changes = [];'],
  ['wasm/platform/gamepad.js','setInterval(pollGamepads, 16)','setInterval(pollGamepads, 32)'],
- ['wasm/platform/console-library.js','epoch++;','epoch+=2;']]){
+ ['wasm/platform/console-library.js','epoch++;','epoch+=2;'],
+ ['wasm/platform/navigation.js','viewStack.push(view);','viewStack.push(null);']]){
  assert.notStrictEqual(normalize(file,read(file).replace(from,to)),old(file),'neighboring mutation rejected');
 }
-console.log('library_navigation_test: real polling/listener; first analog 166 -> 16 ms, jitter starvation and D-pad cancellation reproduced in stable and fixed; 350/100 ms single timer, hysteresis, reversal, diagonals, multiple pads, transitions, stale callbacks, legacy menus, confirm and frozen gameplay PASS (synthetic timing, not TV latency)');
+console.log('library_navigation_test: real polling/listener and view stack; library/Settings/PCs/add-PC/pairing corrected, 350/100 ms single timer, hysteresis, reversal, two pads, modal transitions/held-axis suppression, stale callbacks, confirm/back, stop/start and frozen gameplay PASS (synthetic timing, not TV latency)');

@@ -90,6 +90,12 @@ function assertFrozen(reference, paths) {
         assert.strictEqual(menu(file,fs.readFileSync(file,'utf8')),menu(file,old),'approved menu labels only');
         continue;
       }
+      if (file === 'wasm/platform/navigation.js') {
+        const old=cp.execFileSync('git',['show',reference+':'+file],{encoding:'utf8'});
+        const menu=require('./library-navigation-scope.cjs').normalize;
+        assert.strictEqual(menu(file,fs.readFileSync(file,'utf8')),menu(file,old),'exact menu transition hooks only');
+        continue;
+      }
       // Permit only the approved packaging version bump; IDs, build options
       // and every other byte remain part of the frozen contract.
       if (file === 'CMakeLists.txt' || file === 'res/config.xml') {

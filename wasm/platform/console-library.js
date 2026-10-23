@@ -131,7 +131,7 @@ var ConsoleLibrary = (function() {
   function valid(token) { return active && !isInGame && !document.hidden && token === epoch && host && hosts[host.serverUid] === host; }
   function status(text) { el('libraryStatus').textContent = text; }
   function cancel() {
-    if (typeof LibraryNavigation !== 'undefined') LibraryNavigation.reset();
+    if (typeof LibraryNavigation !== 'undefined') LibraryNavigation.viewChanged();
     epoch++;
     if (scope) scope.cancel();
     if (coverScope) coverScope.cancel();
