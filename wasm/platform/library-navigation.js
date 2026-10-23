@@ -53,7 +53,8 @@ var LibraryNavigation = (function() {
     }, delay);
   }
   function handle(detail) {
-    if (!available()) { reset(); return false; }
+    // Consume paused/hidden menu input too; do not restart the legacy repeater.
+    if (!available()) { reset(); return true; }
     var index = detail.padIndex === undefined ? 0 : detail.padIndex;
     var pad = pads[index];
     if (!pad) pad = pads[index] = {buttons: Object.create(null), axes: [0, 0], x: 0, y: 0};
