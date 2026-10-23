@@ -200,14 +200,12 @@ This checks version/IDs, public author identity, ForceGM metadata and variant
 payload equality. It does not replace cryptographic signature/digest coverage
 verification, privacy review or a TV installation test.
 
-## Legacy release workflows
+## Release signing
 
-The stable/development packaging workflows remain manual and use the root recipe.
-They require private signing input on a remote runner and produce drafts.
-**They are not the maintainer's release-signing procedure. Do not upload the
-maintainer's private certificate or configure GitHub Secrets with it.**
-Use local signing and upload only audited WGTs/notes after explicit authorization.
-A draft, tag or workflow dispatch is also an external action, not implicit approval.
+Signing is local only. Remote packaging/signing workflows are removed; the
+read-only test CI remains available. Never upload private certificates to GitHub
+Secrets or remote builders. Upload only audited WGTs/notes after explicit
+authorization; a draft or tag also requires approval.
 
 ## Recipe-specific notes
 
