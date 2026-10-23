@@ -4,7 +4,7 @@
 
 A **vibe-coded fork of Moonlight Tizen** for Samsung Smart TVs, developed with AI assistance and maintained independently. Built on [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen).
 
-Stream PC games through [Sunshine](https://app.lizardbyte.dev/Sunshine/) or NVIDIA GameStream. The goal: keep improving Moonlight on Tizen OS, focusing on **smoother gameplay, low latency and full picture quality**.
+Stream PC games through [Sunshine](https://app.lizardbyte.dev/Sunshine/) or NVIDIA GameStream. The goal: keep improving Moonlight on Tizen OS toward a **console-like experience**, with **smoother gameplay, low latency and full picture quality**.
 
 ---
 
