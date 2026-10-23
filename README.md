@@ -2,11 +2,11 @@
   <img src="docs/images/moonlight-logo.png" alt="Moonlight logo" width="96" height="96">
 </p>
 
-<h1 align="center">Moonlight for Samsung TVs (Tizen) — Samir Martins’ Fork</h1>
+<h1 align="center">Vibelight-Tizen</h1>
 
-An independently maintained fork of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen), with its own development direction and release cycle. Built on brightcraft's foundational work.
+A **vibe-coded fork of Moonlight Tizen** for Samsung Smart TVs, developed with AI assistance and maintained independently. Built on [brightcraft/moonlight-tizen](https://github.com/brightcraft/moonlight-tizen).
 
-An open-source client for NVIDIA GameStream and [Sunshine](https://app.lizardbyte.dev/Sunshine/) that streams games from your PC to a Samsung Smart TV.
+Stream PC games through [Sunshine](https://app.lizardbyte.dev/Sunshine/) or NVIDIA GameStream. The goal: keep improving Moonlight on Tizen OS, focusing on **smoother gameplay, low latency and full picture quality**.
 
 ---
 
@@ -50,24 +50,22 @@ Game Mode.
 
 ---
 
-## Why this fork
+## What Vibelight offers
 
-This fork focuses on smooth playback, low latency and full picture quality on Samsung TVs:
-
-- Audio playback runs separately from the interface.
-- Video timing follows the TV's refresh rate, which is reported to the host.
-- Gamepad controls include optional rumble and saved button remapping with a visual editor and button test.
-- A controller-first library keeps favorites, recent games and the last PC ready to
-  use, with Play, Resume, Wake PC and Reload Moonlight in one screen.
-- Cached covers appear while checking the PC, including offline, and are reused after games.
+- **Video:** hardware decoding, H.264/HEVC/AV1, TV-aware timing and stream recovery.
+- **Audio:** AudioWorklet playback separate from the interface, with adaptive buffering.
+- **Controls:** rumble, saved button remapping and visual button testing.
+- **Library:** controller-first navigation, favorites, recent games, cached covers,
+  Play, Resume and Wake PC.
+- **Diagnostics:** optional performance overlay and a local session report.
 
 ---
 
 ## Recommended settings
 
 - **Initial defaults:** H.264, 1920×1080 at 60 FPS and 30 Mbps; saved settings are preserved.
-- Opening Moonlight shows the library; waking the PC and starting a game are separate manual actions.
-- Leaving for Smart Hub disconnects only the client; the game stays on the PC for manual Resume.
+- Opening the app shows the library; waking the PC and starting a game are manual actions.
+- Leaving for Smart Hub disconnects the client; the game stays on the PC for Resume.
 - **Rumble feedback** defaults on; saved preferences are preserved.
 - **Audio jitter buffer** defaults to 100 ms, but this is an adaptive ceiling rather than
   fixed latency; buffering increases only when needed, up to the selected limit.
@@ -84,16 +82,14 @@ ForceGM requests Game Mode for the TV panel. The in-app switch selects the
 decoder's Ultra Low Latency mode, which can freeze video on some models.
 Leave the switch **off** when using ForceGM; it does not disable the panel request.
 
-### How do I wake the PC and start playing?
+### How do I wake the PC?
 
-Enable Wake-on-LAN on the PC and its network adapter, then pair Moonlight while
-the PC is online so it can learn the adapter's MAC address. Choose **Wake PC**;
-if prompted, enter the physical LAN adapter's MAC and press **Wake PC** to save and send.
-Once the PC and Sunshine are ready, select a game and press **Play**.
-The PC check does not block Play. If its status is stale, **Reload Moonlight**
-reloads the app without clearing saved pairing or settings. Availability is
-checked on opening or returning to the library, not continuously.
-The MAC stays in TV storage and LAN wake packets.
+Enable Wake-on-LAN on the PC and network adapter, then pair while online to
+learn its MAC address. Choose **Wake PC**; enter the LAN adapter's MAC if prompted.
+Once Sunshine is ready, press **Play**. PC checks never block Play.
+For stale status, use **Reload Moonlight**; pairing and settings are preserved.
+Checks run on entering the library, not continuously. The MAC stays in TV storage
+and LAN wake packets.
 
 ### What if the PC does not appear or pairing fails?
 
