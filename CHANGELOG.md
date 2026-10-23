@@ -7,6 +7,18 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.4.9
+
+### Improved
+- Removes the initial analog navigation debounce across the library, Settings,
+  PC selection and pairing dialogs
+- Keeps held directional input repeating steadily despite small stick changes
+  or releases of unrelated buttons
+- Stabilizes diagonal selection and direction changes with independent menu
+  input state for each controller
+- Cancels pending navigation across screen changes, dialogs and menu suspension,
+  while keeping raw input isolated during controller button testing
+
 ## v3.4.8
 
 ### Improved
