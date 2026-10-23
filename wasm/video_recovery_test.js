@@ -153,10 +153,10 @@ try {
     baseline: legacyCases.get(item.name)?.status || 'NOT_TESTED', current: item.status}));
   assert(report.comparison.filter(x => x.baseline === 'FAIL_REPRODUCED' && x.current === 'PASS').length === 4);
   assert(!report.variants.current.checks.some(x => x.status === 'FAIL_REPRODUCED'));
-  // No timer/polling is added: the idle hook is inside the existing timeout only.
+  // No timer/polling is added: service on timeout and active receive only.
   const receiver = read('moonlight-common-c/src/VideoStream.c');
   assert(receiver.includes('else if  (err == 0) {\n            if (!PltIsThreadInterrupted(&receiveThread)) {\n                servicePendingVideoDecoderRefresh();'));
-  assert.strictEqual(receiver.split('servicePendingVideoDecoderRefresh();').length, 2);
+  assert.strictEqual(receiver.split('servicePendingVideoDecoderRefresh();').length, 3);
   report.healthy_equivalence = 'PASS: 12 codec/fragment/metrics combinations match payload hash, timestamps, calls and clock reads';
   assert(inputs.every(p => sha(fs.readFileSync(path.join(root, p))) === hashes[p]), 'inputs changed during test');
   report.status = 'PASS';

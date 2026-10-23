@@ -1,5 +1,8 @@
 #include "Limelight-internal.h"
 #include "rs.h"
+#include "VideoRecoveryLog.h"
+
+static VIDEO_RECOVERY_LOG lossLog;
 
 #if defined(LC_DEBUG) && !defined(LC_FUZZING)
 // This enables FEC validation mode with a synthetic drop
@@ -19,6 +22,7 @@
 void RtpvInitializeQueue(PRTP_VIDEO_QUEUE queue) {
     reed_solomon_init();
     memset(queue, 0, sizeof(*queue));
+    memset(&lossLog, 0, sizeof(lossLog));
 
     queue->currentFrameNumber = 1;
     queue->multiFecCapable = APP_VERSION_AT_LEAST(7, 1, 431);
@@ -216,7 +220,8 @@ static int reconstructFrame(PRTP_VIDEO_QUEUE queue) {
         // based on the packets we've received (or not) so far. If the number of missing shards exceeds the total
         // needed shards, there is no hope of recovering the data. The only way we could recover this frame is by
         // receiving OOS data, which is unlikely because we've not seen any recently from this host.
-        if (!queue->reportedLostFrame && !queue->receivedOosData) {
+        if (isReferenceFrameInvalidationEnabled() &&
+                !queue->reportedLostFrame && !queue->receivedOosData) {
             // NB: We use totalPackets - neededPackets instead of just bufferParityPackets here because we require
             // one extra parity shard for recovery if we're in FEC validation mode.
             if (queue->missingPackets > totalPackets - neededPackets) {
@@ -602,7 +607,8 @@ int RtpvAddPacket(PRTP_VIDEO_QUEUE queue, PRTP_PACKET packet, int length, PRTPV_
             reportFinalFrameFecStatus(queue);
 
             if (queue->multiFecLastBlockNumber != 0) {
-                Limelog("Unrecoverable frame %d (block %d of %d): %d+%d=%d received < %d needed\n",
+                if (videoRecoveryLogAllowed(&lossLog))
+                    Limelog("Unrecoverable frame %d (block %d of %d): %d+%d=%d received < %d needed\n",
                         queue->currentFrameNumber, queue->multiFecCurrentBlockNumber+1,
                         queue->multiFecLastBlockNumber+1,
                         queue->receivedDataPackets,
@@ -630,7 +636,8 @@ int RtpvAddPacket(PRTP_VIDEO_QUEUE queue, PRTP_PACKET packet, int length, PRTPV_
                 }
             }
             else {
-                Limelog("Unrecoverable frame %d: %d+%d=%d received < %d needed\n",
+                if (videoRecoveryLogAllowed(&lossLog))
+                    Limelog("Unrecoverable frame %d: %d+%d=%d received < %d needed\n",
                         queue->currentFrameNumber, queue->receivedDataPackets,
                         queue->receivedParityPackets,
                         queue->pendingFecBlockList.count,
@@ -645,7 +652,8 @@ int RtpvAddPacket(PRTP_VIDEO_QUEUE queue, PRTP_PACKET packet, int length, PRTPV_
             // Report the final status of the FEC queue before dropping this frame
             reportFinalFrameFecStatus(queue);
 
-            Limelog("Unrecoverable frame %d: lost FEC blocks %d to %d\n",
+            if (videoRecoveryLogAllowed(&lossLog))
+                Limelog("Unrecoverable frame %d: lost FEC blocks %d to %d\n",
                     nvPacket->frameIndex,
                     expectedFecBlockNumber + 1,
                     fecCurrentBlockNumber);
@@ -788,6 +796,7 @@ int RtpvAddPacket(PRTP_VIDEO_QUEUE queue, PRTP_PACKET packet, int length, PRTPV_
             }
             else {
                 // Submit all FEC blocks to the depacketizer
+                if (lossLog.emitted) videoRecoveryLogRecovered(&lossLog);
                 submitCompletedFrame(queue);
 
                 // submitCompletedFrame() should have consumed all completed FEC data

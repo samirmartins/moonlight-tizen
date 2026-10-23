@@ -13,6 +13,9 @@ static unsigned requests, packets, fecReports, nextFrame, nextSpi;
 static unsigned warningCount, clearCount;
 static uint16_t nextSeq;
 static bool active;
+#ifdef TRANSPORT_REGRESSION
+static bool fixtureRfi, fixtureSwap, fixtureDropTail;
+#endif
 static unsigned timeReads;
 static uint32_t requestTimes[256];
 static RTP_VIDEO_QUEUE rtp;
@@ -21,7 +24,13 @@ extern int fixture_submit(PDECODE_UNIT);
 uint64_t PltGetMillis(void) { timeReads++; return fixtureNow; }
 uint64_t LiGetMillis(void) { timeReads++; return fixtureNow; }
 bool LiGetCurrentHostDisplayHdrMode(void) { return false; }
-bool isReferenceFrameInvalidationEnabled(void) { return false; }
+bool isReferenceFrameInvalidationEnabled(void) {
+#ifdef TRANSPORT_REGRESSION
+    return fixtureRfi;
+#else
+    return false;
+#endif
+}
 void LiRequestIdrFrame(void) {
     assert(requests < 256);
     requestTimes[requests++] = (uint32_t)fixtureNow;
@@ -110,6 +119,10 @@ void fixture_cancel(void) { ConnectionInterrupted = true; stopVideoDepacketizer(
 // Minimal codec headers exercise the real parser, not hardware decoding.
 void fixture_deliver(int idr, int fragments) {
     assert(fragments >= 1 && fragments <= 3);
+#ifdef TRANSPORT_REGRESSION
+    unsigned char* staged[3];
+    int sizes[3];
+#endif
     for (int part = 0; part < fragments; part++) {
         const int capacity = StreamConfig.packetSize + MAX_RTP_HEADER_SIZE;
         unsigned char* bytes = calloc(1, capacity + sizeof(RTPV_QUEUE_ENTRY));
@@ -154,6 +167,19 @@ void fixture_deliver(int idr, int fragments) {
             used = capacity - 32;
         }
         const int size = 32 + used;
+#ifdef TRANSPORT_REGRESSION
+        staged[part] = bytes; sizes[part] = size;
+    }
+    for (int part = 0; part < fragments; part++) {
+        const int index = fixtureSwap && part < 2 ? 1 - part : part;
+        unsigned char* bytes = staged[index];
+        const int capacity = StreamConfig.packetSize + MAX_RTP_HEADER_SIZE;
+        const int size = sizes[index];
+        PRTP_PACKET r = (PRTP_PACKET)bytes;
+        if (fixtureDropTail && index == fragments - 1) { free(bytes); continue; }
+        // Extracted verbatim from the active receive path by the JS driver.
+        #include "transport_receive.inc"
+#endif
         int result = RtpvAddPacket(&rtp, r, size,
                                   (PRTPV_QUEUE_ENTRY)(bytes + capacity));
         packets++;

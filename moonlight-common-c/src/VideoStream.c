@@ -162,6 +162,11 @@ static void VideoReceiveThreadProc(void* context) {
             continue;
         }
 
+        // Partial frames can keep recv() busy without reaching a submit or a
+        // timeout. Service only an already pending request; its cooldown stays
+        // in the depacketizer, on this same receive thread.
+        servicePendingVideoDecoderRefresh();
+
         if (!receivedDataFromPeer) {
             receivedDataFromPeer = true;
             Limelog("Received first video packet after %d ms\n", waitingForVideoMs);

@@ -1,4 +1,7 @@
 #include "Limelight-internal.h"
+#include "VideoRecoveryLog.h"
+
+static VIDEO_RECOVERY_LOG idrWaitLog;
 
 // Uncomment to test 3 byte Annex B start sequences with GFE
 //#define FORCE_3_BYTE_START_SEQUENCES
@@ -88,6 +91,7 @@ void initializeVideoDepacketizer(int pktSize) {
     decoderRefreshRequestPending = false;
     decoderRefreshRequestSent = false;
     lastDecoderRefreshRequestMs = 0;
+    memset(&idrWaitLog, 0, sizeof(idrWaitLog));
 }
 
 // Also called after the existing UDP receive timeout. A deferred request must
@@ -1122,7 +1126,8 @@ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
             // IDR wait takes priority over RFI wait (and an IDR frame will satisfy both)
             if (waitingForIdrFrame) {
                 servicePendingVideoDecoderRefresh();
-                Limelog("Waiting for IDR frame\n");
+                if (videoRecoveryLogAllowed(&idrWaitLog))
+                    Limelog("Waiting for IDR frame\n");
 
                 // We wait for the first fully received frame after a loss to approximate
                 // detection of the recovery of the network. Requesting an IDR frame while
@@ -1165,6 +1170,7 @@ static void processRtpPayload(PNV_VIDEO_PACKET videoPacket, int length,
             }
         }
 
+        if (idrWaitLog.emitted) videoRecoveryLogRecovered(&idrWaitLog);
         reassembleFrame(frameIndex);
     }
 }
