@@ -182,22 +182,25 @@ for(let t=200;t<700;t+=16){crossAction.axis(t%32?.79:.81);crossAction.advance(t+
 assert.deepStrictEqual(crossAction.moves,[['accept',166]],'held axis is suppressed after confirming a screen change');
 crossAction.axis(0);crossAction.advance(736);crossAction.axis(.8);crossAction.advance(752);
 assert.deepStrictEqual(crossAction.moves.at(-1),['right',752]);
-// Freeze every existing runtime file against the last stable. Only four exact
-// JS/HTML hooks and packaging version strings may differ, not native streaming.
+// Freeze the historical navigation delta. Only the exact independently tested
+// video/refresh patch may differ in subsequent streaming versions.
 const normalize=require('./library-navigation-scope.cjs').normalize;
 const paths=cp.execFileSync('git',['ls-tree','-r','--name-only','v3.4.8','--',
  'wasm','moonlight-common-c','libgamestream','CMakeLists.txt','res/config.xml'],{encoding:'utf8'}).trim().split('\n')
- .filter(file=>!file.endsWith('_test.js')&&!file.endsWith('.cjs'));
+ .filter(file=>!file.endsWith('_test.js')&&!file.endsWith('.cjs')&&!/_fixture\.(?:c|cpp)$/.test(file));
+assert(!read('CMakeLists.txt').includes('video_recovery_fixture'), 'native fixture stays out of app');
 for(const file of paths){
  if(!['wasm/platform/index.js','wasm/platform/gamepad.js','wasm/platform/console-library.js',
   'wasm/platform/navigation.js','wasm/platform/controller-mapping-menu.js',
   'wasm/index.html','CMakeLists.txt','res/config.xml'].includes(file)) {
-  assert.deepStrictEqual(fs.readFileSync(file),cp.execFileSync('git',['show','v3.4.8:'+file]),'unchanged runtime bytes: '+file);
+  const transport=require('./video-transport-scope.cjs');
+  if(transport.files.includes(file))assert.strictEqual(transport.normalize(file,read(file)),old(file),'exact video/refresh delta: '+file);
+  else assert.deepStrictEqual(fs.readFileSync(file),cp.execFileSync('git',['show','v3.4.8:'+file]),'unchanged runtime bytes: '+file);
   continue;
  }
  let current=normalize(file,read(file)),base=old(file);
- if(file==='CMakeLists.txt')current=current.replace('project(MoonlightWasm VERSION 3.4.9)','project(MoonlightWasm VERSION 3.4.8)');
- if(file==='res/config.xml')current=current.replace(' version="3.4.9"',' version="3.4.8"');
+ if(file==='CMakeLists.txt')current=current.replace('project(MoonlightWasm VERSION 3.4.10)','project(MoonlightWasm VERSION 3.4.8)').replace('project(MoonlightWasm VERSION 3.4.9)','project(MoonlightWasm VERSION 3.4.8)');
+ if(file==='res/config.xml')current=current.replace(' version="3.4.10"',' version="3.4.8"').replace(' version="3.4.9"',' version="3.4.8"');
  assert.strictEqual(current,base,'runtime frozen outside library hooks: '+file);
 }
 for(const [file,from,to]of [

@@ -11,6 +11,7 @@ function removeBlock(source, begin, end) {
   return source.slice(0, first) + source.slice(last + end.length);
 }
 function normalize(file, source) {
+  source = require('./video-transport-scope.cjs').normalize(file, source);
   if (file === 'wasm/platform/audio.js') {
     source = removeBlock(source, '\n// Optional audio collection is switched', '// End optional audio collection switch.\n');
     source = source.replace('      generation: _audGeneration,\n      telemetry: _audTelemetryMask !== 0', '      generation: _audGeneration');
@@ -52,6 +53,10 @@ function assertFrozen(reference, paths) {
     // independently tested overlay aggregation move, never a whole-file mask.
     const changed = cp.execFileSync('git', ['diff', '--name-only', reference, '--', ...rest], {encoding:'utf8'}).trim().split('\n').filter(Boolean);
     for (const file of changed) {
+      if (file === 'moonlight-common-c/src/VideoRecoveryLog.h') {
+        assert.strictEqual(require('./video-transport-scope.cjs').normalize(file, fs.readFileSync(file, 'utf8')), '', 'exact tested log helper only');
+        continue;
+      }
       // The wildcard above also matches this test-only adapter. The frozen
       // CMake source list must keep it out of the application target.
       if (file === 'wasm/video_recovery_fixture.cpp') {
@@ -102,13 +107,14 @@ function assertFrozen(reference, paths) {
         const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
         const current = fs.readFileSync(file, 'utf8');
         const normalizeVersion = source => file === 'CMakeLists.txt'
-          ? source.replace('project(MoonlightWasm VERSION 3.4.9)', 'project(MoonlightWasm VERSION 3.4.3)')
+          ? source.replace('project(MoonlightWasm VERSION 3.4.10)', 'project(MoonlightWasm VERSION 3.4.3)')
+            .replace('project(MoonlightWasm VERSION 3.4.9)', 'project(MoonlightWasm VERSION 3.4.3)')
             .replace('project(MoonlightWasm VERSION 3.4.8)', 'project(MoonlightWasm VERSION 3.4.3)')
             .replace('project(MoonlightWasm VERSION 3.4.7)', 'project(MoonlightWasm VERSION 3.4.3)')
             .replace('project(MoonlightWasm VERSION 3.4.6)', 'project(MoonlightWasm VERSION 3.4.3)')
             .replace('project(MoonlightWasm VERSION 3.4.5)', 'project(MoonlightWasm VERSION 3.4.3)')
             .replace('project(MoonlightWasm VERSION 3.4.4)', 'project(MoonlightWasm VERSION 3.4.3)')
-          : source.replace(' version="3.4.9"', ' version="3.4.3"').replace(' version="3.4.8"', ' version="3.4.3"').replace(' version="3.4.7"', ' version="3.4.3"').replace(' version="3.4.6"', ' version="3.4.3"').replace(' version="3.4.5"', ' version="3.4.3"').replace(' version="3.4.4"', ' version="3.4.3"');
+          : source.replace(' version="3.4.10"', ' version="3.4.3"').replace(' version="3.4.9"', ' version="3.4.3"').replace(' version="3.4.8"', ' version="3.4.3"').replace(' version="3.4.7"', ' version="3.4.3"').replace(' version="3.4.6"', ' version="3.4.3"').replace(' version="3.4.5"', ' version="3.4.3"').replace(' version="3.4.4"', ' version="3.4.3"');
         assert.strictEqual(normalizeVersion(current), normalizeVersion(old), 'approved version bump only');
         continue;
       }

@@ -64,8 +64,15 @@ function _displayFinishRefreshEstimate() {
   if (count > 0 && sum > 0) {
     var meanMs = sum / count;
     var variance = (sumSq / count) - (meanMs * meanMs);
+    var deviationMs = Math.sqrt(Math.max(0, variance));
+    // A mixed cadence (for example 60/30 Hz callbacks under menu load) is not
+    // a panel measurement. Keep the last reliable result or the FPS fallback.
+    // Allow modest timer jitter, without reporting an averaged false rate.
+    if (!isFinite(meanMs) || !isFinite(deviationMs) || deviationMs > meanMs * 0.05) {
+      return;
+    }
     _displayRefreshRawHz = 1000 / meanMs;
-    _displayRefreshDeviationMs = Math.sqrt(Math.max(0, variance));
+    _displayRefreshDeviationMs = deviationMs;
     var hz = _displaySnapRefresh(_displayRefreshRawHz);
     _displayRefreshX100 = Math.round(hz * 100);
     window._mlDisplayRefreshX100 = _displayRefreshX100;
