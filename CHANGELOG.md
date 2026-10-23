@@ -7,6 +7,20 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.4.10
+
+### Improved
+- Preserves recoverable reordered video frames when reference-frame invalidation
+  is not enabled, avoiding unnecessary waits for a keyframe
+- Services pending keyframe requests during continuous partial video reception,
+  retaining the existing request cooldown and cancellation behavior
+- Rejects unstable display-refresh estimates while preserving the last reliable
+  measurement or the configured frame-rate fallback
+- Limits repetitive video-recovery logging while retaining initial messages
+  and recovery summaries
+- Removes unused remote signing workflows and expands recovery, refresh and
+  release-security regression coverage
+
 ## v3.4.9
 
 ### Improved
