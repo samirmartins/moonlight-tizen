@@ -62,16 +62,13 @@ The in-app *Game Mode* switch is separate; see the FAQ below.
 
 ---
 
-## Recommended settings
+## Defaults and behavior
 
-- **Initial defaults:** H.264, 1920×1080 at 60 FPS and 30 Mbps.
-- Opening the app shows the library; waking the PC and starting a game are manual actions.
-- Leaving for Smart Hub disconnects the client; the game stays on the PC for Resume.
-- **Rumble feedback** defaults on.
-- **Audio jitter buffer** defaults to 100 ms, but this is an adaptive ceiling rather than
-  fixed latency; buffering increases only when needed, up to the selected limit.
-- **Session diagnosis** is opt-in and resets to off when the app starts. It stores only the
-  latest report locally.
+- **Video defaults:** H.264, 1920×1080 at 60 FPS, 30 Mbps.
+- **Rumble:** on by default.
+- **Audio buffer:** adaptive, with a default 100 ms ceiling—not fixed latency.
+- **Smart Hub:** disconnects the client; the game stays available for Resume.
+- **Session diagnosis:** off at startup; stores only the latest report locally.
 
 ---
 
@@ -85,12 +82,11 @@ The switch can remain **off** while ForceGM requests panel Game Mode.
 
 ### How do I wake the PC?
 
-Enable Wake-on-LAN on the PC and network adapter, then pair while online to
-learn its MAC address. Choose **Wake PC**; enter the LAN adapter's MAC if prompted.
-Once Sunshine is ready, press **Play**. PC checks never block Play.
-For stale status, use the library's **reload button**.
-Checks run on entering the library, not continuously. The MAC stays in TV storage
-and LAN wake packets.
+Enable Wake-on-LAN on the PC and network adapter, then pair while the PC is online.
+Select **Wake PC**; enter its LAN MAC address if prompted. When Sunshine is ready,
+press **Play**. If the status is outdated, use **Reload VibeLight**. Play remains
+available regardless of the displayed status. The MAC stays in TV storage and
+LAN wake packets.
 
 ### What if the PC does not appear or pairing fails?
 
