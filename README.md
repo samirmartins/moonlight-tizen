@@ -34,7 +34,7 @@ Choose the build that suits your TV:
 The in-app *Game Mode* switch is separate; see the FAQ below.
 
 1. **Download VibeLight.** Get a `.wgt` from the
-   [latest release](https://github.com/samirmartins/moonlight-tizen/releases/latest).
+   [latest release](https://github.com/samirmartins/vibelight-tizen/releases/latest).
 2. **Install on the TV.** Enable the TV's Developer Mode and install the downloaded
    widget with Apps2Samsung, following the
    [Installation Guide](INSTALLATION.md#apps2samsung-recommended).
@@ -114,7 +114,7 @@ See [Updates](INSTALLATION.md#updates).
 
 - [Changelog](CHANGELOG.md)
 - [Installation Guide](INSTALLATION.md)
-- [Issues](https://github.com/samirmartins/moonlight-tizen/issues)
+- [Issues](https://github.com/samirmartins/vibelight-tizen/issues)
 - [Contributing](.github/CONTRIBUTING.md)
 
 ---
@@ -140,9 +140,9 @@ See [build/signing details](build-tools/README.md).
 
 This fork builds on work from:
 
-- **[brightcraft](https://github.com/brightcraft/moonlight-tizen)** — foundational work, base repository and Tizen UI.
-- **[ruanformigoni](https://github.com/ruanformigoni/moonlight-tizen)** — Web Audio foundation.
-- **[Moonlight Game Streaming Project](https://github.com/moonlight-stream)** — GameStream protocol and Chrome OS client.
+- **[brightcraft](https://github.com/brightcraft/moonlight-tizen)** — upstream codebase and original Tizen interface.
+- **[ruanformigoni](https://github.com/ruanformigoni/moonlight-tizen)** — foundation for the initial Web Audio implementation.
+- **[Moonlight Game Streaming Project](https://github.com/moonlight-stream)** — core GameStream client libraries and original ChromeOS client.
 - **[Samsung Developers Forum](https://github.com/SamsungDForum/moonlight-chrome)** — original WASM port to Tizen.
 - **[KyroFrCode](https://github.com/KyroFrCode/moonlight-chrome-tizen)** — installable application and build method.
 - **[OneLiberty](https://github.com/OneLiberty/moonlight-chrome-tizen)** — codec selection, gamepad mouse emulation and Wake-on-LAN.

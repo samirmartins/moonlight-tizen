@@ -4,7 +4,7 @@ Issues and focused pull requests are welcome.
 
 ## Issues
 
-Use the [issue templates](https://github.com/samirmartins/moonlight-tizen/issues/new/choose).
+Use the [issue templates](https://github.com/samirmartins/vibelight-tizen/issues/new/choose).
 Include app/TV/Tizen versions, installation method and reproduction steps.
 Mask private addresses and identifiers; never attach credentials, pairing/input
 keys, private certificates or unredacted logs.

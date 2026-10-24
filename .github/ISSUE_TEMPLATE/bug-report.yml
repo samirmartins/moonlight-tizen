@@ -6,7 +6,7 @@ body:
   - type: markdown
     attributes:
       value: |
-        Before submitting, check the [FAQ](https://github.com/samirmartins/moonlight-tizen#faq) and existing issues.
+        Before submitting, check the [FAQ](https://github.com/samirmartins/vibelight-tizen#faq) and existing issues.
         Reports and attachments are public. Remove IP/MAC addresses, DUIDs, serial numbers,
         PC/user names, personal file paths, emails, tokens and credentials from text, logs and images.
         Do not upload private certificates or keys. Provide model names and versions, not device identifiers.

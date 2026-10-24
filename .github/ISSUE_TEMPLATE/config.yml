@@ -1,7 +1,7 @@
 blank_issues_enabled: true
 contact_links:
   - name: Discussions Board
-    url: https://github.com/samirmartins/moonlight-tizen/discussions
+    url: https://github.com/samirmartins/vibelight-tizen/discussions
     about: General questions, ideas, and conversations
   - name: Upstream project
     url: https://github.com/brightcraft/moonlight-tizen
