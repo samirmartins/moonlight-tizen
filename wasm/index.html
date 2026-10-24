@@ -5,7 +5,7 @@
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="-1">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Moonlight Game Streaming</title>
+  <title>VibeLight Game Streaming</title>
   <link rel="icon" href="static/favicon/favicon.png">
   <link rel="stylesheet" href="static/css/roboto.css">
   <link rel="stylesheet" href="static/css/material-icons.css">
@@ -14,6 +14,7 @@
   <link rel="stylesheet" href="static/css/menu-tools.css">
   <link rel="stylesheet" href="static/css/console-library.css">
   <link rel="stylesheet" href="static/css/controller-mapping.css">
+  <link rel="stylesheet" href="static/css/vibelight.css">
   <script type="text/javascript" src="platform.js"></script>
 </head>
 <body data-name="moonlight-tizen" data-tools="emscripten" data-configs="Debug Release" data-path="{tc}/{config}">
@@ -25,8 +26,8 @@
         </button>
         <div id="goBackTooltip" class="mdl-tooltip" for="goBackBtn">Back</div>
         <!-- Header logo and title -->
-        <img src="static/res/ic_moonlight_logo.svg" id="header-logo">
-        <span id="header-title" class="mdl-layout-title">Moonlight</span>
+        <img src="static/res/vibelight-mark.png" id="header-logo" alt="">
+        <span id="header-title" class="mdl-layout-title">VibeLight</span>
         <!-- Add spacer to align navigation to the right -->
         <div class="mdl-layout-spacer"></div>
         <!-- Navigation bar -->
@@ -364,7 +365,7 @@
               </span>
               <div id="restartAppMenu">
                 <button type="button" id="restartAppBtn" class="mdl-button mdl-js-button mdl-js-ripple-effect" aria-label="Restart Application">
-                  Restart the Moonlight app quickly
+                  Restart the VibeLight app quickly
                   <img src="static/res/ic_restart_alt_48px.svg" id="restartApplicationIcon">
                 </button>
               </div>
@@ -389,7 +390,7 @@
           <button type="button" id="libraryAll" class="console-button" aria-pressed="true">All games</button>
           <button type="button" id="libraryFavorites" class="console-button" aria-pressed="false">Favorites</button>
           <button type="button" id="libraryRecent" class="console-button" aria-pressed="false">Recent</button>
-          <button type="button" id="libraryRefresh" class="console-button">Reload Moonlight</button>
+          <button type="button" id="libraryRefresh" class="console-button">Reload VibeLight</button>
         </div>
         <p id="libraryEmpty" hidden></p>
       </section>
@@ -397,7 +398,7 @@
       <div id="listener"></div>
       <!-- Wasm module placeholder, Wasm gets thrown into here -->
       <div id="wasmSpinner" class="mdl-progress mdl-js-progress mdl-progress__indeterminate">
-        <img src="static/res/ic_moonlight_logo.svg" id="wasmSpinnerLogo">
+        <img src="static/res/vibelight-logo.png" id="wasmSpinnerLogo" alt="VibeLight Tizen">
         <h4 id="wasmSpinnerMessage"></h4>
       </div>
       <div id="loadingSpinner" class="mdl-progress mdl-js-progress mdl-progress__indeterminate">
@@ -643,10 +644,10 @@
   </div>
   <div id="restartAppDialogOverlay" class="dialog-overlay">
     <dialog id="restartAppDialog" class="mdl-dialog">
-      <h3 id="restartAppDialogTitle" class="mdl-dialog__title">Restart Moonlight</h3>
+      <h3 id="restartAppDialogTitle" class="mdl-dialog__title">Restart VibeLight</h3>
       <div class="mdl-dialog__content">
         <p id="restartAppDialogText">
-          Are you sure you want to restart Moonlight?
+          Are you sure you want to restart VibeLight?
         </p>
       </div>
       <div class="mdl-dialog__actions">
@@ -657,10 +658,10 @@
   </div>
   <div id="exitAppDialogOverlay" class="dialog-overlay">
     <dialog id="exitAppDialog" class="mdl-dialog">
-      <h3 id="exitAppDialogTitle" class="mdl-dialog__title">Exit Moonlight</h3>
+      <h3 id="exitAppDialogTitle" class="mdl-dialog__title">Exit VibeLight</h3>
       <div class="mdl-dialog__content">
         <p id="exitAppDialogText">
-          Are you sure you want to exit Moonlight?
+          Are you sure you want to exit VibeLight?
         </p>
       </div>
       <div class="mdl-dialog__actions">

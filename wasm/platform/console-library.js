@@ -271,7 +271,7 @@ var ConsoleLibrary = (function() {
     }
     renderedHost = host;
     el('libraryEmpty').hidden = items.length !== 0;
-    el('libraryEmpty').textContent = apps.length ? 'No games in this section. Choose All games.' : 'Start the PC and Sunshine, then use Reload Moonlight.';
+    el('libraryEmpty').textContent = apps.length ? 'No games in this section. Choose All games.' : 'Start the PC and Sunshine, then use Reload VibeLight.';
     ['All','Favorites','Recent'].forEach(function(name) {
       el('library'+name).setAttribute('aria-pressed', filter === name.toLowerCase());
     });
@@ -338,7 +338,7 @@ var ConsoleLibrary = (function() {
       if (!reached) host.online = false;
       // No response cannot distinguish a powered-off PC from a slow Sunshine,
       // firewall or network failure. Do not claim to have measured its power.
-      status(!reached ? 'PC unavailable. Turn it on or use Wake PC, then reload Moonlight.' : !host.paired ? 'Pairing required · Open PCs.' : 'Games unavailable · Try Reload Moonlight.');
+      status(!reached ? 'PC unavailable. Turn it on or use Wake PC, then reload VibeLight.' : !host.paired ? 'Pairing required · Open PCs.' : 'Games unavailable · Try Reload VibeLight.');
       return cached;
     }).then(function() {
       if (!valid(token)) return;

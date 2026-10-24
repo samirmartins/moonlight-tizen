@@ -142,7 +142,7 @@ RUN --mount=type=secret,id=tizen_author,target=/run/secrets/Moonlight.p12,uid=10
 # file still identifies itself once it is sitting on a USB stick next to others
 RUN VERSION=$(grep -oP 'version="\K[0-9]+\.[0-9]+\.[0-9]+' build/widget/config.xml); \
 	if [ "$FORCE_GAME_MODE" = "1" ]; then SUFFIX="-ForceGM"; else SUFFIX=""; fi; \
-	mv build/widget/Moonlight.wgt "Moonlight-v${VERSION}-samirmartins${SUFFIX}.wgt" && ls -la *.wgt
+	mv build/widget/VibeLight.wgt "VibeLight-v${VERSION}-samirmartins${SUFFIX}.wgt" && ls -la *.wgt
 
 # Clean up unnecessary files to reduce image size
 RUN rm -rf \

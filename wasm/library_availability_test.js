@@ -23,7 +23,7 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
   opening=f.c.ConsoleLibrary.open(f.host);await f.flush();
   const timeout=[...f.timers].find(([,t])=>t.ms===26000);assert(timeout);
   f.timers.delete(timeout[0]);timeout[1].fn();await opening;
-  assert.strictEqual(f.node('libraryStatus').textContent,'PC unavailable. Turn it on or use Wake PC, then reload Moonlight.');
+  assert.strictEqual(f.node('libraryStatus').textContent,'PC unavailable. Turn it on or use Wake PC, then reload VibeLight.');
   assert(!f.node('libraryRefresh').disabled);f.suspend();assert.strictEqual(f.timers.size,0);
   // Slow disk decoding never schedules another check in the old document.
   f=fixture();f.host.delay=[];f.host.connect=()=>Promise.reject(Error('timeout'));
@@ -42,7 +42,7 @@ function deferred(){let resolve,reject;const promise=new Promise((a,b)=>{resolve
   f.suspend();assert.strictEqual(f.timers.size,0);
   // App-list failure after authenticated contact never becomes PC offline.
   f=fixture();f.host.getAppListWithCacheFlush=()=>Promise.reject(Error('slow app list'));
-  await f.open();assert.strictEqual(f.host.online,true);assert.strictEqual(f.node('libraryStatus').textContent,'Games unavailable · Try Reload Moonlight.');
+  await f.open();assert.strictEqual(f.host.online,true);assert.strictEqual(f.node('libraryStatus').textContent,'Games unavailable · Try Reload VibeLight.');
   f.suspend();
   f=fixture();f.host.paired=false;await f.open();
   assert.strictEqual(f.node('libraryStatus').textContent,'Pairing required · Open PCs.');

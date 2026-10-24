@@ -12,6 +12,6 @@ for (const file of ['wasm/wasmplayer.cpp', 'wasm/auddec.cpp', 'wasm/audio_ring.h
   'wasm/platform/audio.js', 'wasm/platform/audio-worklet.js', 'wasm/platform/gamepad.js', 'wasm/gamepad.cpp',
   'wasm/platform/diagnostics.js', 'wasm/platform/index.js', 'wasm/platform/console-library.js',
   'wasm/index.html', 'moonlight-common-c/reedsolomon/rs.c']) {
-  assert.strictEqual(fs.readFileSync(file, 'utf8'), cp.execFileSync('git', ['show', 'v3.4.9:' + file], {encoding: 'utf8'}), file + ' must match stable');
+  assert.strictEqual(require('./branding-scope.cjs').normalize(file, fs.readFileSync(file, 'utf8')), cp.execFileSync('git', ['show', 'v3.4.9:' + file], {encoding: 'utf8'}), file + ' must match stable outside approved branding');
 }
-console.log('video_transport_scope_test: exact tested video/refresh changes; audio/PTS/rumble/input/UI/overlay/FEC math unchanged');
+console.log('video_transport_scope_test: exact tested video/refresh changes; audio/PTS/rumble/input/overlay/FEC math unchanged; branding-only UI exceptions');

@@ -142,11 +142,16 @@ for (const message of [
   'DecoderError: Synthetic error', 'ProgressMsg: Synthetic progress'
 ]) {
   const expected = dispatch(oldMessages, message);
+  // Menu background now comes from the shared skin; streaming transparency
+  // and every non-visual effect must still match the published behavior.
+  for (const event of expected) {
+    if (event[0] === 'css' && event[1] === 'body' && event[2] === 'backgroundColor' && event[3] === '#282C38') event[3] = '';
+  }
   if (message === 'streamTerminated: -101') {
     const snackbar = expected.find(event => event[0] === 'snackbar');
     assert.strictEqual(snackbar[1], "Your network connection isn't performing well. Reduce your video bitrate setting or try a faster connection.");
     snackbar[1] = 'Stream ended. Check connection or settings.';
   }
-  assert.deepStrictEqual(dispatch(newMessages, message), expected, message + ' preserves all non-text effects');
+  assert.deepStrictEqual(dispatch(newMessages, message), expected, message + ' preserves all effects except the exact menu color reset');
 }
 console.log('connection_warning_test: receive callback returns before UI work; FIFO and stale-session guards OK');

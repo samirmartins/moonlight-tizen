@@ -197,7 +197,7 @@ function changeUiModeForWasmLoad() {
   $('#main-content').children().not('#listener, #wasmSpinner').hide();
   $('#wasmSpinner').css('display', 'inline-block');
   $('#wasmSpinnerLogo').show();
-  $('#wasmSpinnerMessage').text('Loading Moonlight...');
+  $('#wasmSpinnerMessage').text('Loading VibeLight...');
 }
 
 function moduleDidLoad() {
@@ -376,7 +376,7 @@ function showHosts() {
   ConsoleLibrary.hide();
   $('#wasmSpinner, #loadingSpinner').hide();
   $('#main-header').children().show();
-  $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': 'none'});
+  $('#main-header').css({'backgroundColor': '', 'boxShadow': ''});
   showHostsMode();
   Navigation.switch();
 }
@@ -1329,7 +1329,7 @@ function showSettings() {
   ConsoleLibrary.settings();
   $('#wasmSpinner, #loadingSpinner').hide();
   $('#main-header').children().show();
-  $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': 'none'});
+  $('#main-header').css({'backgroundColor': '', 'boxShadow': ''});
   $('#settings-list').removeClass('hide-container').css('display', 'flex');
   Navigation.push(Views.Settings);
   showSettingsMode();
@@ -1518,7 +1518,7 @@ function restartAppDialog() {
   var restartAppDialog = document.querySelector('#restartAppDialog');
 
   // Change the dialog text element to confirm whether the user wants to restart the application
-  document.getElementById('restartAppDialogText').innerHTML = 'Are you sure you want to restart Moonlight?';
+  document.getElementById('restartAppDialogText').innerHTML = 'Are you sure you want to restart VibeLight?';
 
   // Show the dialog and push the view
   restartAppDialogOverlay.style.display = 'flex';
@@ -1649,7 +1649,7 @@ function showAppsMode() {
   $('#main-content').removeClass('fullscreen');
   $('#listener').removeClass('fullscreen');
   $('#loadingSpinner').css('display', 'none');
-  $('body').css('backgroundColor', '#282C38');
+  $('body').css('backgroundColor', '');
   $('#wasm_module').css('display', 'none');
 
   isInGame = false;

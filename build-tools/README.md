@@ -167,7 +167,7 @@ Recipes using a persistent key also require its SIGNING_CERT_SHA256 identity pin
 Do not silently generate a replacement or re-sign an already published widget.
 
 Extract the WGT from the packaging image with `docker create` and `docker cp`.
-The path is `/home/moonlight/Moonlight-v<version>-samirmartins[-ForceGM].wgt`;
+The path is `/home/moonlight/VibeLight-v<version>-samirmartins[-ForceGM].wgt`;
 substitute the version in `res/config.xml` and omit `-ForceGM` for Normal.
 Remove only the temporary container created for extraction.
 
@@ -200,8 +200,8 @@ for the files being checked (3.4.0 is an example):
 ```bash
 WIDGET_VERSION=3.4.0
 python3 build-tools/verify-widgets.py \
-  "Moonlight-v${WIDGET_VERSION}-samirmartins.wgt" \
-  "Moonlight-v${WIDGET_VERSION}-samirmartins-ForceGM.wgt" \
+  "VibeLight-v${WIDGET_VERSION}-samirmartins.wgt" \
+  "VibeLight-v${WIDGET_VERSION}-samirmartins-ForceGM.wgt" \
   --author-cert /path/to/public-author.der
 ```
 

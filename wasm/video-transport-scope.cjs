@@ -9,6 +9,7 @@ const approved = {
   'wasm/platform/display.js': '0164d03e3dc359691deed0d9ed22336e306c402e4e854308c776eeeacfd07c6b'
 };
 function normalize(file, source) {
+  source = require('./branding-scope.cjs').normalize(file, source);
   if (!approved[file] || crypto.createHash('sha256').update(source).digest('hex') !== approved[file]) return source;
   return file.endsWith('/VideoRecoveryLog.h') ? '' : cp.execFileSync('git', ['show', 'v3.4.9:' + file], {encoding: 'utf8'});
 }

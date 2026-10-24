@@ -12,6 +12,7 @@ function launch(source) {
   .replace("    if (typeof AppLifecycle !== 'undefined' && (!isInGame || document.hidden)) return;\n", '');
 }
 function normalize(file, source) {
+ source = require('./branding-scope.cjs').normalize(file, source);
  source = require('./audio-telemetry-scope.cjs').normalize(file, source);
  source = require('./library-cover-scope.cjs').normalize(file, source);
  source = require('./controller-mapping-scope.cjs').normalize(file, source);

@@ -1,14 +1,14 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<widget xmlns:tizen="http://tizen.org/ns/widgets" xmlns="http://www.w3.org/ns/widgets" id="http://samsung.tv/MoonlightWasm" version="3.4.10" viewmodes="fullscreen">
+<widget xmlns:tizen="http://tizen.org/ns/widgets" xmlns="http://www.w3.org/ns/widgets" id="http://samsung.tv/MoonlightWasm" version="3.4.11" viewmodes="fullscreen">
     <access origin="*"></access>
     <tizen:application id="MoonLightS.MoonlightWasm" package="MoonLightS" required_version="5.5" launch_mode="caller"/>
     <content src="index.html"/>
-    <description>Moonlight Game Streaming</description>
+    <description>VibeLight Game Streaming</description>
     <feature name="http://tizen.org/feature/screen.size.all"/>
     <icon src="icon.png"/>
     <tizen:metadata key="http://samsung.com/tv/metadata/use.voiceguide" value="false"/>
     <tizen:metadata key="http://samsung.com/tv/metadata/floating.navigation" value="false"/>
-    <name>Moonlight</name>
+    <name>VibeLight</name>
     <tizen:privilege name="http://tizen.org/privilege/internet"/>
     <tizen:privilege name="http://tizen.org/privilege/fullscreen"/>
     <tizen:privilege name="http://tizen.org/privilege/system"/>

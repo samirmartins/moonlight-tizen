@@ -1,0 +1,162 @@
+/* Shared menu skin. Keep layout, focus behavior and streaming surfaces intact. */
+:root {
+    --vl-bg: #0f1419;
+    --vl-surface: #171e24;
+    --vl-raised: #232d35;
+    --vl-text: #eef5fa;
+    --vl-muted: #b6c0c9;
+    --vl-line: #35424c;
+    --vl-accent: #70b8c0;
+    --vl-selected: #1c3339;
+    --vl-primary: #24444d;
+}
+body { color: var(--vl-text); background-color: var(--vl-bg); }
+#main-header, .console-library #main-header {
+    background-color: var(--vl-surface);
+    box-shadow: inset 0 -1px var(--vl-line), inset 3px 0 var(--vl-accent);
+}
+#header-logo { border-radius: 0; box-shadow: none; }
+#header-title, .console-library #header-title {
+    color: var(--vl-text); text-transform: none; text-shadow: none;
+}
+#wasmSpinnerLogo { animation: none; }
+.mdl-progress > .progressbar { background-color: var(--vl-accent); }
+.mdl-progress > .bufferbar { background-color: var(--vl-surface); }
+.mdl-progress > .auxbar { background: var(--vl-raised); }
+#settingsBtn, #restoreDefaultsBtn, #quitRunningAppBtn, #goBackBtn,
+.console-toolbar-button, .console-button {
+    color: var(--vl-text); background-color: var(--vl-raised);
+    border-color: var(--vl-line); border-radius: 6px; box-shadow: none;
+}
+.console-hero {
+    background: var(--vl-surface); border-color: var(--vl-line);
+    border-radius: 6px; box-shadow: inset 3px 0 var(--vl-accent);
+}
+.console-button-primary { background: var(--vl-primary); border-color: var(--vl-accent); }
+.console-filters [aria-pressed="true"] {
+    background: var(--vl-selected); border-color: var(--vl-accent);
+}
+#libraryHost { color: var(--vl-accent); }
+#libraryStatus, #libraryEmpty { color: var(--vl-muted); }
+.console-library .console-card {
+    background: var(--vl-surface); border-color: var(--vl-line); border-radius: 6px;
+}
+.console-card-badge { background: var(--vl-selected); color: var(--vl-text); }
+.console-library .console-card.hovered, .console-library .console-card:focus {
+    border-color: var(--vl-accent); outline-color: var(--vl-accent);
+}
+.console-button:focus, .console-button.hovered,
+.console-toolbar-button:focus, .console-toolbar-button.hovered { outline-color: var(--vl-accent); }
+#host-grid .mdl-card { border-radius: 6px; }
+.host-add-container > .mdl-card__title, .host-container > .mdl-card__title {
+    background-color: var(--vl-raised);
+}
+#host-grid .host-title { background-color: var(--vl-surface); color: var(--vl-text); }
+.host-menu.hovered, .host-menu:hover, .host-menu:focus, .host-menu:active {
+    background-color: var(--vl-primary); box-shadow: none;
+}
+#settings-left-pane { border-right-color: var(--vl-line); }
+.settings-category {
+    color: var(--vl-muted); border-bottom-color: var(--vl-line); border-radius: 6px;
+}
+.settings-category.hovered, .settings-category:hover, .settings-category:focus {
+    background-color: var(--vl-raised); box-shadow: inset 0 0 0 1px var(--vl-accent);
+}
+.settings-category.selected {
+    color: var(--vl-text); background: var(--vl-selected);
+    box-shadow: inset 3px 0 var(--vl-accent);
+}
+.settings-options label { color: var(--vl-text); }
+.settings-options .mdl-list__item-text-body { color: var(--vl-muted); }
+.settings-options .mdl-switch__label { color: var(--vl-text); }
+#selectResolution, #selectFramerate, #selectBitrate, #ipAddressFieldModeBtn,
+#sortAppsListBtn, #optimizeGamesBtn, #removeAllHostsBtn, #rumbleFeedbackBtn, #mouseEmulationBtn,
+#selectAudio, #playHostAudioBtn, #selectAudioJitter, #selectCodec, #hdrModeBtn,
+#fullRangeBtn, #gameModeBtn, #disableWarningsBtn, #performanceStatsBtn, #diagnosticsBtn,
+#navigationGuideBtn, #restartAppBtn, #systemInfoBtn, #controllerMappingBtn {
+    color: var(--vl-text); background-color: var(--vl-raised); border-radius: 6px;
+}
+.mdl-menu__outline, .mdl-menu { background-color: var(--vl-raised); }
+.videoBitrateMenu, .audioJitterMenu { background-color: var(--vl-raised); }
+#videoResolutionMenu > #selectResolution, #videoFramerateMenu > #selectFramerate,
+#videoBitrateMenu > #selectBitrate, #audioConfigMenu > #selectAudio,
+#audioJitterMenu > #selectAudioJitter, #videoCodecMenu > #selectCodec {
+    color: var(--vl-text); background-color: var(--vl-raised);
+}
+.mdl-menu__item { color: var(--vl-text); }
+.mdl-menu__item.hovered, .mdl-menu__item:hover, .mdl-menu__item:focus {
+    background-color: var(--vl-selected);
+}
+.mdl-switch.is-checked .mdl-switch__track { background: var(--vl-accent); box-shadow: none; }
+.mdl-switch.is-checked .mdl-switch__thumb { background-color: var(--vl-text); }
+.mdl-switch.is-focused {
+    background-color: var(--vl-selected); box-shadow: inset 0 0 0 2px var(--vl-accent);
+}
+.settings-options .mdl-button:hover, .settings-options .mdl-button:focus,
+.settings-options .mdl-button.hovered {
+    box-shadow: inset 0 0 0 2px var(--vl-accent);
+}
+#main-content #settings-list .mdl-button:focus,
+#main-content #settings-list .mdl-button:hover,
+#main-content #settings-list .mdl-button.hovered,
+#settings-list label.mdl-switch:focus, #settings-list label.mdl-switch:hover,
+#settings-list label.mdl-switch.hovered, #settings-list label.mdl-switch.is-focused,
+#main-header .mdl-button:focus, #main-header .mdl-button:hover,
+.mdl-dialog .mdl-button:focus, .mdl-dialog .mdl-button:hover {
+    background-color: var(--vl-selected); box-shadow: inset 0 0 0 2px var(--vl-accent);
+}
+.mdl-slider__background-upper { background-color: var(--vl-line); }
+.mdl-slider__background-lower { background-color: var(--vl-accent); }
+.mdl-slider::-webkit-slider-thumb { background: var(--vl-accent); }
+.mdl-dialog, .large-dialog, .utility-dialog {
+    color: var(--vl-text); background-color: var(--vl-surface); border-radius: 6px;
+    box-shadow: inset 0 0 0 1px var(--vl-accent);
+}
+.mdl-dialog__content { color: var(--vl-muted); }
+.utility-input, #ipAddressTextInput, #ipAddressField2, #ipAddressField3, #ipAddressField4 {
+    color: var(--vl-text); background-color: var(--vl-raised); border-color: var(--vl-line);
+}
+.mdl-textfield__input:focus, .mdl-textfield__input.hovered,
+.ip-address-select-field.hovered, .ip-address-select-field:hover {
+    box-shadow: inset 0 0 0 2px var(--vl-accent);
+}
+.mdl-textfield--floating-label.is-focused .mdl-textfield__label { color: var(--vl-accent); }
+.mdl-button--raised.mdl-button--colored {
+    background-color: var(--vl-raised) !important;
+}
+.mdl-button--raised.mdl-button--colored:hover, .mdl-button--raised.mdl-button--colored:focus,
+.mdl-button--raised.mdl-button--colored:active { box-shadow: inset 0 0 0 2px var(--vl-accent); }
+.utility-actions button, #diagnosticsReportBtn {
+    color: var(--vl-text); background: var(--vl-raised);
+}
+.utility-dialog button:focus, .utility-dialog .hovered, #diagnosticsReportBtn:focus {
+    outline-color: var(--vl-accent);
+}
+.diagnosis-table th { color: var(--vl-accent); }
+.diagnosis-table th, .diagnosis-table td { border-bottom-color: var(--vl-line); }
+#diagnosisFoot, #diagnosisDevice { color: var(--vl-muted); }
+#controllerMappingDialog {
+    background: var(--vl-surface); border-color: var(--vl-accent);
+    color: var(--vl-text); border-radius: 6px; box-shadow: none;
+}
+#controllerMappingDialog button {
+    color: var(--vl-text); background: var(--vl-raised); border-color: var(--vl-line);
+    border-radius: 6px;
+}
+#controllerMappingDialog button:focus, #controllerMappingDialog .cm-selected {
+    background: var(--vl-selected); border-color: var(--vl-accent); outline-color: var(--vl-accent);
+}
+#controllerMappingDialog #cm-enabled[aria-pressed="true"], #controllerMappingDialog #cm-save {
+    background: var(--vl-primary); border-color: var(--vl-accent);
+}
+/* Preserve the existing bright cyan feedback and atlas for physical test input. */
+#controllerMappingDialog .cm-pressed { background: #087b86; color: white; }
+.cm-label { background: var(--vl-selected); border-color: var(--vl-accent); }
+#controllerMappingDialog .cm-credit, #controllerMappingDialog .cm-note { color: var(--vl-muted); }
+#controllerMappingDialog #cm-status { color: var(--vl-accent); }
+#controllerMappingDialog #cm-exit-hint {
+    background: var(--vl-selected); border-color: var(--vl-accent); color: var(--vl-text);
+}
+#controllerMappingDialog footer { border-top-color: var(--vl-line); }
+.mdl-snackbar { background: var(--vl-surface); border-radius: 6px; box-shadow: inset 0 0 0 1px var(--vl-line); }
+.mdl-tooltip { background-color: var(--vl-raised); box-shadow: none; }

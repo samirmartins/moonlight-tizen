@@ -11,6 +11,7 @@ const changes = {
   ]
 };
 function normalize(file, source) {
+  source = require('./branding-scope.cjs').normalize(file, source);
   const change = changes[file];
   return change ? source.replace(change[0], change[1]) : source;
 }

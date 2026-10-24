@@ -53,6 +53,10 @@ function assertFrozen(reference, paths) {
     // independently tested overlay aggregation move, never a whole-file mask.
     const changed = cp.execFileSync('git', ['diff', '--name-only', reference, '--', ...rest], {encoding:'utf8'}).trim().split('\n').filter(Boolean);
     for (const file of changed) {
+      if (file === 'wasm/static/css/vibelight.css') {
+        assert.strictEqual(require('./branding-scope.cjs').normalize(file, fs.readFileSync(file, 'utf8')), '', 'exact geometry-free branding skin only');
+        continue;
+      }
       if (file === 'moonlight-common-c/src/VideoRecoveryLog.h') {
         assert.strictEqual(require('./video-transport-scope.cjs').normalize(file, fs.readFileSync(file, 'utf8')), '', 'exact tested log helper only');
         continue;
@@ -105,7 +109,7 @@ function assertFrozen(reference, paths) {
       // and every other byte remain part of the frozen contract.
       if (file === 'CMakeLists.txt' || file === 'res/config.xml') {
         const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
-        const current = fs.readFileSync(file, 'utf8');
+        const current = require('./branding-scope.cjs').normalize(file, fs.readFileSync(file, 'utf8'));
         const normalizeVersion = source => file === 'CMakeLists.txt'
           ? source.replace('project(MoonlightWasm VERSION 3.4.10)', 'project(MoonlightWasm VERSION 3.4.3)')
             .replace('project(MoonlightWasm VERSION 3.4.9)', 'project(MoonlightWasm VERSION 3.4.3)')

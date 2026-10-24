@@ -1,10 +1,10 @@
 # Installation
 
-Moonlight Tizen requires Tizen 5.5 or newer. The TV and the device used for installation must be on the same network.
+VibeLight Tizen requires Tizen 5.5 or newer. The TV and the device used for installation must be on the same network.
 
 ## Apps2Samsung (recommended)
 
-1. Download a `.wgt` from the [latest release](https://github.com/samirmartins/vibelight-tizen/releases/latest). Start with ForceGM; leave Moonlight's in-app *Game Mode* switch off.
+1. Download a `.wgt` from the [latest release](https://github.com/samirmartins/vibelight-tizen/releases/latest). Start with ForceGM; leave VibeLight's in-app *Game Mode* switch off.
 2. On the TV, open **Apps**, enter `12345`, enable **Developer Mode**, provide the installer's IP address if requested, and restart the TV. Menu details vary by model.
 3. Download [Apps2Samsung](https://github.com/Apps2Samsung/Apps2Samsung/releases/latest), open it, and select the TV or enter its IP address.
 4. Choose **Custom WGT**, select the downloaded file, and install it. Sign in to a Samsung account if requested.

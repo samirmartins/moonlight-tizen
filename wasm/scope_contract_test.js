@@ -24,6 +24,8 @@ function withoutInputWake(source) {
 }
 
 function withoutLogs(source) {
+ source=require('./branding-scope.cjs').normalize('wasm/platform/index.js',source);
+ source=require('./branding-scope.cjs').normalize('wasm/platform/messages.js',source);
  source=require(require('path').resolve('wasm/app-lifecycle-scope.cjs')).launch(source);
  source=source.replace(/\.catch\(function\(\) \{\s*handleMessage\('streamTerminated: 0'\);\s*snackbarLogLong\('Previous stream is still closing\. Retry shortly\.'\);\s*\}\)/g,'');
  const assert=require('assert');
