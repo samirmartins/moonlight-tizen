@@ -16,8 +16,7 @@ Stream PC games through [Sunshine](https://app.lizardbyte.dev/Sunshine/) or NVID
 
 ![VibeLight interface: Wake PC, settings, Resume library, Add Host and controller testing](docs/images/interface.gif)
 
-Local UI demonstration with simulated PC states and openly licensed game images;
-see [image credits and licenses](docs/images/ATTRIBUTION.md).
+Simulated UI preview · [Image credits and licenses](docs/images/ATTRIBUTION.md).
 
 ---
 
@@ -96,13 +95,9 @@ before retrying. For other errors, check Sunshine's **Troubleshooting** logs.
 
 ### Can I update without losing settings?
 
-Install the new WGT over the existing app using the same installation method and,
-if re-signing, the same author certificate. Settings are retained when the
-application ID and author certificate match and the installer does not uninstall
-the app; normal and ForceGM builds of the same release share both. A clean
-reinstallation, including an installer's automatic recovery, removes saved settings
-and pairing. Reuse your signing profile and avoid removing the previous version.
-See [Updates](INSTALLATION.md#updates).
+Install over the existing app using the same author certificate or signing profile,
+without uninstalling it. A clean reinstall removes settings and pairing.
+See [Updates](INSTALLATION.md#updates) for details and installer precautions.
 
 ---
 
@@ -112,18 +107,8 @@ See [Updates](INSTALLATION.md#updates).
 - [Installation Guide](INSTALLATION.md)
 - [Issues](https://github.com/samirmartins/vibelight-tizen/issues)
 - [Contributing](.github/CONTRIBUTING.md)
-
----
-
-## Building
-
-See the [build and signing guide](build-tools/README.md) for instructions and limitations.
-
----
-
-## License
-
-[GNU General Public License v3.0](LICENSE).
+- [Build and signing guide](build-tools/README.md)
+- [License: GPL-3.0](LICENSE)
 
 ---
 
