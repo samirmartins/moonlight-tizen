@@ -7,6 +7,18 @@ the history of [brightcraft/moonlight-tizen](https://github.com/brightcraft/moon
 kept here so the trail back is not lost. The version numbering restarts at v2.0.0 for
 that reason: the two lines are separate and should never be read as one.
 
+## v3.4.11
+
+### Improved
+- Introduces the VibeLight name and Code logo throughout the app, including
+  the TV launcher icon, while retaining the familiar interface palette
+- Organizes the controller-remapping dialog into consistent blocks while
+  preserving its mapping and button-testing behavior
+- Refreshes the README, interface demonstration and supporting documentation
+  with the VibeLight identity and an explicit Moonlight Tizen fork introduction
+- Preserves streaming behavior, application identity and saved-setting keys
+  for updates over the existing installation
+
 ## v3.4.10
 
 ### Improved
