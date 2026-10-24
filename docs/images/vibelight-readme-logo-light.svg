@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="400" height="408" viewBox="0 0 400 408">
+<title>VibeLight Tizen — stacked README logo</title>
+<g transform="translate(72 18)"><circle cx="128" cy="128" r="128" fill="#565c64"/><circle cx="128" cy="128" r="96" fill="white"/><path d="M137.66 132H224V124H137.66L198.71 62.95 193.05 57.29 132 118.34V32H124V118.34L62.95 57.29 57.29 62.95 118.34 124H32V132H118.34L57.29 193.05 62.95 198.71 124 137.66V224H132V137.66L193.05 198.71 198.71 193.05Z" fill="#565c64"/></g>
+<text x="281" y="264" fill="#565c64" font-family="monospace" font-size="31" font-weight="600">&lt;/&gt;</text>
+<text x="200" y="345" text-anchor="middle" fill="#282c38" font-family="Arial, sans-serif" font-size="56" font-weight="600">VibeLight</text>
+<text x="204" y="384" text-anchor="middle" fill="#565c64" font-family="Arial, sans-serif" font-size="20" letter-spacing="8">TIZEN</text>
+</svg>

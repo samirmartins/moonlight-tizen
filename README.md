@@ -1,10 +1,10 @@
-<p align="center">
+<div align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/images/vibelight-logo.png">
-    <source media="(prefers-color-scheme: light)" srcset="docs/images/vibelight-logo-light.png">
-    <img src="docs/images/vibelight-logo-light.png" alt="VibeLight-Tizen logo" width="320">
+    <source media="(prefers-color-scheme: dark)" srcset="docs/images/vibelight-readme-logo.png">
+    <source media="(prefers-color-scheme: light)" srcset="docs/images/vibelight-readme-logo-light.png">
+    <img src="docs/images/vibelight-readme-logo-light.png" alt="VibeLight Tizen logo" width="380">
   </picture>
-</p>
+</div>
 
 **VibeLight-Tizen** is an independently maintained, vibe-coded **fork of Moonlight Tizen** for Samsung Smart TVs, based on [BrightCraft's client](https://github.com/brightcraft/moonlight-tizen).
 

@@ -11,8 +11,10 @@ online Resume and offline Wake PC/Play are demonstration states.
 `settings.png`, `add-host.png` and `controller-mapping.png` contain only this
 application's interface. The VibeLight logos retain the original Moonlight
 wheel from `wasm/static/res/ic_moonlight_logo.svg`, with a transparent `</>` mark.
-Editable sources are `vibelight-code-logo.svg` and `vibelight-code-mark.svg`;
-the README selects the light/dark PNG variant without changing its proportions.
+Editable app-logo sources are `vibelight-code-logo.svg` and `vibelight-code-mark.svg`.
+The stacked README composition uses `vibelight-readme-logo.svg` and
+`vibelight-readme-logo-light.svg`; its light/dark PNGs preserve transparency and
+proportions, with the name below the original symbol.
 `interface.gif` combines Wake PC/Play, settings, Resume, the initial Add Host
 screen and controller button testing, with two seconds per frame. The five
 screen captures are retained as lossless 2048 × 1152 PNGs; the GIF is scaled to
