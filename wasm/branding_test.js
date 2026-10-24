@@ -18,6 +18,11 @@ const frozen = ['moonlight-common-c', 'libgamestream', 'h264bitstream',
 const changed = cp.execFileSync('git', ['diff', '--name-only', 'v3.4.10', '--', ...frozen], {encoding: 'utf8'}).trim().split('\n').filter(Boolean);
 assert.deepStrictEqual(changed.sort(), files.filter(f => f.startsWith('wasm/platform/') && !f.endsWith('/messages.js')).sort());
 const html = fs.readFileSync('wasm/index.html', 'utf8');
+for (const file of ['docs/images/vibelight-code-mark.svg', 'docs/images/vibelight-code-logo.svg']) {
+  const svg = fs.readFileSync(file, 'utf8');
+  assert(!/<mask\b|\bmask=|<rect\b/.test(svg), 'approved logo has no cutout or badge background');
+  assert(svg.includes('&lt;/&gt;'), 'Code label is retained');
+}
 assert(html.indexOf('static/css/vibelight.css') > html.indexOf('static/css/controller-mapping.css'));
 assert(!html.includes('>Moonlight') && !html.includes('Reload Moonlight'));
 assert(html.includes('data-name="moonlight-tizen"'), 'internal identity is unchanged');
