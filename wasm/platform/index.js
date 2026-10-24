@@ -3073,7 +3073,7 @@ function loadHTTPCertsCb() {
 }
 
 function onWindowLoad() {
-  console.log('%c[index.js, onWindowLoad]', 'color: green;', 'Moonlight\'s main window loaded.');
+  console.log('%c[index.js, onWindowLoad]', 'color: green;', 'VibeLight main window loaded.');
 
   initSamsungKeys();
   initSpecialKeys();

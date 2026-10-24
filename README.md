@@ -2,11 +2,11 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/vibelight-logo.png">
     <source media="(prefers-color-scheme: light)" srcset="docs/images/vibelight-logo-light.png">
-    <img src="docs/images/vibelight-logo-light.png" alt="VibeLight-Tizen logo" width="320" height="320">
+    <img src="docs/images/vibelight-logo-light.png" alt="VibeLight-Tizen logo" width="320">
   </picture>
 </p>
 
-**VibeLight-Tizen** is a vibe-coded fork for Samsung Smart TVs, developed with AI assistance and maintained independently. Built on [BrightCraft's Tizen client](https://github.com/brightcraft/moonlight-tizen).
+**VibeLight-Tizen** is a vibe-coded **fork of Moonlight Tizen** for Samsung Smart TVs, based on [BrightCraft's client](https://github.com/brightcraft/moonlight-tizen). Developed with AI assistance and maintained independently.
 
 Stream PC games through [Sunshine](https://app.lizardbyte.dev/Sunshine/) or NVIDIA GameStream. The goal: keep improving VibeLight on Tizen OS toward a **console-like experience**, with **smoother gameplay, low latency and full picture quality**.
 

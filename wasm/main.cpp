@@ -108,7 +108,7 @@ void MoonlightInstance::RequestStop(uint32_t error, bool stopCommon) {
     delete job;
     m_StopThread = 0;
     m_SessionPhase = mlsession::Phase::Blocked;
-    PostToJs("DialogMsg: Unable to stop the stream safely. Restart Moonlight.");
+    PostToJs("DialogMsg: Unable to stop the stream safely. Restart VibeLight.");
   }
   UnlockMouse();
   PostToJs(std::string(MSG_STREAM_TERMINATED + std::to_string((int)error)));
@@ -197,7 +197,7 @@ void* MoonlightInstance::StopThreadFunc(void* context) {
     }
   }
   if (safe) me->ReleaseMedia();
-  else PostToJs("DialogMsg: Decoder close is pending. Retry shortly or restart Moonlight.");
+  else PostToJs("DialogMsg: Decoder close is pending. Retry shortly or restart VibeLight.");
   {
     std::lock_guard<std::mutex> guard(me->m_LifecycleMutex);
     me->m_SessionPhase = safe ? mlsession::Phase::Idle : mlsession::Phase::Blocked;

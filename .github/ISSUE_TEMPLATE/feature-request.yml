@@ -6,7 +6,7 @@ body:
   - type: textarea
     attributes:
       label: Description
-      description: Describe the feature you would like to see added to Moonlight.
+      description: Describe the feature you would like to see added to VibeLight.
       placeholder: "Example: I would like to see a new feature that allows..."
     validations:
       required: true

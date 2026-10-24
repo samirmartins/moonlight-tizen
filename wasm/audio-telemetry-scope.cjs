@@ -105,6 +105,11 @@ function assertFrozen(reference, paths) {
         assert.strictEqual(menu(file,fs.readFileSync(file,'utf8')),menu(file,old),'exact menu transition hooks only');
         continue;
       }
+      if (file === 'wasm/main.cpp') {
+        const old = cp.execFileSync('git', ['show', reference+':'+file], {encoding:'utf8'});
+        assert.strictEqual(require('./branding-scope.cjs').normalize(file, fs.readFileSync(file,'utf8')), old, 'only the two approved visible product-name literals may differ');
+        continue;
+      }
       // Permit only the approved packaging version bump; IDs, build options
       // and every other byte remain part of the frozen contract.
       if (file === 'CMakeLists.txt' || file === 'res/config.xml') {

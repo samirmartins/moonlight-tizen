@@ -8,15 +8,16 @@ The original image files are retained without pixel changes in `open-games/`.
 The application's existing `object-fit: cover` scales and crops their visible
 area in `game-library.png` and `game-library-wake.png`; favorites, selection,
 online Resume and offline Wake PC/Play are demonstration states.
-`settings.png` and `add-host.png` contain only this application's interface.
-`moonlight-logo.png` renders the existing application logo from
-`wasm/static/res/ic_moonlight_logo.svg`, without changes to its design. The
-96 × 96 PNG is centered above the title with GitHub-compatible HTML alignment.
+`settings.png`, `add-host.png` and `controller-mapping.png` contain only this
+application's interface. The VibeLight logos retain the original Moonlight
+wheel from `wasm/static/res/ic_moonlight_logo.svg`, with a transparent `</>` mark.
+Editable sources are `vibelight-code-logo.svg` and `vibelight-code-mark.svg`;
+the README selects the light/dark PNG variant without changing its proportions.
 `interface.gif` combines Wake PC/Play, settings, Resume, the initial Add Host
-screen and controller button testing, with two seconds per frame. The four
+screen and controller button testing, with two seconds per frame. The five
 screen captures are retained as lossless 2048 × 1152 PNGs; the GIF is scaled to
-1920 × 1080. Its controller-test frame retains the previously published cyan
-input highlights and the CC0 artwork credited in
+1920 × 1080. Its current controller-test capture includes cyan input highlights,
+the approved block layout and the CC0 artwork credited in
 [the application asset notice](../../wasm/static/res/controller-dualsense-LICENSE.txt).
 
 ## Source images

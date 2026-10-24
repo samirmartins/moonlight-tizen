@@ -14,8 +14,12 @@ function normalize(file, source) {
     if (source === current.toString('utf8')) return asset(file, current).toString('utf8');
   }
   if (file === 'wasm/platform/index.js') return source
+    .replace("'VibeLight main window loaded.'", "'Moonlight\\'s main window loaded.'")
     .replace(".text('Loading VibeLight...')", ".text('Loading Moonlight...')")
     .replace('Are you sure you want to restart VibeLight?', 'Are you sure you want to restart Moonlight?');
+  if (file === 'wasm/main.cpp') return source
+    .replace('DialogMsg: Unable to stop the stream safely. Restart VibeLight.', 'DialogMsg: Unable to stop the stream safely. Restart Moonlight.')
+    .replace('DialogMsg: Decoder close is pending. Retry shortly or restart VibeLight.', 'DialogMsg: Decoder close is pending. Retry shortly or restart Moonlight.');
   if (file === 'wasm/platform/console-library.js') return source
     .replaceAll('Reload VibeLight.', 'Reload Moonlight.')
     .replace('then reload VibeLight.', 'then reload Moonlight.');

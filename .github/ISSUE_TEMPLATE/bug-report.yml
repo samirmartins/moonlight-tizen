@@ -1,5 +1,5 @@
 name: Bug Report
-description: Report a problem with this Moonlight Tizen fork
+description: Report a problem with VibeLight Tizen
 labels:
   - bug
 body:
@@ -18,8 +18,8 @@ body:
   - type: input
     id: moonlight-version
     attributes:
-      label: Moonlight Version
-      description: Copy the app version shown in Moonlight's System Info. Include the commit if built from source.
+      label: VibeLight Version
+      description: Copy the app version shown in VibeLight's System Info. Include the commit if built from source.
       placeholder: "Example: 3.4.0"
     validations:
       required: true
@@ -39,7 +39,7 @@ body:
     id: installation-method
     attributes:
       label: Installation Type
-      description: What is the method you used to install Moonlight on your device?
+      description: What is the method you used to install VibeLight on your device?
       options:
         - Apps2Samsung
         - Tizen Studio / CLI
@@ -58,7 +58,7 @@ body:
     id: tizen-version
     attributes:
       label: Device OS
-      description: Copy the Tizen version shown in Moonlight's System Info, or write Unknown.
+      description: Copy the Tizen version shown in VibeLight's System Info, or write Unknown.
       placeholder: "Example: Tizen 9.0"
     validations:
       required: true
@@ -174,7 +174,7 @@ body:
     id: log-files
     attributes:
       label: Log Files
-      description: Optional. Attach only relevant Moonlight/Sunshine logs after removing private addresses, names, paths, tokens and credentials. A cropped Session diagnosis image is also useful for streaming issues.
+      description: Optional. Attach only relevant VibeLight/Sunshine logs after removing private addresses, names, paths, tokens and credentials. A cropped Session diagnosis image is also useful for streaming issues.
       placeholder: "Attach redacted logs or paste the relevant excerpt. Do not upload certificates or keys."
   - type: textarea
     id: screenshots
