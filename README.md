@@ -114,15 +114,10 @@ See [Updates](INSTALLATION.md#updates) for details and installer precautions.
 
 ## Credits
 
-This fork builds on work from:
-
-- **[brightcraft](https://github.com/brightcraft/moonlight-tizen)** — upstream codebase and original Tizen interface.
-- **[ruanformigoni](https://github.com/ruanformigoni/moonlight-tizen)** — foundation for the initial Web Audio implementation.
-- **[Moonlight Game Streaming Project](https://github.com/moonlight-stream)** — core GameStream client libraries and original ChromeOS client.
-- **[Samsung Developers Forum](https://github.com/SamsungDForum/moonlight-chrome)** — original WASM port to Tizen.
-- **[KyroFrCode](https://github.com/KyroFrCode/moonlight-chrome-tizen)** — installable application and build method.
-- **[OneLiberty](https://github.com/OneLiberty/moonlight-chrome-tizen)** — codec selection, gamepad mouse emulation and Wake-on-LAN.
-- **[ToyPoodleGaming](https://github.com/toypoodlegaming/moonlight-chrome-tizen)** — surround sound, statistics and bitrate calculation.
-- **Claude Code and OpenAI Codex** — development, review, testing and documentation assistance.
+- **[BrightCraft](https://github.com/brightcraft/moonlight-tizen)** — fork foundation.
+- **[ruanformigoni](https://github.com/ruanformigoni/moonlight-tizen)** — initial Web Audio foundation.
+- **[Moonlight Game Streaming Project](https://github.com/moonlight-stream)** — core streaming libraries.
+- **Earlier upstream work:** [Samsung Developers Forum](https://github.com/SamsungDForum/moonlight-chrome), [KyroFrCode](https://github.com/KyroFrCode/moonlight-chrome-tizen), [OneLiberty](https://github.com/OneLiberty/moonlight-chrome-tizen) and [ToyPoodleGaming](https://github.com/toypoodlegaming/moonlight-chrome-tizen).
+- **Claude Code and OpenAI Codex** — development assistance.
 
 And to **every contributor** to those projects.
