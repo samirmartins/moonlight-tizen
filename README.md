@@ -2,7 +2,7 @@
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/images/vibelight-readme-logo.png">
     <source media="(prefers-color-scheme: light)" srcset="docs/images/vibelight-readme-logo-light.png">
-    <img src="docs/images/vibelight-readme-logo-light.png" alt="VibeLight Tizen logo" width="380">
+    <img src="docs/images/vibelight-readme-logo-light.png" alt="VibeLight Tizen logo" width="260">
   </picture>
 </div>
 
