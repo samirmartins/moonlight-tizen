@@ -78,7 +78,7 @@ The in-app *Game Mode* switch is separate; see the FAQ below.
 
 ForceGM requests Game Mode for the TV panel. The in-app switch selects the
 decoder's Ultra Low Latency mode, which can freeze video on some models.
-The switch can remain **off** while ForceGM requests panel Game Mode.
+**When using ForceGM, leave VibeLight's in-app Game Mode switch OFF.**
 
 ### How do I wake the PC?
 
