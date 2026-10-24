@@ -376,7 +376,7 @@ function showHosts() {
   ConsoleLibrary.hide();
   $('#wasmSpinner, #loadingSpinner').hide();
   $('#main-header').children().show();
-  $('#main-header').css({'backgroundColor': '', 'boxShadow': ''});
+  $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': 'none'});
   showHostsMode();
   Navigation.switch();
 }
@@ -1329,7 +1329,7 @@ function showSettings() {
   ConsoleLibrary.settings();
   $('#wasmSpinner, #loadingSpinner').hide();
   $('#main-header').children().show();
-  $('#main-header').css({'backgroundColor': '', 'boxShadow': ''});
+  $('#main-header').css({'backgroundColor': '#333846', 'boxShadow': 'none'});
   $('#settings-list').removeClass('hide-container').css('display', 'flex');
   Navigation.push(Views.Settings);
   showSettingsMode();
@@ -1649,7 +1649,7 @@ function showAppsMode() {
   $('#main-content').removeClass('fullscreen');
   $('#listener').removeClass('fullscreen');
   $('#loadingSpinner').css('display', 'none');
-  $('body').css('backgroundColor', '');
+  $('body').css('backgroundColor', '#282C38');
   $('#wasm_module').css('display', 'none');
 
   isInGame = false;
