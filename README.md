@@ -6,9 +6,9 @@
   </picture>
 </p>
 
-**VibeLight-Tizen** is a vibe-coded **fork of Moonlight Tizen** for Samsung Smart TVs, based on [BrightCraft's client](https://github.com/brightcraft/moonlight-tizen). Developed with AI assistance and maintained independently.
+**VibeLight-Tizen** is an independently maintained, vibe-coded **fork of Moonlight Tizen** for Samsung Smart TVs, based on [BrightCraft's client](https://github.com/brightcraft/moonlight-tizen).
 
-Stream PC games through [Sunshine](https://app.lizardbyte.dev/Sunshine/) or NVIDIA GameStream. The goal: keep improving VibeLight on Tizen OS toward a **console-like experience**, with **smoother gameplay, low latency and full picture quality**.
+Stream PC games through [Sunshine](https://app.lizardbyte.dev/Sunshine/) or NVIDIA GameStream. The goal: keep improving VibeLight on Tizen OS toward a **console-like experience**, with **smoother gameplay and low latency**, without sacrificing image quality.
 
 ---
 
@@ -54,7 +54,7 @@ The in-app *Game Mode* switch is separate; see the FAQ below.
 ## What VibeLight offers
 
 - **Video:** hardware decoding, H.264/HEVC/AV1 (depending on TV hardware), TV-aware timing and stream recovery.
-- **Audio:** AudioWorklet playback separate from the interface, with adaptive buffering.
+- **Audio:** AudioWorklet where supported, with adaptive buffering and a compatibility fallback.
 - **Controls:** rumble, saved button remapping and visual button testing.
 - **Library:** controller-first navigation, favorites, recent games, cached covers,
   Play, Resume and Wake PC.
@@ -64,10 +64,10 @@ The in-app *Game Mode* switch is separate; see the FAQ below.
 
 ## Recommended settings
 
-- **Initial defaults:** H.264, 1920×1080 at 60 FPS and 30 Mbps; saved settings are preserved.
+- **Initial defaults:** H.264, 1920×1080 at 60 FPS and 30 Mbps.
 - Opening the app shows the library; waking the PC and starting a game are manual actions.
 - Leaving for Smart Hub disconnects the client; the game stays on the PC for Resume.
-- **Rumble feedback** defaults on; saved preferences are preserved.
+- **Rumble feedback** defaults on.
 - **Audio jitter buffer** defaults to 100 ms, but this is an adaptive ceiling rather than
   fixed latency; buffering increases only when needed, up to the selected limit.
 - **Session diagnosis** is opt-in and resets to off when the app starts. It stores only the
@@ -88,7 +88,7 @@ The switch can remain **off** while ForceGM requests panel Game Mode.
 Enable Wake-on-LAN on the PC and network adapter, then pair while online to
 learn its MAC address. Choose **Wake PC**; enter the LAN adapter's MAC if prompted.
 Once Sunshine is ready, press **Play**. PC checks never block Play.
-For stale status, use the library's **reload button**; pairing and settings are preserved.
+For stale status, use the library's **reload button**.
 Checks run on entering the library, not continuously. The MAC stays in TV storage
 and LAN wake packets.
 
@@ -121,12 +121,7 @@ See [Updates](INSTALLATION.md#updates).
 
 ## Building
 
-```bash
-docker build --ulimit nofile=1024:524288 -t vibelight-tizen .
-```
-
-Root build is not end-to-end verified; signing may use a test key.
-See [build/signing details](build-tools/README.md).
+See the [build and signing guide](build-tools/README.md) for instructions and limitations.
 
 ---
 
